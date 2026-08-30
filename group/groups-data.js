@@ -14,10 +14,16 @@ const fs = () => window.ToDoAuth.firestore;
 // type them from a screenshot.
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
+// crypto.getRandomValues instead of Math.random - Math.random isn't a
+// cryptographically strong source, and an invite code is effectively a
+// short-lived credential (whoever has it can join the group), so it
+// shouldn't be guessable/predictable even in principle.
 function generateInviteCode(length = 6) {
+    const randomValues = new Uint32Array(length);
+    crypto.getRandomValues(randomValues);
     let code = '';
     for (let i = 0; i < length; i += 1) {
-        code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+        code += CODE_CHARS[randomValues[i] % CODE_CHARS.length];
     }
     return code;
 }

@@ -53,10 +53,10 @@
                 max-width: 480px;
                 max-height: 86vh;
                 overflow-y: auto;
-                background: #10141f;
-                border: 1px solid rgba(216, 183, 120, 0.32);
+                background: linear-gradient(150deg, #050225, #0a0537, #140a46);
+                border: 1px solid rgba(170, 152, 255, 0.36);
                 border-radius: 16px;
-                color: #f3f0ea;
+                color: #f6f4ff;
                 font-family: 'Inter', system-ui, sans-serif;
                 padding: 22px 24px 26px;
             }
@@ -70,41 +70,41 @@
             .settingsCloseBtn {
                 background: transparent;
                 border: none;
-                color: #f3f0ea;
+                color: #f6f4ff;
                 font-size: 1.4rem;
                 cursor: pointer;
                 line-height: 1;
                 padding: 4px 8px;
             }
             .settingsSection {
-                border-top: 1px solid rgba(216, 183, 120, 0.18);
+                border-top: 1px solid rgba(170, 152, 255, 0.2);
                 padding: 16px 0;
             }
             .settingsSection:first-of-type { border-top: none; }
             .settingsSection h3 {
                 margin: 0 0 8px;
                 font-size: 0.95rem;
-                color: #d7b778;
+                color: #b58bff;
                 text-transform: uppercase;
                 letter-spacing: 0.04em;
             }
-            .settingsHint { margin: 0 0 10px; font-size: 0.88rem; color: rgba(243, 240, 234, 0.65); }
-            .settingsEmail { margin: 0 0 12px; font-size: 0.9rem; color: rgba(243, 240, 234, 0.75); }
-            .settingsFieldLabel { display: block; font-size: 0.82rem; margin-bottom: 6px; color: rgba(243, 240, 234, 0.7); }
+            .settingsHint { margin: 0 0 10px; font-size: 0.88rem; color: #d7d0ff; }
+            .settingsEmail { margin: 0 0 12px; font-size: 0.9rem; color: #d7d0ff; }
+            .settingsFieldLabel { display: block; font-size: 0.82rem; margin-bottom: 6px; color: #d7d0ff; }
             .settingsInlineRow { display: flex; gap: 8px; }
             .settingsNameInput {
                 flex: 1;
                 background: rgba(255, 255, 255, 0.06);
-                border: 1px solid rgba(216, 183, 120, 0.28);
+                border: 1px solid rgba(170, 152, 255, 0.3);
                 border-radius: 8px;
-                color: #f3f0ea;
+                color: #f6f4ff;
                 padding: 8px 10px;
                 font: inherit;
             }
             .settingsSaveNameBtn, .settingsSignOutBtn, .settingsExportBtn, .settingsLinkBtn, .settingsDeleteBtn {
-                background: rgba(216, 183, 120, 0.14);
-                border: 1px solid rgba(216, 183, 120, 0.4);
-                color: #f3f0ea;
+                background: rgba(181, 139, 255, 0.16);
+                border: 1px solid rgba(170, 152, 255, 0.44);
+                color: #f6f4ff;
                 border-radius: 8px;
                 padding: 8px 14px;
                 font: inherit;
@@ -114,11 +114,12 @@
                 display: inline-block;
             }
             .settingsSignOutBtn { margin-top: 12px; }
-            .settingsSaveNameStatus, .settingsDeleteStatus { min-height: 1.1em; font-size: 0.82rem; color: #8ec5ff; margin: 8px 0 0; }
+            .settingsSaveNameStatus, .settingsDeleteStatus { min-height: 1.1em; font-size: 0.82rem; color: #7f86ff; margin: 8px 0 0; }
             .settingsToggleRow { display: flex; align-items: center; gap: 10px; font-size: 0.92rem; cursor: pointer; }
             .settingsDangerSection h3 { color: #e08a8a; }
             .settingsDeleteBtn { background: rgba(224, 90, 90, 0.14); border-color: rgba(224, 90, 90, 0.5); }
             .settingsDeleteBtn.isArmed { background: rgba(224, 90, 90, 0.32); }
+            .settingsCard a { color: #b58bff; }
         `;
         document.head.appendChild(style);
     }
