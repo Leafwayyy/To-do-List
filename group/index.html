@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>To-Do List - Group</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
+    <!-- Same stylesheet as the solo app, loaded once, the normal way - no
+         second build/bundle for this page, so there's nothing for its rules
+         to collide with. -->
+    <link rel="stylesheet" href="/style.css?v=20260830c">
+</head>
+<body class="authChecking">
+
+    <div class="authLoadingScreen" aria-hidden="true">
+        <div class="authGlow" aria-hidden="true"></div>
+        <div class="authSpinner"></div>
+    </div>
+
+    <div class="userBadge hidden">
+        <a class="groupNavLink" href="/">My Tasks</a>
+        <button class="helpTourBtn" type="button" title="Restart the group tutorial"><i class="fa-solid fa-question"></i></button>
+        <img class="userBadgeAvatar hidden" alt="">
+        <span class="userBadgeName"></span>
+        <button class="userSignOutBtn" type="button" title="Sign out">Sign out</button>
+    </div>
+
+    <div class="authOverlay">
+        <div class="authGlow" aria-hidden="true"></div>
+
+        <div class="authBrand">
+            <span class="authLogo"><i class="fa-solid fa-people-group"></i></span>
+            <h1 class="authBrandTitle">Group</h1>
+        </div>
+
+        <div class="authCardWrap">
+            <div class="authCard" role="dialog" aria-modal="true" aria-label="Sign in">
+                <form class="authEmailForm">
+                    <input type="email" class="authEmailInput" placeholder="Email" autocomplete="email" required>
+                    <input type="password" class="authPasswordInput" placeholder="Password" autocomplete="current-password" required>
+                    <button type="button" class="authForgotPasswordBtn">Forgot password?</button>
+                    <p class="authErrorText hidden"></p>
+                    <p class="authInfoText hidden"></p>
+                    <button type="submit" class="authSubmitBtn">Sign in</button>
+                </form>
+
+                <div class="authDivider"><span>or</span></div>
+
+                <button class="authGoogleBtn" type="button">
+                    <i class="fa-brands fa-google"></i> Continue with Google
+                </button>
+
+                <p class="authModeRow"><span class="authModeLeadText">No account yet?</span> <button type="button" class="authModeToggleBtn">Sign up</button></p>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="pageTitleRow">
+            <h1 class="title">Group</h1>
+            <button type="button" class="groupRenameBtn hidden" title="Rename group"><i class="fa-solid fa-pen"></i></button>
+        </div>
+
+        <p class="groupStatusMsg hidden"></p>
+
+        <div class="groupPageWrap hidden">
+            <div class="yourNameRow">
+                <label for="yourNameInput">Your name (shown to teammates)</label>
+                <div class="yourNameInputRow">
+                    <input type="text" class="yourNameInput" id="yourNameInput" placeholder="e.g. Alex" maxlength="40">
+                    <button type="button" class="yourNameSaveBtn">Save</button>
+                    <span class="yourNameSavedMsg hidden">Saved</span>
+                </div>
+            </div>
+
+            <div class="groupSwitcherRow"></div>
+            <a class="groupBrowseAllLink hidden" href="browse.html">See all my groups <i class="fa-solid fa-arrow-right"></i></a>
+
+            <div class="groupSetupSection hidden">
+                <p class="groupSetupIntro">Create a group for your project team, or join one with an invite code.</p>
+                <div class="groupSetupForms">
+                    <form class="groupCreateForm">
+                        <h2>Create a group</h2>
+                        <input type="text" class="groupCreateNameInput" placeholder="Group name" required>
+                        <button type="submit" class="groupCreateBtn">Create group</button>
+                        <p class="groupFormError groupCreateError hidden"></p>
+                    </form>
+                    <form class="groupJoinForm">
+                        <h2>Join a group</h2>
+                        <input type="text" class="groupJoinCodeInput" placeholder="Invite code" autocapitalize="characters" required>
+                        <button type="submit" class="groupJoinBtn">Join group</button>
+                        <p class="groupFormError groupJoinError hidden"></p>
+                    </form>
+                </div>
+            </div>
+
+            <div class="groupDashboard hidden">
+                <div class="appShell">
+                    <section class="mainColumn">
+                        <div class="groupDashboardHeader">
+                            <p class="groupInviteRow">Invite code: <span class="groupInviteCode"></span>
+                                <button type="button" class="groupCopyInviteBtn" title="Copy invite code"><i class="fa-solid fa-copy"></i></button>
+                            </p>
+                            <button type="button" class="groupLeaveBtn hidden">Leave group</button>
+                            <button type="button" class="groupDeleteBtn hidden">Delete group</button>
+                        </div>
+
+                        <div class="motivatorContainer">
+                            <p class="motivatorText">Keep it up!</p>
+                            <div class="progressBarContainer">
+                                <div class="progressBar"></div>
+                            </div>
+                            <div class="taskAmountContainer">
+                                <p class="taskAmount">0/0</p>
+                            </div>
+                        </div>
+
+                        <div class="urgencyAlert hidden" role="status" aria-live="polite">
+                            <p class="urgencyAlertText">No urgent deadlines right now.</p>
+                        </div>
+
+                        <div class="suggestionsForYouPanel hidden" aria-live="polite"></div>
+
+                        <div class="inputContainer">
+                            <input type="text" class="taskInput" placeholder="Type your task...">
+                            <button class="detailsToggleBtn" type="button" aria-expanded="false" aria-controls="groupTaskDetailsPanel" title="Set priority, difficulty, and deadline for smarter task order">
+                                Prioritize
+                            </button>
+                            <button class="addBtn" type="button" title="Add task" aria-label="Add task">
+                                <i class="fa-solid fa-plus"></i>
+                            </button>
+                        </div>
+
+                        <p class="quickAddHint hidden" aria-live="polite"></p>
+
+                        <div class="taskDetailsPanel" id="groupTaskDetailsPanel">
+                            <p class="detailsHelp">Priority and difficulty help the app decide what should be done first - the list below always sorts by priority automatically.</p>
+                            <div class="detailsGrid">
+                                <select class="matrixSelect" aria-label="Priority type">
+                                    <option value="do">Task Matrix: Important &amp; Urgent</option>
+                                    <option value="schedule" selected>Task Matrix: Important</option>
+                                    <option value="delegate">Task Matrix: Urgent</option>
+                                    <option value="eliminate">Task Matrix: None</option>
+                                </select>
+
+                                <select class="difficultySelect" aria-label="Difficulty">
+                                    <option value="1">Difficulty: 1 (Very Easy)</option>
+                                    <option value="2">Difficulty: 2 (Easy)</option>
+                                    <option value="3" selected>Difficulty: 3 (Medium)</option>
+                                    <option value="4">Difficulty: 4 (Hard)</option>
+                                    <option value="5">Difficulty: 5 (Very Hard)</option>
+                                </select>
+
+                                <div class="effortContainer">
+                                    <div class="taskTypePills" aria-label="Time estimate optional">
+                                        <button type="button" class="typePill active" data-type="open" data-tip="No time estimate. Use this when you are not sure how long it will take.">No time estimate</button>
+                                        <button type="button" class="typePill" data-type="timeboxed" data-tip="Set an estimated time in minutes so planning is more accurate.">Estimate time</button>
+                                    </div>
+                                    <div class="durationWrap">
+                                        <input type="number" class="durationInput hidden" min="5" step="5" placeholder="Mins" aria-label="Estimated minutes">
+                                        <div class="durationChips">
+                                            <button type="button" class="durationChip" data-minutes="15">15m</button>
+                                            <button type="button" class="durationChip" data-minutes="30">30m</button>
+                                            <button type="button" class="durationChip" data-minutes="45">45m</button>
+                                            <button type="button" class="durationChip" data-minutes="60">60m</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="deadlineContainer">
+                                    <span class="deadlineTag"><i class="fa-regular fa-calendar"></i> Deadline</span>
+                                    <input type="datetime-local" class="deadlineInput" aria-label="Deadline" title="Set deadline date and time">
+                                </div>
+
+                                <div class="deadlineContainer scheduleContainer">
+                                    <span class="deadlineTag scheduleTag"><i class="fa-solid fa-clock"></i> Schedule</span>
+                                    <input type="datetime-local" class="deadlineInput scheduleInput" aria-label="Scheduled time" title="Set when you'll actually work on this">
+                                </div>
+                            </div>
+                        </div>
+
+                        <p class="taskViewsLabel">Whose tasks</p>
+                        <div class="taskViews groupMemberScopeTabs" aria-label="Whose tasks"></div>
+
+                        <p class="taskViewsLabel">Filter by deadline</p>
+                        <div class="taskViews deadlineViewTabs" aria-label="Task views">
+                            <button class="taskViewBtn active" data-view="all">All</button>
+                            <button class="taskViewBtn" data-view="focus">Focus Now</button>
+                            <button class="taskViewBtn" data-view="overdue" aria-label="Overdue">
+                                <span>Overdue</span>
+                                <span class="overdueCountBadge" aria-hidden="true">0</span>
+                            </button>
+                            <button class="taskViewBtn" data-view="today">Due Today</button>
+                            <button class="taskViewBtn" data-view="week">This Week</button>
+                            <button class="taskViewBtn" data-view="completed">Completed</button>
+                        </div>
+
+                        <ul class="tasks groupTasksList"></ul>
+                    </section>
+
+                    <aside class="sideColumn">
+                        <div class="memberRoster"></div>
+
+                        <div class="groupHistoryPanel">
+                            <p class="groupHistoryTitle">Recently finished</p>
+                            <div class="groupHistoryList"></div>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="rewardOverlay hidden" aria-hidden="true">
+        <div class="rewardCard" role="dialog" aria-modal="true" aria-label="Milestone reached">
+            <div class="confettiField" aria-hidden="true"></div>
+            <p class="rewardKicker">Nice work!</p>
+            <h3 class="rewardTitle">Milestone reached</h3>
+
+            <div class="rewardReelViewport">
+                <div class="rewardReelTrack"></div>
+                <div class="rewardReelPointer" aria-hidden="true"></div>
+            </div>
+
+            <div class="rewardResult">
+                <p class="rewardSuggestionLabel">Treat yourself:</p>
+                <p class="rewardSuggestionText">Take a short break</p>
+            </div>
+
+            <button class="rewardCloseBtn" type="button">Nice!</button>
+        </div>
+    </div>
+
+    <div class="tourOverlay hidden" aria-hidden="true">
+        <div class="tourCard" role="dialog" aria-modal="true" aria-label="Group tutorial">
+            <p class="tourStepLabel">Step 1 of 1</p>
+            <h3 class="tourTitle">Welcome</h3>
+            <p class="tourText">This tutorial shows exactly what to do.</p>
+            <div class="tourActions">
+                <button class="tourSkipBtn" type="button">Skip</button>
+                <button class="tourNextBtn" type="button">Next</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="taskEditorOverlay groupWelcomeOverlay hidden" aria-hidden="true">
+        <div class="taskEditorCard groupWelcomeCard" role="dialog" aria-modal="true" aria-label="Welcome to Group">
+            <h2>Welcome to Group</h2>
+            <label>
+                What should your teammates call you?
+                <input type="text" class="editorTextInput groupWelcomeNameInput" maxlength="40" placeholder="e.g. Alex">
+            </label>
+            <p class="groupWelcomeIntro">You can change this anytime from the group page.</p>
+            <div class="editorActions">
+                <button type="button" class="editorSaveBtn groupWelcomeContinueBtn">Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/task-shared.js?v=20260830a"></script>
+    <script src="/auth-gate.js?v=20260829a"></script>
+    <script src="groups-data.js?v=20260829b"></script>
+    <script src="group.js?v=20260830c"></script>
+    <script type="module" src="/firebase-init.js?v=20260830a"></script>
+</body>
+</html>

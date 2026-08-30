@@ -1,0 +1,2757 @@
+// Group workspace - plain JS, same style as script.js (no build step, no
+// framework). Task rendering below intentionally mirrors createTaskItem()/
+// createSubtasksSection()/createSubtaskItem() in script.js: same classes,
+// same icons, same DOM shape, so a group task looks and behaves like a solo
+// task instead of a re-invention. MATRIX_CONFIG/DIFFICULTY_CONFIG/
+// getDeadlineStatus/generateTaskId/generateSubtaskId come from task-shared.js,
+// loaded before this file - not redefined here, so they can't drift from
+// solo's copy.
+//
+// Not yet ported from solo (by design, see conversation with the user):
+// the schedule field, quick-add NLP, snooze, drag-reorder, task views,
+// edit-in-place, and the reward/reel celebration. Matrix, difficulty,
+// deadline urgency, and subtasks (auto-complete with manual override) are
+// ported and share the exact same logic as solo.
+
+// ---------------------------------------------------------------------
+// Firestore data layer
+// ---------------------------------------------------------------------
+//
+// db(), fs(), displayNameFor/loadProfileName/saveProfileName, resolveMemberName,
+// createGroup/joinGroup/leaveGroup/deleteGroupCompletely, and subscribeToMyGroups
+// now live in groups-data.js, shared with group/browse.js - not redefined here.
+
+function subscribeToGroupTasks(groupId, callback, onError) {
+    const { collection, onSnapshot } = fs();
+    const tasksRef = collection(db(), 'groups', groupId, 'tasks');
+    return onSnapshot(tasksRef, (snapshot) => {
+        callback(snapshot.docs.map((taskDoc) => ({ id: taskDoc.id, ...taskDoc.data() })));
+    }, onError);
+}
+
+// ---------------------------------------------------------------------
+// Comments - a discussion thread per task. Only subscribed while a given
+// task's comment section is expanded (see toggleGroupCommentsExpanded),
+// not one big always-on listener per task in the list.
+// ---------------------------------------------------------------------
+
+function subscribeToTaskComments(groupId, taskId, callback, onError) {
+    const { collection, onSnapshot } = fs();
+    const commentsRef = collection(db(), 'groups', groupId, 'tasks', taskId, 'comments');
+    return onSnapshot(commentsRef, (snapshot) => {
+        callback(snapshot.docs.map((commentDoc) => ({ id: commentDoc.id, ...commentDoc.data() })));
+    }, onError);
+}
+
+// Also bumps commentCount/lastCommentAt on the parent task itself (a small
+// denormalized counter, allowed for any group member - not just the task's
+// owner - by its own narrow rule) so the unread-comments indicator on the
+// task list can read straight off the already-loaded task, instead of
+// needing a live listener per task just to know if there's anything new.
+async function addComment(groupId, taskId, user, text) {
+    const trimmedText = text.trim();
+    if (!trimmedText) {
+        return;
+    }
+    const { doc, writeBatch, serverTimestamp, increment } = fs();
+    const batch = writeBatch(db());
+    batch.set(doc(db(), 'groups', groupId, 'tasks', taskId, 'comments', generateTaskId()), {
+        authorId: user.uid,
+        authorName: displayNameFor(user),
+        text: trimmedText.slice(0, 500),
+        createdAt: serverTimestamp()
+    });
+    batch.update(doc(db(), 'groups', groupId, 'tasks', taskId), {
+        commentCount: increment(1),
+        lastCommentAt: serverTimestamp()
+    });
+    await batch.commit();
+    // You obviously just saw your own comment - don't flag it unread to yourself.
+    setCommentsLastViewedAt(taskId, new Date().toISOString());
+}
+
+async function deleteComment(groupId, taskId, commentId) {
+    const { doc, writeBatch, increment } = fs();
+    const batch = writeBatch(db());
+    batch.delete(doc(db(), 'groups', groupId, 'tasks', taskId, 'comments', commentId));
+    batch.update(doc(db(), 'groups', groupId, 'tasks', taskId), { commentCount: increment(-1) });
+    await batch.commit();
+}
+
+// ---------------------------------------------------------------------
+// Suggestions - "suggest a task for them": proposes a brand new task for a
+// specific teammate, who can accept (creates the real task, owned by them)
+// or dismiss it. Not tied to any existing task.
+// ---------------------------------------------------------------------
+
+async function suggestTaskForMember(groupId, fromUser, forUserId, { text, matrix, difficulty, dueAt }) {
+    const trimmedText = text.trim();
+    if (!trimmedText) {
+        return;
+    }
+    const { doc, setDoc, serverTimestamp } = fs();
+    await setDoc(doc(db(), 'groups', groupId, 'suggestions', generateTaskId()), {
+        fromUserId: fromUser.uid,
+        fromUserName: displayNameFor(fromUser),
+        forUserId,
+        text: trimmedText.slice(0, 240),
+        // Suggested starting priority - the assignee can still change all
+        // of this after accepting, via the normal task editor. Deliberately
+        // no suggested "schedule" or time estimate: those are the
+        // assignee's own planning call, not something to set on their
+        // behalf.
+        matrix: getValidMatrixValue(matrix),
+        difficulty: getValidDifficultyLevel(difficulty),
+        dueAt: dueAt || null,
+        status: 'pending',
+        createdAt: serverTimestamp()
+    });
+}
+
+// Every pending suggestion in the group, not just the current user's - the
+// dashboard filters client-side (forUserId === you = "for you", otherwise
+// "you suggested"), since a group this small doesn't need two queries.
+function subscribeToGroupSuggestions(groupId, callback, onError) {
+    const { collection, onSnapshot } = fs();
+    const suggestionsRef = collection(db(), 'groups', groupId, 'suggestions');
+    return onSnapshot(suggestionsRef, (snapshot) => {
+        callback(snapshot.docs.map((suggestionDoc) => ({ id: suggestionDoc.id, ...suggestionDoc.data() })));
+    }, onError);
+}
+
+async function acceptSuggestion(groupId, suggestion, user) {
+    const { doc, updateDoc } = fs();
+    await addGroupTask(groupId, user, {
+        text: suggestion.text,
+        matrix: suggestion.matrix,
+        difficulty: suggestion.difficulty,
+        dueAt: suggestion.dueAt
+    });
+    await updateDoc(doc(db(), 'groups', groupId, 'suggestions', suggestion.id), { status: 'accepted' });
+}
+
+async function dismissSuggestion(groupId, suggestionId) {
+    const { doc, updateDoc } = fs();
+    await updateDoc(doc(db(), 'groups', groupId, 'suggestions', suggestionId), { status: 'dismissed' });
+}
+
+async function retractSuggestion(groupId, suggestionId) {
+    const { doc, deleteDoc } = fs();
+    await deleteDoc(doc(db(), 'groups', groupId, 'suggestions', suggestionId));
+}
+
+async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, scheduledAt, taskType, estimateMinutes }) {
+    const trimmedText = text.trim();
+    if (!trimmedText) {
+        return;
+    }
+
+    const { doc, setDoc } = fs();
+    const timestamp = new Date().toISOString();
+    const validTaskType = getValidTaskType(taskType);
+
+    await setDoc(doc(db(), 'groups', groupId, 'tasks', generateTaskId()), {
+        ownerId: user.uid,
+        ownerName: displayNameFor(user),
+        text: trimmedText,
+        completed: false,
+        matrix: getValidMatrixValue(matrix),
+        difficulty: getValidDifficultyLevel(difficulty),
+        dueAt: dueAt || null,
+        scheduledAt: scheduledAt || null,
+        taskType: validTaskType,
+        estimateMinutes: validTaskType === 'timeboxed' ? (estimateMinutes || null) : null,
+        subtasks: [],
+        createdAt: timestamp,
+        updatedAt: timestamp
+    });
+}
+
+async function setGroupTaskCompleted(groupId, taskId, completed) {
+    const { doc, updateDoc } = fs();
+    await updateDoc(doc(db(), 'groups', groupId, 'tasks', taskId), {
+        completed,
+        completedAt: completed ? new Date().toISOString() : null,
+        updatedAt: new Date().toISOString()
+    });
+}
+
+async function deleteGroupTask(groupId, taskId) {
+    const { doc, deleteDoc } = fs();
+    await deleteDoc(doc(db(), 'groups', groupId, 'tasks', taskId));
+}
+
+// Same auto-complete-with-manual-override behavior as the solo app: checking
+// off the last subtask completes the task, unchecking one reopens it, and
+// the task's own checkbox can still be toggled independently at any time.
+// Shared by all three subtask mutators below: recomputes the parent task's
+// own completed/completedAt from its subtasks (auto-complete with manual
+// override, same as solo) - completedAt feeds the history panel.
+function subtaskDrivenTaskUpdate(subtasks) {
+    const completed = subtasks.length > 0 && subtasks.every((subtask) => subtask.completed);
+    return {
+        subtasks,
+        completed,
+        completedAt: completed ? new Date().toISOString() : null,
+        updatedAt: new Date().toISOString()
+    };
+}
+
+async function addGroupSubtask(groupId, task, text) {
+    const trimmedText = text.trim();
+    if (!trimmedText) {
+        return;
+    }
+
+    const subtasks = [
+        ...(task.subtasks || []),
+        { id: generateSubtaskId(), text: trimmedText, completed: false, createdAt: new Date().toISOString() }
+    ];
+
+    const { doc, updateDoc } = fs();
+    await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), subtaskDrivenTaskUpdate(subtasks));
+}
+
+async function toggleGroupSubtask(groupId, task, subtaskId) {
+    const subtasks = (task.subtasks || []).map((subtask) => (
+        subtask.id === subtaskId ? { ...subtask, completed: !subtask.completed } : subtask
+    ));
+
+    const { doc, updateDoc } = fs();
+    await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), subtaskDrivenTaskUpdate(subtasks));
+}
+
+async function deleteGroupSubtask(groupId, task, subtaskId) {
+    const subtasks = (task.subtasks || []).filter((subtask) => subtask.id !== subtaskId);
+
+    const { doc, updateDoc } = fs();
+    await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), subtaskDrivenTaskUpdate(subtasks));
+}
+
+// ---------------------------------------------------------------------
+// DOM references
+// ---------------------------------------------------------------------
+
+const groupStatusMsg = document.querySelector('.groupStatusMsg');
+const groupPageWrap = document.querySelector('.groupPageWrap');
+const groupSwitcherRow = document.querySelector('.groupSwitcherRow');
+const groupBrowseAllLink = document.querySelector('.groupBrowseAllLink');
+const groupSetupSection = document.querySelector('.groupSetupSection');
+const groupCreateForm = document.querySelector('.groupCreateForm');
+const groupCreateNameInput = document.querySelector('.groupCreateNameInput');
+const groupCreateError = document.querySelector('.groupCreateError');
+const groupJoinForm = document.querySelector('.groupJoinForm');
+const groupJoinCodeInput = document.querySelector('.groupJoinCodeInput');
+const groupJoinError = document.querySelector('.groupJoinError');
+const groupDashboard = document.querySelector('.groupDashboard');
+const groupInviteCode = document.querySelector('.groupInviteCode');
+const groupCopyInviteBtn = document.querySelector('.groupCopyInviteBtn');
+const groupRenameBtn = document.querySelector('.groupRenameBtn');
+const groupLeaveBtn = document.querySelector('.groupLeaveBtn');
+const groupDeleteBtn = document.querySelector('.groupDeleteBtn');
+const memberRoster = document.querySelector('.memberRoster');
+const groupHistoryList = document.querySelector('.groupHistoryList');
+const suggestionsForYouPanel = document.querySelector('.suggestionsForYouPanel');
+const helpTourBtn = document.querySelector('.helpTourBtn');
+const groupWelcomeOverlay = document.querySelector('.groupWelcomeOverlay');
+const groupWelcomeNameInput = document.querySelector('.groupWelcomeNameInput');
+const groupWelcomeContinueBtn = document.querySelector('.groupWelcomeContinueBtn');
+const groupUrgencyAlert = document.querySelector('.urgencyAlert');
+const groupUrgencyAlertText = document.querySelector('.urgencyAlertText');
+const overdueViewButton = document.querySelector('.taskViewBtn[data-view="overdue"]');
+const overdueCountBadge = document.querySelector('.overdueCountBadge');
+const taskInput = document.querySelector('.taskInput');
+const detailsToggleBtn = document.querySelector('.detailsToggleBtn');
+const addBtn = document.querySelector('.addBtn');
+const taskDetailsPanel = document.querySelector('.taskDetailsPanel');
+const matrixSelect = document.querySelector('.matrixSelect');
+const difficultySelect = document.querySelector('.difficultySelect');
+const deadlineContainer = document.querySelector('.deadlineContainer:not(.scheduleContainer)');
+const deadlineInput = document.querySelector('.deadlineInput:not(.scheduleInput)');
+const scheduleContainer = document.querySelector('.scheduleContainer');
+const scheduleInput = document.querySelector('.scheduleInput');
+const typePills = Array.from(document.querySelectorAll('.typePill'));
+const durationInput = document.querySelector('.durationInput');
+const durationWrap = document.querySelector('.durationWrap');
+const durationChips = Array.from(document.querySelectorAll('.durationChip'));
+const groupTasksList = document.querySelector('.groupTasksList');
+const taskViewBtns = document.querySelectorAll('.taskViewBtn');
+const groupMemberScopeTabs = document.querySelector('.groupMemberScopeTabs');
+const yourNameInput = document.querySelector('.yourNameInput');
+const yourNameSaveBtn = document.querySelector('.yourNameSaveBtn');
+const yourNameSavedMsg = document.querySelector('.yourNameSavedMsg');
+const pageTitleEl = document.querySelector('h1.title');
+const motivatorText = document.querySelector('.motivatorText');
+const progressBar = document.querySelector('.progressBar');
+const taskAmountText = document.querySelector('.taskAmount');
+
+// Reward/celebration reel - personal to whoever is signed in, not shared
+// with the rest of the group (see checkGroupMilestone below). Same overlay
+// markup/CSS as solo's (.rewardOverlay etc.), same reel mechanics from
+// task-shared.js (REWARD_SUGGESTIONS, createRewardTile, reel geometry).
+const rewardOverlay = document.querySelector('.rewardOverlay');
+const rewardCard = document.querySelector('.rewardCard');
+const confettiField = document.querySelector('.confettiField');
+const rewardTitle = document.querySelector('.rewardTitle');
+const rewardReelViewport = document.querySelector('.rewardReelViewport');
+const rewardReelTrack = document.querySelector('.rewardReelTrack');
+const rewardSuggestionText = document.querySelector('.rewardSuggestionText');
+const rewardCloseBtn = document.querySelector('.rewardCloseBtn');
+
+// ---------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------
+
+const SELECTED_GROUP_KEY = 'todolist-selected-group';
+
+let currentUser = null;
+let groups = undefined; // undefined = loading, [] = none yet
+let selectedGroupId = null;
+let groupTasks = [];
+let groupSuggestions = [];
+let showSetup = new URLSearchParams(window.location.search).get('new') === '1';
+let expandedSubtaskTaskIds = new Set();
+let expandedSnoozeTaskIds = new Set();
+let expandedCommentTaskIds = new Set();
+let taskCommentsById = {}; // taskId -> comments array, filled in lazily
+let taskCommentsErrorById = {}; // taskId -> error message, so a failed load/post is visible, not silent
+const commentUnsubscribes = {}; // taskId -> unsubscribe fn, only while expanded
+let activeView = 'all';
+// 'all' = everyone's tasks together; a uid = just that one person's.
+let activeMemberScope = 'all';
+
+let unsubscribeGroups = null;
+let unsubscribeTasks = null;
+let unsubscribeSuggestions = null;
+
+// A link from the "all my groups" browse page (?g=<id>) always wins over
+// whatever was last selected here.
+const deepLinkGroupId = new URLSearchParams(window.location.search).get('g');
+
+try {
+    selectedGroupId = deepLinkGroupId || localStorage.getItem(SELECTED_GROUP_KEY);
+} catch {
+    // localStorage can be unavailable (private browsing, quota) - the
+    // switcher just won't remember the choice across reloads.
+}
+
+function clearExpandedCommentSubscriptions() {
+    Object.values(commentUnsubscribes).forEach((unsubscribe) => unsubscribe());
+    Object.keys(commentUnsubscribes).forEach((key) => delete commentUnsubscribes[key]);
+    expandedCommentTaskIds = new Set();
+    taskCommentsById = {};
+}
+
+function selectGroup(groupId) {
+    selectedGroupId = groupId;
+    showSetup = false;
+    activeMemberScope = 'all';
+    clearExpandedCommentSubscriptions();
+    try {
+        localStorage.setItem(SELECTED_GROUP_KEY, groupId);
+    } catch {
+        // Same as above - non-fatal.
+    }
+    renderApp();
+    watchSelectedGroupTasks();
+}
+
+function getSelectedGroup() {
+    if (!groups || groups.length === 0) {
+        return null;
+    }
+    return groups.find((group) => group.id === selectedGroupId) || groups[0];
+}
+
+// ---------------------------------------------------------------------
+// Task rendering - mirrors createTaskItem()/createSubtasksSection()/
+// createSubtaskItem() in script.js as closely as this feature set allows.
+// ---------------------------------------------------------------------
+
+function createGroupTaskItem(groupId, task, isOwner) {
+    const taskItem = document.createElement('li');
+    taskItem.dataset.taskId = task.id;
+
+    if (task.completed) {
+        taskItem.classList.add('completed');
+    }
+
+    const taskMain = document.createElement('div');
+    taskMain.classList.add('taskMain');
+
+    const checkBtn = document.createElement('button');
+    checkBtn.type = 'button';
+    checkBtn.classList.add('checkBtn');
+    checkBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+    checkBtn.setAttribute('aria-label', task.completed ? 'Mark as incomplete' : 'Mark as complete');
+    checkBtn.title = task.completed ? 'Mark as incomplete' : 'Mark as complete';
+    if (!isOwner) {
+        checkBtn.disabled = true;
+        checkBtn.title = `Only ${task.ownerName || 'the owner'} can update this task`;
+    }
+
+    const taskContent = document.createElement('div');
+    taskContent.classList.add('taskContent');
+
+    const taskTextSpan = document.createElement('span');
+    taskTextSpan.classList.add('taskText');
+    taskTextSpan.textContent = task.text;
+
+    const taskMeta = document.createElement('div');
+    taskMeta.classList.add('taskMeta');
+
+    if (!isOwner) {
+        const ownerBadge = document.createElement('span');
+        ownerBadge.classList.add('ownerBadge');
+        ownerBadge.textContent = task.ownerName || 'Teammate';
+        taskMeta.appendChild(ownerBadge);
+    }
+
+    const matrixValue = getValidMatrixValue(task.matrix);
+    const matrixData = MATRIX_CONFIG[matrixValue];
+    const matrixBadge = document.createElement('span');
+    matrixBadge.classList.add('matrixBadge', matrixData.className);
+    matrixBadge.textContent = matrixData.label;
+    taskMeta.appendChild(matrixBadge);
+
+    const difficultyLevel = getValidDifficultyLevel(task.difficulty);
+    const difficultyBadge = document.createElement('span');
+    difficultyBadge.classList.add('difficultyBadge', `difficulty-${difficultyLevel}`);
+    difficultyBadge.textContent = getDifficultyLabel(difficultyLevel);
+    taskMeta.appendChild(difficultyBadge);
+
+    if (task.scheduledAt && !task.completed) {
+        const scheduleBadge = document.createElement('span');
+        scheduleBadge.classList.add('scheduleBadge');
+        scheduleBadge.innerHTML = `<i class="fa-solid fa-clock"></i> ${getScheduleLabel(task.scheduledAt)}`;
+        taskMeta.appendChild(scheduleBadge);
+    }
+
+    const effortLabel = getEffortLabel(task);
+    if (effortLabel !== 'No estimate') {
+        const effortBadge = document.createElement('span');
+        effortBadge.classList.add('effortBadge');
+        effortBadge.textContent = effortLabel;
+        taskMeta.appendChild(effortBadge);
+    }
+
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    const subtaskDoneCount = subtasks.filter((subtask) => subtask.completed).length;
+    if (subtasks.length > 0) {
+        const subtaskProgressBadge = document.createElement('span');
+        subtaskProgressBadge.classList.add('subtaskProgressBadge');
+        subtaskProgressBadge.textContent = `${subtaskDoneCount}/${subtasks.length} steps`;
+        taskMeta.appendChild(subtaskProgressBadge);
+    }
+
+    const deadlineStatus = getTaskDisplayDeadlineStatus(task);
+    taskItem.classList.add(`status-${deadlineStatus.urgencyLevel}`);
+
+    const deadlineBadge = document.createElement('span');
+    deadlineBadge.classList.add('deadlineBadge', deadlineStatus.deadlineClassName);
+    deadlineBadge.textContent = deadlineStatus.deadlineLabel;
+    taskMeta.appendChild(deadlineBadge);
+
+    const countdownBadge = document.createElement('span');
+    countdownBadge.classList.add('countdownBadge', deadlineStatus.countdownClassName);
+    countdownBadge.textContent = deadlineStatus.countdownLabel;
+    taskMeta.appendChild(countdownBadge);
+
+    taskContent.appendChild(taskTextSpan);
+    taskContent.appendChild(taskMeta);
+
+    taskMain.appendChild(checkBtn);
+    taskMain.appendChild(taskContent);
+
+    const taskButtons = document.createElement('div');
+    taskButtons.classList.add('taskButtons');
+
+    const canSnooze = isOwner && Boolean(task.dueAt) && !task.completed;
+
+    if (isOwner) {
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.classList.add('editBtn');
+        editBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+        editBtn.setAttribute('aria-label', 'Edit task');
+        editBtn.title = 'Edit task';
+        editBtn.addEventListener('click', () => {
+            playClickSound();
+            openGroupTaskEditor(groupId, task);
+        });
+        taskButtons.appendChild(editBtn);
+
+        if (canSnooze) {
+            const snoozeBtn = document.createElement('button');
+            snoozeBtn.type = 'button';
+            snoozeBtn.classList.add('snoozeBtn');
+            snoozeBtn.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i>';
+            snoozeBtn.setAttribute('aria-label', 'Snooze / reschedule deadline');
+            snoozeBtn.title = 'Snooze / reschedule deadline';
+            snoozeBtn.addEventListener('click', () => {
+                playClickSound();
+                toggleGroupSnoozeExpanded(task.id);
+            });
+            taskButtons.appendChild(snoozeBtn);
+        }
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.classList.add('deleteBtn');
+        deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+        deleteBtn.setAttribute('aria-label', 'Delete task');
+        deleteBtn.title = 'Delete task';
+        deleteBtn.addEventListener('click', () => {
+            playClickSound();
+            deleteGroupTask(groupId, task.id).catch((error) => console.error('Failed to delete task:', error));
+        });
+        taskButtons.appendChild(deleteBtn);
+    }
+
+    const taskTopRow = document.createElement('div');
+    taskTopRow.classList.add('taskTopRow');
+    taskTopRow.appendChild(taskMain);
+    taskTopRow.appendChild(taskButtons);
+
+    taskItem.appendChild(taskTopRow);
+    if (canSnooze) {
+        taskItem.appendChild(createGroupSnoozeSection(groupId, task));
+    }
+    taskItem.appendChild(createGroupSubtasksSection(groupId, task, subtasks, isOwner));
+    taskItem.appendChild(createGroupCommentsSection(groupId, task));
+
+    checkBtn.addEventListener('click', () => {
+        if (!isOwner) {
+            return;
+        }
+        playClickSound();
+        const willBeCompleted = !task.completed;
+        setGroupTaskCompleted(groupId, task.id, willBeCompleted).catch((error) => {
+            console.error('Failed to update task:', error);
+        });
+        if (willBeCompleted) {
+            playTaskCompleteSound();
+            checkGroupMilestone(groupId, task.id);
+        }
+    });
+
+    return taskItem;
+}
+
+// Same quick-reschedule presets as solo's snooze section - reuses the same
+// .deadlinePresetBtn/.snoozeOptionBtn classes and computePresetDate presets
+// from task-shared.js.
+function createGroupSnoozeSection(groupId, task) {
+    const section = document.createElement('div');
+    section.classList.add('snoozeSection');
+    if (!expandedSnoozeTaskIds.has(task.id)) {
+        section.classList.add('hidden');
+    }
+
+    const label = document.createElement('span');
+    label.classList.add('snoozeLabel');
+    label.textContent = 'Push deadline to:';
+    section.appendChild(label);
+
+    const presetOptions = [
+        { preset: 'tomorrow', label: 'Tomorrow' },
+        { preset: 'plus3days', label: 'In 3 days' },
+        { preset: 'nextweek', label: 'Next week' }
+    ];
+
+    presetOptions.forEach(({ preset, label: optionLabel }) => {
+        const optionBtn = document.createElement('button');
+        optionBtn.type = 'button';
+        optionBtn.classList.add('deadlinePresetBtn', 'snoozeOptionBtn');
+        optionBtn.textContent = optionLabel;
+        optionBtn.addEventListener('click', () => {
+            playClickSound();
+            applyGroupSnoozeToTask(groupId, task.id, preset);
+        });
+        section.appendChild(optionBtn);
+    });
+
+    const pickDateBtn = document.createElement('button');
+    pickDateBtn.type = 'button';
+    pickDateBtn.classList.add('deadlinePresetBtn', 'snoozeOptionBtn');
+    pickDateBtn.textContent = 'Pick a date...';
+    pickDateBtn.addEventListener('click', () => {
+        playClickSound();
+        expandedSnoozeTaskIds.delete(task.id);
+        openGroupTaskEditor(groupId, task);
+    });
+    section.appendChild(pickDateBtn);
+
+    return section;
+}
+
+function toggleGroupSnoozeExpanded(taskId) {
+    if (expandedSnoozeTaskIds.has(taskId)) {
+        expandedSnoozeTaskIds.delete(taskId);
+    } else {
+        expandedSnoozeTaskIds.add(taskId);
+    }
+    renderGroupTasks();
+}
+
+function applyGroupSnoozeToTask(groupId, taskId, preset) {
+    const presetDate = computePresetDate(preset);
+    if (!presetDate) {
+        return;
+    }
+
+    expandedSnoozeTaskIds.delete(taskId);
+
+    const { doc, updateDoc } = fs();
+    updateDoc(doc(db(), 'groups', groupId, 'tasks', taskId), {
+        dueAt: presetDate.toISOString(),
+        updatedAt: new Date().toISOString()
+    }).catch((error) => console.error('Failed to snooze task:', error));
+}
+
+// ---------------------------------------------------------------------
+// Reward / celebration reel - personal only. Triggered directly from your
+// own checkbox click (see createGroupTaskItem), never from the live
+// listener picking up a teammate's completion, so it can only ever fire
+// for tasks you completed yourself.
+// ---------------------------------------------------------------------
+
+let groupSessionCompletionCount = 0;
+let rewardSpinToken = 0;
+
+// justCompletedTaskId is passed explicitly rather than relying on groupTasks
+// already reflecting the completion - the live listener's snapshot for this
+// change hasn't come back yet at the moment this runs, so the task being
+// completed right now would otherwise still read as incomplete.
+function checkGroupMilestone(groupId, justCompletedTaskId) {
+    groupSessionCompletionCount += 1;
+
+    const isDueToday = (task) => {
+        if (!isValidDateValue(task.dueAt)) {
+            return false;
+        }
+        const dueDate = new Date(task.dueAt);
+        const today = new Date();
+        return dueDate.getFullYear() === today.getFullYear()
+            && dueDate.getMonth() === today.getMonth()
+            && dueDate.getDate() === today.getDate();
+    };
+
+    const myTasksHere = groupTasks.filter((task) => task.ownerId === currentUser?.uid);
+    const dueTodayTasks = myTasksHere.filter(isDueToday);
+    const stillIncomplete = dueTodayTasks.filter((task) => !task.completed && task.id !== justCompletedTaskId);
+
+    const celebratedKey = `todoGroupCelebratedDailyClearDate:${groupId}`;
+    const todayKey = getDateKey(new Date());
+    const alreadyCelebratedToday = localStorage.getItem(celebratedKey) === todayKey;
+    const dailyClearReady = dueTodayTasks.length > 0 && stillIncomplete.length === 0 && !alreadyCelebratedToday;
+
+    if (dailyClearReady) {
+        try {
+            localStorage.setItem(celebratedKey, todayKey);
+        } catch {
+            // Non-fatal - just means it might celebrate again later today.
+        }
+        triggerGroupRewardCelebration('Today’s tasks in this group are all done');
+        return;
+    }
+
+    if (groupSessionCompletionCount % 5 === 0) {
+        triggerGroupRewardCelebration(`${groupSessionCompletionCount} tasks completed this session`);
+    }
+}
+
+function triggerGroupRewardCelebration(titleText) {
+    if (!rewardOverlay || !rewardTitle || !rewardSuggestionText) {
+        return;
+    }
+
+    rewardSpinToken += 1;
+    const currentSpinToken = rewardSpinToken;
+
+    rewardTitle.textContent = titleText;
+    const winningReward = REWARD_SUGGESTIONS[Math.floor(Math.random() * REWARD_SUGGESTIONS.length)];
+    rewardSuggestionText.textContent = winningReward.text;
+
+    rewardCard?.classList.remove('revealed');
+    rewardOverlay.classList.remove('hidden');
+    rewardOverlay.setAttribute('aria-hidden', 'false');
+
+    const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReducedMotion || !rewardReelTrack || !rewardReelViewport) {
+        revealRewardResult();
+        spawnConfetti();
+        return;
+    }
+
+    spinGroupRewardReel(winningReward, currentSpinToken);
+}
+
+function spinGroupRewardReel(winningReward, spinToken) {
+    rewardReelTrack.innerHTML = '';
+    rewardReelTrack.style.transition = 'none';
+    rewardReelTrack.style.transform = 'translateX(0)';
+
+    for (let i = 0; i < REEL_FILLER_COUNT; i += 1) {
+        const tileReward = i === REEL_LANDING_INDEX
+            ? winningReward
+            : REWARD_SUGGESTIONS[Math.floor(Math.random() * REWARD_SUGGESTIONS.length)];
+        rewardReelTrack.appendChild(createRewardTile(tileReward));
+    }
+
+    // Force a layout flush so the reset above is committed before the
+    // transition is applied below - otherwise the browser can coalesce both
+    // style changes into one and skip the animation entirely.
+    void rewardReelTrack.offsetWidth;
+
+    const viewportWidth = rewardReelViewport.clientWidth;
+    const jitter = (Math.random() * 30) - 15;
+    const targetOffset = (REEL_LANDING_INDEX * REEL_TILE_STEP) + (REEL_TILE_WIDTH / 2) - (viewportWidth / 2) + jitter;
+
+    rewardReelTrack.style.transition = 'transform 6.5s cubic-bezier(0.16, 1, 0.3, 1)';
+    rewardReelTrack.style.transform = `translateX(-${targetOffset}px)`;
+
+    rewardReelTrack.addEventListener('transitionend', function onSpinEnd(event) {
+        if (event.propertyName !== 'transform') {
+            return;
+        }
+        rewardReelTrack.removeEventListener('transitionend', onSpinEnd);
+        if (spinToken !== rewardSpinToken) {
+            return;
+        }
+
+        const landedTile = rewardReelTrack.children[REEL_LANDING_INDEX];
+        landedTile?.classList.add('landed');
+
+        setTimeout(() => {
+            if (spinToken !== rewardSpinToken) {
+                return;
+            }
+            revealRewardResult();
+            spawnConfetti();
+        }, 400);
+    });
+}
+
+function revealRewardResult() {
+    rewardCard?.classList.add('revealed');
+}
+
+function closeGroupRewardCelebration() {
+    if (!rewardOverlay) {
+        return;
+    }
+
+    rewardSpinToken += 1;
+    rewardOverlay.classList.add('hidden');
+    rewardOverlay.setAttribute('aria-hidden', 'true');
+    rewardCard?.classList.remove('revealed');
+
+    if (rewardReelTrack) {
+        rewardReelTrack.style.transition = 'none';
+        rewardReelTrack.innerHTML = '';
+    }
+    if (confettiField) {
+        confettiField.innerHTML = '';
+    }
+}
+
+if (rewardCloseBtn) {
+    rewardCloseBtn.addEventListener('click', () => {
+        playClickSound();
+        closeGroupRewardCelebration();
+    });
+}
+
+function spawnConfetti() {
+    if (!confettiField) {
+        return;
+    }
+
+    confettiField.innerHTML = '';
+
+    const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReducedMotion) {
+        return;
+    }
+
+    const colors = ['#d7b778', '#b58bff', '#7f86ff', '#8bdaff', '#f6f2ea'];
+    const pieceCount = 28;
+
+    for (let i = 0; i < pieceCount; i += 1) {
+        const piece = document.createElement('span');
+        piece.className = 'confettiPiece';
+        piece.style.left = `${Math.random() * 100}%`;
+        piece.style.backgroundColor = colors[i % colors.length];
+        piece.style.animationDelay = `${Math.random() * 0.4}s`;
+        piece.style.animationDuration = `${1.6 + Math.random() * 1.2}s`;
+        piece.style.transform = `rotate(${Math.random() * 360}deg)`;
+        confettiField.appendChild(piece);
+    }
+}
+
+// ---------------------------------------------------------------------
+// Comments - unlike subtasks, any group member can post here (not just
+// the task's owner), since the whole point is teammates weighing in on
+// each other's tasks.
+// ---------------------------------------------------------------------
+
+const COMMENTS_LAST_VIEWED_KEY = 'todolist-comments-last-viewed';
+
+function getCommentsLastViewedAt(taskId) {
+    try {
+        const stored = JSON.parse(localStorage.getItem(COMMENTS_LAST_VIEWED_KEY) || '{}');
+        return stored[taskId] || null;
+    } catch {
+        return null;
+    }
+}
+
+function setCommentsLastViewedAt(taskId, isoString) {
+    try {
+        const stored = JSON.parse(localStorage.getItem(COMMENTS_LAST_VIEWED_KEY) || '{}');
+        stored[taskId] = isoString;
+        localStorage.setItem(COMMENTS_LAST_VIEWED_KEY, JSON.stringify(stored));
+    } catch {
+        // localStorage can be unavailable - the indicator just won't
+        // remember what you've already seen across reloads.
+    }
+}
+
+function hasUnreadComments(task) {
+    if (!task.lastCommentAt?.seconds) {
+        return false;
+    }
+    const lastViewed = getCommentsLastViewedAt(task.id);
+    if (!lastViewed) {
+        return true;
+    }
+    return (task.lastCommentAt.seconds * 1000) > new Date(lastViewed).getTime();
+}
+
+// Comments created before commentCount existed never bumped it, so a task
+// with old comments can show a stored count lower than its real one. Once
+// the real list has actually been loaded, quietly correct the stored field
+// to match - any group member is allowed to (see the task update rule),
+// and it means this only ever needs fixing once per task.
+function healCommentCountIfStale(groupId, task, actualCount) {
+    const storedCount = task.commentCount || 0;
+    if (storedCount === actualCount) {
+        return;
+    }
+    const { doc, updateDoc } = fs();
+    updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), { commentCount: actualCount })
+        .catch((error) => console.error('Failed to correct comment count:', error));
+}
+
+function toggleGroupCommentsExpanded(groupId, task) {
+    if (expandedCommentTaskIds.has(task.id)) {
+        expandedCommentTaskIds.delete(task.id);
+    } else {
+        expandedCommentTaskIds.add(task.id);
+        setCommentsLastViewedAt(task.id, new Date().toISOString());
+        if (!commentUnsubscribes[task.id]) {
+            commentUnsubscribes[task.id] = subscribeToTaskComments(groupId, task.id, (comments) => {
+                taskCommentsById[task.id] = comments;
+                taskCommentsErrorById[task.id] = null;
+                healCommentCountIfStale(groupId, task, comments.length);
+                renderGroupTasks();
+            }, (error) => {
+                console.error('Failed to load comments:', error);
+                taskCommentsErrorById[task.id] = error?.code === 'permission-denied'
+                    ? 'Comments aren\'t turned on for this project yet (the security rules need to be published).'
+                    : 'Could not load comments.';
+                renderGroupTasks();
+            });
+        }
+    }
+    renderGroupTasks();
+}
+
+function createGroupCommentsSection(groupId, task) {
+    const section = document.createElement('div');
+    section.classList.add('commentsSection');
+
+    const expanded = expandedCommentTaskIds.has(task.id);
+    const comments = taskCommentsById[task.id] || [];
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.classList.add('commentsToggleBtn');
+    toggleBtn.setAttribute('aria-expanded', String(expanded));
+
+    const chevron = document.createElement('i');
+    chevron.classList.add('fa-solid', expanded ? 'fa-chevron-down' : 'fa-chevron-right');
+    toggleBtn.appendChild(chevron);
+
+    // The count badge uses the denormalized commentCount off the task
+    // itself (always available, even before expanding) rather than
+    // comments.length (only populated once loaded).
+    // Once actually loaded, the real list is the ground truth (comments
+    // created before commentCount existed never bumped it, so the stored
+    // number can undercount) - only fall back to the stored estimate while
+    // still collapsed and nothing's been fetched yet.
+    const knownCount = taskCommentsById[task.id] ? comments.length : (task.commentCount || 0);
+    const toggleLabel = document.createElement('span');
+    toggleLabel.classList.add('commentsToggleLabel');
+    toggleLabel.innerHTML = '<i class="fa-regular fa-comment"></i> ' + (
+        knownCount === 0 ? 'Comments' : `${knownCount} comment${knownCount === 1 ? '' : 's'}`
+    );
+    toggleBtn.appendChild(toggleLabel);
+
+    if (!expanded && hasUnreadComments(task)) {
+        const unreadDot = document.createElement('span');
+        unreadDot.classList.add('commentsUnreadDot');
+        unreadDot.setAttribute('aria-label', 'Unread comments');
+        toggleBtn.appendChild(unreadDot);
+    }
+
+    toggleBtn.addEventListener('click', () => {
+        playClickSound();
+        toggleGroupCommentsExpanded(groupId, task);
+    });
+    section.appendChild(toggleBtn);
+
+    const body = document.createElement('div');
+    body.classList.add('commentsBody');
+    if (!expanded) {
+        body.classList.add('hidden');
+    }
+
+    if (expanded) {
+        const loadError = taskCommentsErrorById[task.id];
+        if (loadError) {
+            const errorMsg = document.createElement('p');
+            errorMsg.classList.add('commentsEmpty', 'commentsError');
+            errorMsg.textContent = loadError;
+            body.appendChild(errorMsg);
+        } else if (comments.length === 0) {
+            const empty = document.createElement('p');
+            empty.classList.add('commentsEmpty');
+            empty.textContent = 'No comments yet - say something helpful.';
+            body.appendChild(empty);
+        } else {
+            const list = document.createElement('div');
+            list.classList.add('commentsList');
+            list.setAttribute('role', 'list');
+            [...comments]
+                .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))
+                .forEach((comment) => list.appendChild(createGroupCommentItem(groupId, task, comment)));
+            body.appendChild(list);
+        }
+
+        body.appendChild(createGroupCommentAddRow(groupId, task));
+    }
+
+    section.appendChild(body);
+    return section;
+}
+
+function createGroupCommentItem(groupId, task, comment) {
+    const item = document.createElement('div');
+    item.classList.add('commentItem');
+    item.setAttribute('role', 'listitem');
+
+    const meta = document.createElement('p');
+    meta.classList.add('commentItemMeta');
+    const authorLabel = comment.authorId === currentUser?.uid ? 'You' : (comment.authorName || 'Teammate');
+    const timeLabel = comment.createdAt?.seconds
+        ? formatFriendlyDateTime(new Date(comment.createdAt.seconds * 1000))
+        : 'just now';
+    meta.textContent = `${authorLabel} - ${timeLabel}`;
+    item.appendChild(meta);
+
+    const text = document.createElement('p');
+    text.classList.add('commentItemText');
+    text.textContent = comment.text;
+    item.appendChild(text);
+
+    if (comment.authorId === currentUser?.uid) {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.classList.add('commentDeleteBtn');
+        deleteBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        deleteBtn.setAttribute('aria-label', 'Delete comment');
+        deleteBtn.addEventListener('click', () => {
+            playClickSound();
+            deleteComment(groupId, task.id, comment.id).catch((error) => console.error('Failed to delete comment:', error));
+        });
+        item.appendChild(deleteBtn);
+    }
+
+    return item;
+}
+
+function createGroupCommentAddRow(groupId, task) {
+    const addRow = document.createElement('div');
+    addRow.classList.add('commentAddRow');
+
+    const addInput = document.createElement('input');
+    addInput.type = 'text';
+    addInput.classList.add('commentInput');
+    addInput.placeholder = 'Add a comment...';
+    addInput.setAttribute('aria-label', 'Add a comment');
+    addInput.maxLength = 500;
+    addInput.addEventListener('mousedown', (event) => event.stopPropagation());
+
+    const addBtnEl = document.createElement('button');
+    addBtnEl.type = 'button';
+    addBtnEl.classList.add('commentAddBtn');
+    addBtnEl.setAttribute('aria-label', 'Post comment');
+    addBtnEl.innerHTML = '<i class="fa-solid fa-paper-plane"></i>';
+
+    const submitComment = () => {
+        if (addInput.value.trim() === '' || !currentUser) {
+            return;
+        }
+        playClickSound();
+        const textToPost = addInput.value;
+        addInput.value = '';
+        addComment(groupId, task.id, currentUser, textToPost).catch((error) => {
+            console.error('Failed to post comment:', error);
+            alert(error?.code === 'permission-denied'
+                ? 'Comments aren\'t turned on for this project yet (the security rules need to be published).'
+                : 'Could not post that comment.');
+            addInput.value = textToPost;
+        });
+    };
+
+    addBtnEl.addEventListener('click', submitComment);
+    addInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            submitComment();
+        }
+    });
+
+    addRow.appendChild(addInput);
+    addRow.appendChild(addBtnEl);
+    return addRow;
+}
+
+function createGroupSubtasksSection(groupId, task, subtasks, isOwner) {
+    const section = document.createElement('div');
+    section.classList.add('subtasksSection');
+
+    const expanded = expandedSubtaskTaskIds.has(task.id);
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.classList.add('subtasksToggleBtn');
+    toggleBtn.setAttribute('aria-expanded', String(expanded));
+
+    const chevron = document.createElement('i');
+    chevron.classList.add('fa-solid', expanded ? 'fa-chevron-down' : 'fa-chevron-right');
+    toggleBtn.appendChild(chevron);
+
+    const toggleLabel = document.createElement('span');
+    toggleLabel.classList.add('subtasksToggleLabel');
+    const doneCount = subtasks.filter((subtask) => subtask.completed).length;
+    if (subtasks.length > 0) {
+        toggleLabel.textContent = `${doneCount}/${subtasks.length} steps`;
+    } else {
+        toggleLabel.textContent = isOwner ? 'Add steps' : 'No steps yet';
+    }
+    toggleBtn.appendChild(toggleLabel);
+
+    toggleBtn.addEventListener('click', () => {
+        playClickSound();
+        if (expandedSubtaskTaskIds.has(task.id)) {
+            expandedSubtaskTaskIds.delete(task.id);
+        } else {
+            expandedSubtaskTaskIds.add(task.id);
+        }
+        renderGroupTasks();
+    });
+
+    section.appendChild(toggleBtn);
+
+    const body = document.createElement('div');
+    body.classList.add('subtasksBody');
+    if (!expanded) {
+        body.classList.add('hidden');
+    }
+
+    if (subtasks.length > 0) {
+        // Deliberately not a <ul>/<li>: those tag names collide with the
+        // ".tasks li" selectors used for the top-level task rows, since
+        // this list is nested inside one of those <li> elements. role="list"
+        // preserves the list semantics for assistive tech without the
+        // tag-name collision. (Same reasoning as script.js.)
+        const list = document.createElement('div');
+        list.classList.add('subtasksList');
+        list.setAttribute('role', 'list');
+        subtasks.forEach((subtask) => {
+            list.appendChild(createGroupSubtaskItem(groupId, task, subtask, isOwner));
+        });
+        body.appendChild(list);
+    }
+
+    if (isOwner) {
+        body.appendChild(createGroupSubtaskAddRow(groupId, task));
+    }
+
+    section.appendChild(body);
+    return section;
+}
+
+function createGroupSubtaskItem(groupId, task, subtask, isOwner) {
+    const item = document.createElement('div');
+    item.classList.add('subtaskItem');
+    item.setAttribute('role', 'listitem');
+    if (subtask.completed) {
+        item.classList.add('completed');
+    }
+
+    const checkBtn = document.createElement('button');
+    checkBtn.type = 'button';
+    checkBtn.classList.add('subtaskCheckBtn');
+    checkBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+    checkBtn.setAttribute('aria-label', subtask.completed ? 'Mark step incomplete' : 'Mark step complete');
+    if (!isOwner) {
+        checkBtn.disabled = true;
+    }
+
+    const text = document.createElement('span');
+    text.classList.add('subtaskText');
+    text.textContent = subtask.text;
+
+    item.appendChild(checkBtn);
+    item.appendChild(text);
+
+    if (isOwner) {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.classList.add('subtaskDeleteBtn');
+        deleteBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        deleteBtn.setAttribute('aria-label', 'Delete step');
+        deleteBtn.addEventListener('click', () => {
+            playClickSound();
+            deleteGroupSubtask(groupId, task, subtask.id).catch((error) => console.error('Failed to delete step:', error));
+        });
+        item.appendChild(deleteBtn);
+    }
+
+    checkBtn.addEventListener('click', () => {
+        if (!isOwner) {
+            return;
+        }
+        playClickSound();
+        toggleGroupSubtask(groupId, task, subtask.id).catch((error) => console.error('Failed to update step:', error));
+    });
+
+    return item;
+}
+
+function createGroupSubtaskAddRow(groupId, task) {
+    const addRow = document.createElement('div');
+    addRow.classList.add('subtaskAddRow');
+
+    const addInput = document.createElement('input');
+    addInput.type = 'text';
+    addInput.classList.add('subtaskInput');
+    addInput.placeholder = 'Add a step...';
+    addInput.setAttribute('aria-label', 'Add a step');
+    addInput.addEventListener('mousedown', (event) => event.stopPropagation());
+
+    const addBtnEl = document.createElement('button');
+    addBtnEl.type = 'button';
+    addBtnEl.classList.add('subtaskAddBtn');
+    addBtnEl.setAttribute('aria-label', 'Add step');
+    addBtnEl.innerHTML = '<i class="fa-solid fa-plus"></i>';
+
+    const submitNewSubtask = () => {
+        if (addInput.value.trim() === '') {
+            return;
+        }
+        playClickSound();
+        expandedSubtaskTaskIds.add(task.id);
+        addGroupSubtask(groupId, task, addInput.value).catch((error) => console.error('Failed to add step:', error));
+        addInput.value = '';
+    };
+
+    addBtnEl.addEventListener('click', submitNewSubtask);
+    addInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            submitNewSubtask();
+        }
+    });
+
+    addRow.appendChild(addInput);
+    addRow.appendChild(addBtnEl);
+    return addRow;
+}
+
+// ---------------------------------------------------------------------
+// Task editor - reuses the exact overlay classes from script.js's
+// initializeTaskEditor()/editTask() (.taskEditorOverlay/.taskEditorCard/
+// .editorActions etc.) so it looks identical to solo's, just with a
+// leaner field set (no task type/time estimate/schedule - not part of
+// group tasks yet).
+// ---------------------------------------------------------------------
+
+let taskEditorOverlay = null;
+let activeEditorGroupId = null;
+let activeEditorTaskId = null;
+
+function initializeGroupTaskEditor() {
+    if (taskEditorOverlay) {
+        return;
+    }
+
+    taskEditorOverlay = document.createElement('div');
+    taskEditorOverlay.className = 'taskEditorOverlay';
+    taskEditorOverlay.innerHTML = `
+        <div class="taskEditorCard" role="dialog" aria-modal="true" aria-label="Edit task">
+            <h2>Edit Task</h2>
+            <label>
+                Task
+                <input type="text" class="editorTextInput" maxlength="240">
+            </label>
+            <label>
+                Task Matrix
+                <select class="editorMatrixSelect">
+                    <option value="do">Task Matrix: Important &amp; Urgent</option>
+                    <option value="schedule">Task Matrix: Important</option>
+                    <option value="delegate">Task Matrix: Urgent</option>
+                    <option value="eliminate">Task Matrix: None</option>
+                </select>
+            </label>
+            <label>
+                Task Type
+                <div class="editorEffortRow">
+                    <select class="editorTaskTypeSelect">
+                        <option value="timeboxed">Estimate time</option>
+                        <option value="open">No time estimate</option>
+                    </select>
+                    <input type="number" class="editorDurationInput" min="5" step="5" placeholder="Minutes">
+                </div>
+            </label>
+            <label>
+                Difficulty
+                <select class="editorDifficultySelect">
+                    <option value="1">1 (Very Easy)</option>
+                    <option value="2">2 (Easy)</option>
+                    <option value="3" selected>3 (Medium)</option>
+                    <option value="4">4 (Hard)</option>
+                    <option value="5">5 (Very Hard)</option>
+                </select>
+            </label>
+            <label>
+                Deadline
+                <div class="editorDeadlineWrap">
+                    <input type="datetime-local" class="editorDeadlineInput">
+                    <button type="button" class="editorCalendarBtn" aria-label="Open edit deadline calendar">
+                        <i class="fa-regular fa-calendar"></i>
+                    </button>
+                </div>
+            </label>
+            <label>
+                Schedule (when you'll actually do it)
+                <div class="editorDeadlineWrap editorScheduleWrap">
+                    <input type="datetime-local" class="editorDeadlineInput editorScheduleInput">
+                    <button type="button" class="editorCalendarBtn editorScheduleCalendarBtn" aria-label="Open edit schedule calendar">
+                        <i class="fa-solid fa-clock"></i>
+                    </button>
+                </div>
+            </label>
+            <div class="editorActions">
+                <button type="button" class="editorCancelBtn">Cancel</button>
+                <button type="button" class="editorSaveBtn">Save</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(taskEditorOverlay);
+
+    const editorTextInput = taskEditorOverlay.querySelector('.editorTextInput');
+    const editorTaskTypeSelect = taskEditorOverlay.querySelector('.editorTaskTypeSelect');
+    const editorDurationInput = taskEditorOverlay.querySelector('.editorDurationInput');
+    const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput:not(.editorScheduleInput)');
+    const editorDeadlineWrap = taskEditorOverlay.querySelector('.editorDeadlineWrap:not(.editorScheduleWrap)');
+    const editorScheduleInput = taskEditorOverlay.querySelector('.editorScheduleInput');
+    const editorScheduleWrap = taskEditorOverlay.querySelector('.editorScheduleWrap');
+    const editorCancelBtn = taskEditorOverlay.querySelector('.editorCancelBtn');
+    const editorSaveBtn = taskEditorOverlay.querySelector('.editorSaveBtn');
+
+    sanitizeNumberInputAsPositiveInteger(editorDurationInput);
+
+    editorSaveBtn.addEventListener('click', saveGroupTaskEditorChanges);
+    editorCancelBtn.addEventListener('click', closeGroupTaskEditor);
+
+    editorTaskTypeSelect.addEventListener('change', () => {
+        updateEditorDurationInputVisibility();
+    });
+
+    editorTextInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            saveGroupTaskEditorChanges();
+        }
+    });
+
+    if (editorDeadlineWrap) {
+        editorDeadlineWrap.addEventListener('click', () => {
+            if (typeof editorDeadlineInput.showPicker === 'function') {
+                editorDeadlineInput.showPicker();
+            } else {
+                editorDeadlineInput.focus();
+            }
+        });
+    }
+
+    if (editorScheduleWrap && editorScheduleInput) {
+        editorScheduleWrap.addEventListener('click', () => {
+            if (typeof editorScheduleInput.showPicker === 'function') {
+                editorScheduleInput.showPicker();
+            } else {
+                editorScheduleInput.focus();
+            }
+        });
+    }
+
+    taskEditorOverlay.addEventListener('click', (event) => {
+        if (event.target === taskEditorOverlay) {
+            closeGroupTaskEditor();
+        }
+    });
+}
+
+function updateEditorDurationInputVisibility() {
+    if (!taskEditorOverlay) {
+        return;
+    }
+    const editorTaskTypeSelect = taskEditorOverlay.querySelector('.editorTaskTypeSelect');
+    const editorDurationInput = taskEditorOverlay.querySelector('.editorDurationInput');
+    if (!editorTaskTypeSelect || !editorDurationInput) {
+        return;
+    }
+    const isTimeboxed = getValidTaskType(editorTaskTypeSelect.value) === 'timeboxed';
+    editorDurationInput.classList.toggle('hidden', !isTimeboxed);
+    if (!isTimeboxed) {
+        editorDurationInput.value = '';
+    }
+}
+
+function openGroupTaskEditor(groupId, task) {
+    initializeGroupTaskEditor();
+
+    activeEditorGroupId = groupId;
+    activeEditorTaskId = task.id;
+
+    const editorTextInput = taskEditorOverlay.querySelector('.editorTextInput');
+    const editorMatrixSelect = taskEditorOverlay.querySelector('.editorMatrixSelect');
+    const editorTaskTypeSelect = taskEditorOverlay.querySelector('.editorTaskTypeSelect');
+    const editorDurationInput = taskEditorOverlay.querySelector('.editorDurationInput');
+    const editorDifficultySelect = taskEditorOverlay.querySelector('.editorDifficultySelect');
+    const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput:not(.editorScheduleInput)');
+    const editorScheduleInput = taskEditorOverlay.querySelector('.editorScheduleInput');
+
+    editorTextInput.value = task.text;
+    editorMatrixSelect.value = getValidMatrixValue(task.matrix);
+    editorTaskTypeSelect.value = getValidTaskType(task.taskType);
+    editorDurationInput.value = task.estimateMinutes ? String(task.estimateMinutes) : '';
+    editorDifficultySelect.value = String(getValidDifficultyLevel(task.difficulty));
+    editorDeadlineInput.value = task.dueAt && isValidDateValue(task.dueAt) ? toDatetimeLocalValue(task.dueAt) : '';
+    if (editorScheduleInput) {
+        editorScheduleInput.value = task.scheduledAt && isValidDateValue(task.scheduledAt) ? toDatetimeLocalValue(task.scheduledAt) : '';
+    }
+    updateEditorDurationInputVisibility();
+
+    taskEditorOverlay.classList.add('open');
+    editorTextInput.focus();
+    editorTextInput.select();
+}
+
+function closeGroupTaskEditor() {
+    if (!taskEditorOverlay) {
+        return;
+    }
+    taskEditorOverlay.classList.remove('open');
+    activeEditorGroupId = null;
+    activeEditorTaskId = null;
+}
+
+function saveGroupTaskEditorChanges() {
+    if (!taskEditorOverlay || !activeEditorGroupId || !activeEditorTaskId) {
+        return;
+    }
+
+    const editorTextInput = taskEditorOverlay.querySelector('.editorTextInput');
+    const editorMatrixSelect = taskEditorOverlay.querySelector('.editorMatrixSelect');
+    const editorTaskTypeSelect = taskEditorOverlay.querySelector('.editorTaskTypeSelect');
+    const editorDurationInput = taskEditorOverlay.querySelector('.editorDurationInput');
+    const editorDifficultySelect = taskEditorOverlay.querySelector('.editorDifficultySelect');
+    const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput:not(.editorScheduleInput)');
+    const editorScheduleInput = taskEditorOverlay.querySelector('.editorScheduleInput');
+
+    const updatedText = editorTextInput.value.trim();
+    if (updatedText === '') {
+        alert('Task text cannot be empty.');
+        editorTextInput.focus();
+        return;
+    }
+
+    const updatedTaskType = getValidTaskType(editorTaskTypeSelect.value);
+
+    const { doc, updateDoc } = fs();
+    updateDoc(doc(db(), 'groups', activeEditorGroupId, 'tasks', activeEditorTaskId), {
+        text: updatedText,
+        matrix: getValidMatrixValue(editorMatrixSelect.value),
+        taskType: updatedTaskType,
+        estimateMinutes: updatedTaskType === 'timeboxed' ? parseDurationMinutes(editorDurationInput.value) : null,
+        difficulty: getValidDifficultyLevel(editorDifficultySelect.value),
+        dueAt: editorDeadlineInput.value ? new Date(editorDeadlineInput.value).toISOString() : null,
+        scheduledAt: editorScheduleInput && editorScheduleInput.value ? new Date(editorScheduleInput.value).toISOString() : null,
+        updatedAt: new Date().toISOString()
+    }).catch((error) => console.error('Failed to save task edits:', error));
+
+    closeGroupTaskEditor();
+}
+
+// datetime-local inputs need "YYYY-MM-DDTHH:mm" in local time, not an ISO
+// string with a Z suffix - same conversion script.js uses.
+function toDatetimeLocalValue(isoValue) {
+    const date = new Date(isoValue);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+// Priority scoring for group tasks - same core idea as compareByPriority()/
+// getPriorityScore() in script.js (deadline pressure, matrix weight,
+// difficulty weight, subtask completion), minus the solo-only inputs group
+// tasks don't have (task type/time estimate, scheduledAt). Group tasks are
+// always auto-sorted by this - there's no manual toggle, since with several
+// people's tasks mixed together "what matters most right now" is the whole
+// point of the shared view.
+function getGroupPriorityScore(task) {
+    const status = getDeadlineStatus(task.dueAt);
+    const matrixRank = MATRIX_CONFIG[getValidMatrixValue(task.matrix)].rank;
+    const difficultyRank = DIFFICULTY_CONFIG[getValidDifficultyLevel(task.difficulty)].rank;
+
+    let score = 0;
+
+    if (status.isOverdue) {
+        score += 1000;
+        score += Math.min(320, Math.abs(status.timeUntilMs) / 3600000);
+    } else if (status.hasDeadline) {
+        const hoursLeft = Math.max(1, status.timeUntilMs / 3600000);
+        score += Math.max(0, 260 - Math.min(260, hoursLeft));
+        score += Math.min(180, (difficultyRank / hoursLeft) * 140);
+    }
+
+    score += matrixRank * 45;
+    score += difficultyRank * 20;
+
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    if (subtasks.length > 0) {
+        const doneFraction = subtasks.filter((subtask) => subtask.completed).length / subtasks.length;
+        if (status.isOverdue || status.hasDeadline) {
+            score += doneFraction * 80;
+        }
+        score += doneFraction * 10;
+    }
+
+    return score;
+}
+
+function compareGroupTasksByPriority(taskA, taskB) {
+    if (taskA.completed !== taskB.completed) {
+        return taskA.completed ? 1 : -1;
+    }
+
+    const scoreDiff = getGroupPriorityScore(taskB) - getGroupPriorityScore(taskA);
+    if (scoreDiff !== 0) {
+        return scoreDiff;
+    }
+
+    const statusA = getDeadlineStatus(taskA.dueAt);
+    const statusB = getDeadlineStatus(taskB.dueAt);
+    if (statusA.deadlineTimestamp !== statusB.deadlineTimestamp) {
+        return statusA.deadlineTimestamp - statusB.deadlineTimestamp;
+    }
+
+    return (taskA.createdAt || '').localeCompare(taskB.createdAt || '');
+}
+
+// Mirrors getVisibleTasks()'s view semantics in script.js, applied to
+// whichever slice of the group's tasks the member-scope tabs currently
+// select (everyone together, just you, or just one teammate).
+function getVisibleGroupTasks() {
+    const now = Date.now();
+    const scopedTasks = activeMemberScope === 'all'
+        ? groupTasks
+        : groupTasks.filter((task) => task.ownerId === activeMemberScope);
+
+    switch (activeView) {
+        case 'focus': {
+            const in24Hours = now + (24 * 60 * 60 * 1000);
+            return scopedTasks
+                .filter((task) => {
+                    if (task.completed) {
+                        return false;
+                    }
+                    const status = getDeadlineStatus(task.dueAt);
+                    const dueSoon = status.hasDeadline && status.deadlineTimestamp <= in24Hours;
+                    const urgentMatrix = getValidMatrixValue(task.matrix) === 'do';
+                    return dueSoon || urgentMatrix;
+                })
+                .sort(compareGroupTasksByPriority)
+                .slice(0, 5);
+        }
+        case 'overdue':
+            return scopedTasks.filter((task) => !task.completed && getDeadlineStatus(task.dueAt).isOverdue);
+        case 'today':
+            return scopedTasks.filter((task) => {
+                if (task.completed || !isValidDateValue(task.dueAt)) {
+                    return false;
+                }
+                const dueDate = new Date(task.dueAt);
+                const today = new Date();
+                return dueDate.getFullYear() === today.getFullYear()
+                    && dueDate.getMonth() === today.getMonth()
+                    && dueDate.getDate() === today.getDate();
+            });
+        case 'week': {
+            const weekAhead = now + (7 * 24 * 60 * 60 * 1000);
+            return scopedTasks.filter((task) => {
+                if (task.completed || !isValidDateValue(task.dueAt)) {
+                    return false;
+                }
+                const dueTimestamp = new Date(task.dueAt).getTime();
+                return dueTimestamp >= now && dueTimestamp <= weekAhead;
+            });
+        }
+        case 'completed':
+            return scopedTasks.filter((task) => task.completed);
+        case 'all':
+        default:
+            return scopedTasks;
+    }
+}
+
+function setActiveView(view) {
+    activeView = view;
+    taskViewBtns.forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.view === view);
+    });
+    renderGroupTasks();
+}
+
+taskViewBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+        playClickSound();
+        setActiveView(btn.dataset.view);
+    });
+});
+
+// "Whose tasks" tabs: Everyone (the combined view), Me, then one tab per
+// teammate - separate from the deadline-based views above, and also
+// settable by clicking a roster card in the side column (both control the
+// same activeMemberScope state).
+function setActiveMemberScope(scope) {
+    activeMemberScope = scope;
+    const group = getSelectedGroup();
+    if (group) {
+        renderGroupMemberScopeTabs(group);
+        renderMemberRoster(group);
+        renderGroupHistory(group);
+    }
+    renderGroupTasks();
+}
+
+// "Recently finished" - a lighter, non-calendar take on solo's activity
+// heatmap: the last several completions across the group (or just the
+// selected member-scope), each showing who finished it and when, so it
+// doubles as both a per-member history and an overall group history.
+function renderGroupHistory(group) {
+    if (!groupHistoryList) {
+        return;
+    }
+    groupHistoryList.innerHTML = '';
+
+    const scopedTasks = activeMemberScope === 'all'
+        ? groupTasks
+        : groupTasks.filter((task) => task.ownerId === activeMemberScope);
+
+    const finished = scopedTasks
+        .filter((task) => task.completed && task.completedAt)
+        .sort((a, b) => b.completedAt.localeCompare(a.completedAt))
+        .slice(0, 12);
+
+    if (finished.length === 0) {
+        const empty = document.createElement('p');
+        empty.classList.add('groupHistoryEmpty');
+        empty.textContent = 'Nothing finished here yet.';
+        groupHistoryList.appendChild(empty);
+        return;
+    }
+
+    const memberIds = group.memberIds || [];
+    const memberNames = group.memberNames || [];
+
+    finished.forEach((task) => {
+        const item = document.createElement('div');
+        item.classList.add('groupHistoryItem');
+
+        const text = document.createElement('p');
+        text.classList.add('groupHistoryItemText');
+        text.textContent = task.text;
+        item.appendChild(text);
+
+        const memberIndex = memberIds.indexOf(task.ownerId);
+        const ownerName = task.ownerId === currentUser?.uid
+            ? 'You'
+            : resolveMemberName(task.ownerId, memberIndex >= 0 ? memberNames[memberIndex] : null, groupTasks);
+
+        const meta = document.createElement('p');
+        meta.classList.add('groupHistoryItemMeta');
+        meta.textContent = `${ownerName} - ${formatFriendlyDateTime(new Date(task.completedAt))}`;
+        item.appendChild(meta);
+
+        groupHistoryList.appendChild(item);
+    });
+}
+
+// Pending suggestions a teammate made for YOU specifically (see the
+// "Suggest a task" button on each roster card) - accept to create the real
+// task in your own list, or dismiss it.
+function renderSuggestionsForYou(groupId) {
+    if (!suggestionsForYouPanel || !currentUser) {
+        return;
+    }
+
+    const pendingForMe = groupSuggestions.filter((suggestion) => (
+        suggestion.forUserId === currentUser.uid && suggestion.status === 'pending'
+    ));
+
+    suggestionsForYouPanel.innerHTML = '';
+    suggestionsForYouPanel.classList.toggle('hidden', pendingForMe.length === 0);
+
+    pendingForMe.forEach((suggestion) => {
+        const row = document.createElement('div');
+        row.classList.add('suggestionRow');
+
+        const text = document.createElement('p');
+        text.classList.add('suggestionRowText');
+        text.innerHTML = `<span class="suggestionRowFrom">${suggestion.fromUserName || 'A teammate'} suggests:</span> ${suggestion.text}`;
+        row.appendChild(text);
+
+        const badges = document.createElement('div');
+        badges.classList.add('suggestionRowBadges');
+
+        const matrixValue = getValidMatrixValue(suggestion.matrix);
+        const matrixBadge = document.createElement('span');
+        matrixBadge.classList.add('matrixBadge', MATRIX_CONFIG[matrixValue].className);
+        matrixBadge.textContent = MATRIX_CONFIG[matrixValue].label;
+        badges.appendChild(matrixBadge);
+
+        const difficultyLevel = getValidDifficultyLevel(suggestion.difficulty);
+        const difficultyBadge = document.createElement('span');
+        difficultyBadge.classList.add('difficultyBadge', `difficulty-${difficultyLevel}`);
+        difficultyBadge.textContent = getDifficultyLabel(difficultyLevel);
+        badges.appendChild(difficultyBadge);
+
+        if (suggestion.dueAt) {
+            const deadlineBadge = document.createElement('span');
+            deadlineBadge.classList.add('deadlineBadge', 'deadline-normal');
+            deadlineBadge.textContent = getDeadlineStatus(suggestion.dueAt).deadlineLabel;
+            badges.appendChild(deadlineBadge);
+        }
+
+        row.appendChild(badges);
+
+        const actions = document.createElement('div');
+        actions.classList.add('suggestionRowActions');
+
+        const acceptBtn = document.createElement('button');
+        acceptBtn.type = 'button';
+        acceptBtn.classList.add('suggestionAcceptBtn');
+        acceptBtn.textContent = 'Add it';
+        acceptBtn.addEventListener('click', () => {
+            playClickSound();
+            acceptSuggestion(groupId, suggestion, currentUser).catch((error) => console.error('Failed to accept suggestion:', error));
+        });
+        actions.appendChild(acceptBtn);
+
+        const dismissBtn = document.createElement('button');
+        dismissBtn.type = 'button';
+        dismissBtn.classList.add('suggestionDismissBtn');
+        dismissBtn.textContent = 'Dismiss';
+        dismissBtn.addEventListener('click', () => {
+            playClickSound();
+            dismissSuggestion(groupId, suggestion.id).catch((error) => console.error('Failed to dismiss suggestion:', error));
+        });
+        actions.appendChild(dismissBtn);
+
+        row.appendChild(actions);
+        suggestionsForYouPanel.appendChild(row);
+    });
+}
+
+// "Suggest a task" modal - reuses the exact .taskEditorOverlay/.taskEditorCard
+// styling from the task editor (see initializeGroupTaskEditor) so it looks
+// consistent, but is its own overlay since the fields and purpose differ
+// (proposing a brand new task for someone else, not editing an existing one).
+let suggestOverlay = null;
+let suggestGroupId = null;
+let suggestForUserId = null;
+
+function initializeSuggestModal() {
+    if (suggestOverlay) {
+        return;
+    }
+
+    suggestOverlay = document.createElement('div');
+    suggestOverlay.className = 'taskEditorOverlay suggestTaskOverlay';
+    suggestOverlay.innerHTML = `
+        <div class="taskEditorCard" role="dialog" aria-modal="true" aria-label="Suggest a task">
+            <h2>Suggest a Task</h2>
+            <p class="suggestForLabel"></p>
+            <label>
+                Task
+                <input type="text" class="editorTextInput" maxlength="240">
+            </label>
+            <label>
+                Task Matrix
+                <select class="editorMatrixSelect">
+                    <option value="do">Task Matrix: Important &amp; Urgent</option>
+                    <option value="schedule" selected>Task Matrix: Important</option>
+                    <option value="delegate">Task Matrix: Urgent</option>
+                    <option value="eliminate">Task Matrix: None</option>
+                </select>
+            </label>
+            <label>
+                Difficulty
+                <select class="editorDifficultySelect">
+                    <option value="1">1 (Very Easy)</option>
+                    <option value="2">2 (Easy)</option>
+                    <option value="3" selected>3 (Medium)</option>
+                    <option value="4">4 (Hard)</option>
+                    <option value="5">5 (Very Hard)</option>
+                </select>
+            </label>
+            <label>
+                Deadline (optional)
+                <div class="editorDeadlineWrap">
+                    <input type="datetime-local" class="editorDeadlineInput">
+                    <button type="button" class="editorCalendarBtn" aria-label="Open deadline calendar">
+                        <i class="fa-regular fa-calendar"></i>
+                    </button>
+                </div>
+            </label>
+            <div class="editorActions">
+                <button type="button" class="editorCancelBtn">Cancel</button>
+                <button type="button" class="editorSaveBtn">Send suggestion</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(suggestOverlay);
+
+    const suggestTextInput = suggestOverlay.querySelector('.editorTextInput');
+    const suggestDeadlineInput = suggestOverlay.querySelector('.editorDeadlineInput');
+    const deadlineWrap = suggestOverlay.querySelector('.editorDeadlineWrap');
+    const cancelBtn = suggestOverlay.querySelector('.editorCancelBtn');
+    const sendBtn = suggestOverlay.querySelector('.editorSaveBtn');
+
+    sendBtn.addEventListener('click', submitSuggestTaskModal);
+    cancelBtn.addEventListener('click', closeSuggestModal);
+
+    suggestTextInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            submitSuggestTaskModal();
+        }
+    });
+
+    if (deadlineWrap) {
+        deadlineWrap.addEventListener('click', () => {
+            if (typeof suggestDeadlineInput.showPicker === 'function') {
+                suggestDeadlineInput.showPicker();
+            } else {
+                suggestDeadlineInput.focus();
+            }
+        });
+    }
+
+    suggestOverlay.addEventListener('click', (event) => {
+        if (event.target === suggestOverlay) {
+            closeSuggestModal();
+        }
+    });
+}
+
+function openSuggestTaskModal(groupId, forUserId, forUserName) {
+    if (!currentUser) {
+        return;
+    }
+    initializeSuggestModal();
+
+    suggestGroupId = groupId;
+    suggestForUserId = forUserId;
+
+    suggestOverlay.querySelector('.suggestForLabel').textContent = `For ${forUserName}`;
+    suggestOverlay.querySelector('.editorTextInput').value = '';
+    suggestOverlay.querySelector('.editorMatrixSelect').value = 'schedule';
+    suggestOverlay.querySelector('.editorDifficultySelect').value = '3';
+    suggestOverlay.querySelector('.editorDeadlineInput').value = '';
+
+    suggestOverlay.classList.add('open');
+    suggestOverlay.querySelector('.editorTextInput').focus();
+}
+
+function closeSuggestModal() {
+    if (!suggestOverlay) {
+        return;
+    }
+    suggestOverlay.classList.remove('open');
+    suggestGroupId = null;
+    suggestForUserId = null;
+}
+
+function submitSuggestTaskModal() {
+    if (!suggestOverlay || !suggestGroupId || !suggestForUserId || !currentUser) {
+        return;
+    }
+
+    const text = suggestOverlay.querySelector('.editorTextInput').value;
+    if (!text.trim()) {
+        alert('Suggest something first.');
+        return;
+    }
+    const matrix = suggestOverlay.querySelector('.editorMatrixSelect').value;
+    const difficulty = suggestOverlay.querySelector('.editorDifficultySelect').value;
+    const deadlineValue = suggestOverlay.querySelector('.editorDeadlineInput').value;
+    const dueAt = deadlineValue ? new Date(deadlineValue).toISOString() : null;
+
+    suggestTaskForMember(suggestGroupId, currentUser, suggestForUserId, { text, matrix, difficulty, dueAt })
+        .catch((error) => {
+            console.error('Failed to send suggestion:', error);
+            alert('Could not send that suggestion.');
+        });
+
+    closeSuggestModal();
+}
+
+function renderGroupMemberScopeTabs(group) {
+    if (!groupMemberScopeTabs) {
+        return;
+    }
+    groupMemberScopeTabs.innerHTML = '';
+
+    const memberIds = group.memberIds || [];
+    const memberNames = group.memberNames || [];
+
+    const makeTab = (scope, label) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.classList.add('taskViewBtn', 'groupScopeTabBtn');
+        if (activeMemberScope === scope) {
+            btn.classList.add('active');
+        }
+        btn.textContent = label;
+        btn.addEventListener('click', () => {
+            playClickSound();
+            setActiveMemberScope(scope);
+        });
+        groupMemberScopeTabs.appendChild(btn);
+    };
+
+    makeTab('all', 'Everyone');
+
+    memberIds.forEach((memberId, index) => {
+        const isYou = memberId === currentUser?.uid;
+        const label = isYou ? 'Me' : resolveMemberName(memberId, memberNames[index], groupTasks);
+        makeTab(memberId, label);
+    });
+}
+
+function renderGroupTasks() {
+    if (!groupTasksList) {
+        return;
+    }
+
+    const group = getSelectedGroup();
+    groupTasksList.innerHTML = '';
+
+    if (!group || groupTasks.length === 0) {
+        const emptyMsg = document.createElement('li');
+        emptyMsg.classList.add('emptyTasksMsg');
+        emptyMsg.textContent = 'No tasks yet. Add one above to get the team started.';
+        groupTasksList.appendChild(emptyMsg);
+        return;
+    }
+
+    const visible = getVisibleGroupTasks();
+    if (visible.length === 0) {
+        const emptyMsg = document.createElement('li');
+        emptyMsg.classList.add('emptyTasksMsg');
+        emptyMsg.textContent = 'Nothing in this view right now.';
+        groupTasksList.appendChild(emptyMsg);
+        return;
+    }
+
+    const sorted = [...visible].sort(compareGroupTasksByPriority);
+
+    sorted.forEach((task) => {
+        const isOwner = currentUser && task.ownerId === currentUser.uid;
+        groupTasksList.appendChild(createGroupTaskItem(group.id, task, isOwner));
+    });
+}
+
+// ---------------------------------------------------------------------
+// Member roster
+// ---------------------------------------------------------------------
+
+function renderMemberRoster(group) {
+    if (!memberRoster) {
+        return;
+    }
+    memberRoster.innerHTML = '';
+
+    const memberIds = group.memberIds || [];
+    const memberNames = group.memberNames || [];
+
+    const cards = memberIds.map((memberId, index) => {
+        const memberTasks = groupTasks.filter((task) => task.ownerId === memberId);
+        const doneCount = memberTasks.filter((task) => task.completed).length;
+        const total = memberTasks.length;
+        const percent = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+
+        const activeTasks = memberTasks.filter((task) => !task.completed);
+        const focusTask = activeTasks.length > 0
+            ? [...activeTasks].sort(compareGroupTasksByPriority)[0]
+            : null;
+
+        return {
+            memberId,
+            name: resolveMemberName(memberId, memberNames[index], groupTasks),
+            total,
+            doneCount,
+            percent,
+            focusText: focusTask ? focusTask.text : null
+        };
+    });
+
+    cards.sort((a, b) => b.percent - a.percent);
+
+    cards.forEach((card) => {
+        // A <div> (not <button>) since it needs to hold a real nested
+        // "Suggest a task" button for teammates - buttons can't nest.
+        const memberCard = document.createElement('div');
+        memberCard.setAttribute('role', 'button');
+        memberCard.tabIndex = 0;
+        memberCard.classList.add('memberCard');
+        if (card.memberId === currentUser?.uid) {
+            memberCard.classList.add('isYou');
+        }
+        if (activeMemberScope === card.memberId) {
+            memberCard.classList.add('active');
+        }
+        memberCard.title = `Show only ${card.memberId === currentUser?.uid ? 'your' : card.name + '’s'} tasks`;
+        memberCard.addEventListener('click', () => {
+            playClickSound();
+            setActiveMemberScope(card.memberId);
+        });
+        memberCard.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                playClickSound();
+                setActiveMemberScope(card.memberId);
+            }
+        });
+
+        const name = document.createElement('p');
+        name.classList.add('memberCardName');
+        name.textContent = card.memberId === currentUser?.uid ? `${card.name} (You)` : card.name;
+        memberCard.appendChild(name);
+
+        const progressText = document.createElement('p');
+        progressText.classList.add('memberCardProgress');
+        progressText.textContent = card.total > 0 ? `${card.doneCount}/${card.total} done` : 'No tasks yet';
+        memberCard.appendChild(progressText);
+
+        const progressBarOuter = document.createElement('div');
+        progressBarOuter.classList.add('memberProgressBarOuter');
+        const progressBarInner = document.createElement('div');
+        progressBarInner.classList.add('memberProgressBarInner');
+        progressBarInner.style.width = `${card.percent}%`;
+        progressBarOuter.appendChild(progressBarInner);
+        memberCard.appendChild(progressBarOuter);
+
+        if (card.focusText) {
+            const focusLine = document.createElement('p');
+            focusLine.classList.add('memberCardFocus');
+            const focusLabel = document.createElement('span');
+            focusLabel.classList.add('memberCardFocusLabel');
+            focusLabel.textContent = 'Focus:';
+            focusLine.appendChild(focusLabel);
+            focusLine.appendChild(document.createTextNode(` ${card.focusText}`));
+            memberCard.appendChild(focusLine);
+        }
+
+        if (card.memberId !== currentUser?.uid) {
+            const suggestBtn = document.createElement('button');
+            suggestBtn.type = 'button';
+            suggestBtn.classList.add('memberCardSuggestBtn');
+            suggestBtn.innerHTML = '<i class="fa-solid fa-lightbulb"></i> Suggest a task';
+            suggestBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                playClickSound();
+                openSuggestTaskModal(group.id, card.memberId, card.name);
+            });
+            memberCard.appendChild(suggestBtn);
+        }
+
+        memberRoster.appendChild(memberCard);
+    });
+}
+
+// ---------------------------------------------------------------------
+// Group switcher
+// ---------------------------------------------------------------------
+
+function renderGroupSwitcher() {
+    if (!groupSwitcherRow) {
+        return;
+    }
+    groupSwitcherRow.innerHTML = '';
+
+    (groups || []).forEach((group) => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.classList.add('groupSwitcherCard');
+        if (!showSetup && group.id === getSelectedGroup()?.id) {
+            card.classList.add('active');
+        }
+        card.textContent = group.name;
+        card.addEventListener('click', () => {
+            playClickSound();
+            selectGroup(group.id);
+        });
+        groupSwitcherRow.appendChild(card);
+    });
+
+    const newGroupCard = document.createElement('button');
+    newGroupCard.type = 'button';
+    newGroupCard.classList.add('groupSwitcherCard', 'groupSwitcherNewCard');
+    if (showSetup) {
+        newGroupCard.classList.add('active');
+    }
+    newGroupCard.innerHTML = '<i class="fa-solid fa-plus"></i> New group';
+    newGroupCard.addEventListener('click', () => {
+        playClickSound();
+        showSetup = true;
+        renderApp();
+    });
+    groupSwitcherRow.appendChild(newGroupCard);
+}
+
+// ---------------------------------------------------------------------
+// Top-level render orchestration
+// ---------------------------------------------------------------------
+
+function renderApp() {
+    if (!currentUser) {
+        groupStatusMsg?.classList.add('hidden');
+        groupPageWrap?.classList.add('hidden');
+        return;
+    }
+
+    if (groups === undefined) {
+        if (groupStatusMsg) {
+            groupStatusMsg.textContent = 'Loading your groups...';
+            groupStatusMsg.classList.remove('hidden');
+        }
+        groupPageWrap?.classList.add('hidden');
+        return;
+    }
+
+    groupStatusMsg?.classList.add('hidden');
+    groupPageWrap?.classList.remove('hidden');
+
+    renderGroupSwitcher();
+
+    const shouldShowSetup = showSetup || groups.length === 0;
+    groupSetupSection?.classList.toggle('hidden', !shouldShowSetup);
+    groupSwitcherRow?.classList.toggle('hidden', groups.length === 0);
+    groupBrowseAllLink?.classList.toggle('hidden', groups.length === 0);
+
+    const group = getSelectedGroup();
+    const shouldShowDashboard = !shouldShowSetup && Boolean(group);
+    groupDashboard?.classList.toggle('hidden', !shouldShowDashboard);
+
+    // The big page title shows the selected group's name once you're
+    // looking at one, and falls back to "Group" anywhere else (switcher,
+    // create/join screen) so it's never blank.
+    if (pageTitleEl) {
+        pageTitleEl.textContent = (shouldShowDashboard && group) ? group.name : 'Group';
+    }
+
+    if (shouldShowDashboard && group) {
+        if (groupInviteCode) {
+            groupInviteCode.textContent = group.inviteCode || group.id;
+        }
+        const isOwner = group.ownerId === currentUser.uid;
+        groupLeaveBtn?.classList.toggle('hidden', isOwner);
+        groupDeleteBtn?.classList.toggle('hidden', !isOwner);
+        groupRenameBtn?.classList.toggle('hidden', !isOwner);
+        renderGroupMemberScopeTabs(group);
+        renderMemberRoster(group);
+        renderGroupHistory(group);
+        renderSuggestionsForYou(group.id);
+        renderGroupTasks();
+        updateGroupMotivator();
+        updateGroupUrgencyAlert();
+        maybeAutoStartGroupTour();
+    }
+}
+
+// Your own progress in this group specifically - pairs with the personal
+// reward celebration above (both scoped to "you", not the whole team; the
+// roster below already shows everyone's comparative progress).
+function updateGroupMotivator() {
+    if (!currentUser || !motivatorText || !progressBar || !taskAmountText) {
+        return;
+    }
+
+    const myTasksHere = groupTasks.filter((task) => task.ownerId === currentUser.uid);
+    const totalTasks = myTasksHere.length;
+    const completedTasks = myTasksHere.filter((task) => task.completed).length;
+
+    taskAmountText.textContent = `${completedTasks}/${totalTasks}`;
+
+    const progressPercent = totalTasks === 0 ? 0 : (completedTasks / totalTasks) * 100;
+    progressBar.style.width = `${progressPercent}%`;
+
+    if (progressPercent === 100 && totalTasks > 0) {
+        motivatorText.textContent = 'Great job!';
+    } else if (progressPercent >= 50) {
+        motivatorText.textContent = 'Doing well!';
+    } else if (progressPercent > 0) {
+        motivatorText.textContent = 'Keep it up!';
+    } else {
+        motivatorText.textContent = "Let's start!";
+    }
+}
+
+// Team-wide version of solo's updateUrgencyAlert() - scoped to every
+// member's tasks in the group (not just yours), since the point is
+// visibility into the whole team's deadline pressure, not just your own.
+function updateGroupUrgencyAlert() {
+    if (!groupUrgencyAlert || !groupUrgencyAlertText) {
+        return;
+    }
+
+    const activeTasks = groupTasks.filter((task) => !task.completed);
+    const rankedByUrgency = activeTasks
+        .map((task) => ({ task, status: getDeadlineStatus(task.dueAt) }))
+        .filter((entry) => entry.status.hasDeadline)
+        .sort((entryA, entryB) => entryA.status.deadlineTimestamp - entryB.status.deadlineTimestamp);
+    const overdueCount = rankedByUrgency.filter((entry) => entry.status.urgencyLevel === 'overdue').length;
+
+    if (overdueViewButton && overdueCountBadge) {
+        overdueCountBadge.textContent = String(overdueCount);
+        overdueCountBadge.classList.toggle('visible', overdueCount > 0);
+        overdueViewButton.classList.toggle('has-overdue', overdueCount > 0);
+    }
+
+    groupUrgencyAlert.classList.remove('hidden', 'urgency-soon', 'urgency-critical', 'urgency-overdue');
+
+    if (rankedByUrgency.length === 0 || rankedByUrgency[0].status.urgencyLevel === 'normal') {
+        groupUrgencyAlert.classList.add('hidden');
+        return;
+    }
+
+    const top = rankedByUrgency[0];
+    groupUrgencyAlert.classList.add(`urgency-${top.status.urgencyLevel}`);
+
+    if (top.status.urgencyLevel === 'overdue') {
+        groupUrgencyAlertText.textContent = overdueCount === 1
+            ? '1 task across the group is overdue.'
+            : `${overdueCount} tasks across the group are overdue.`;
+    } else {
+        const ownerLabel = top.task.ownerId === currentUser?.uid ? 'you' : (top.task.ownerName || 'a teammate');
+        const soonLabel = top.status.urgencyLevel === 'critical' ? 'Due very soon' : 'Due soon';
+        groupUrgencyAlertText.textContent = `${soonLabel}: ${top.task.text} (${ownerLabel}, ${top.status.countdownLabel}).`;
+    }
+}
+
+// ---------------------------------------------------------------------
+// Group create/join forms
+// ---------------------------------------------------------------------
+
+if (groupCreateForm) {
+    groupCreateForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        groupCreateError?.classList.add('hidden');
+
+        playClickSound();
+        try {
+            const groupId = await createGroup(groupCreateNameInput.value, currentUser);
+            groupCreateNameInput.value = '';
+            selectGroup(groupId);
+        } catch (error) {
+            if (groupCreateError) {
+                groupCreateError.textContent = error.message || 'Could not create the group.';
+                groupCreateError.classList.remove('hidden');
+            }
+        }
+    });
+}
+
+if (groupJoinForm) {
+    groupJoinForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        groupJoinError?.classList.add('hidden');
+
+        playClickSound();
+        try {
+            const groupId = await joinGroup(groupJoinCodeInput.value, currentUser);
+            groupJoinCodeInput.value = '';
+            selectGroup(groupId);
+        } catch (error) {
+            if (groupJoinError) {
+                groupJoinError.textContent = 'Could not join - check the invite code and try again.';
+                groupJoinError.classList.remove('hidden');
+            }
+        }
+    });
+}
+
+if (groupCopyInviteBtn) {
+    groupCopyInviteBtn.addEventListener('click', async () => {
+        playClickSound();
+        const group = getSelectedGroup();
+        if (!group) {
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(group.inviteCode || group.id);
+            groupCopyInviteBtn.title = 'Copied!';
+        } catch {
+            // Clipboard API can be unavailable (permissions, insecure
+            // context) - the code is still shown on screen to copy by hand.
+        }
+    });
+}
+
+if (groupRenameBtn) {
+    groupRenameBtn.addEventListener('click', async () => {
+        playClickSound();
+        const group = getSelectedGroup();
+        if (!group || !currentUser) {
+            return;
+        }
+        const newName = prompt('Rename this group:', group.name);
+        if (!newName || !newName.trim() || newName.trim() === group.name) {
+            return;
+        }
+        try {
+            await renameGroup(group.id, newName);
+        } catch (error) {
+            console.error('Failed to rename group:', error);
+            alert('Could not rename the group.');
+        }
+    });
+}
+
+if (groupLeaveBtn) {
+    groupLeaveBtn.addEventListener('click', async () => {
+        playClickSound();
+        const group = getSelectedGroup();
+        if (!group || !currentUser) {
+            return;
+        }
+        if (!confirm(`Leave "${group.name}"? You'll need the invite code to rejoin.`)) {
+            return;
+        }
+        try {
+            await leaveGroup(group.id, currentUser);
+            selectedGroupId = null;
+            activeMemberScope = 'all';
+            renderApp();
+        } catch (error) {
+            console.error('Failed to leave group:', error);
+            alert(error.message || 'Could not leave the group.');
+        }
+    });
+}
+
+if (groupDeleteBtn) {
+    groupDeleteBtn.addEventListener('click', async () => {
+        playClickSound();
+        const group = getSelectedGroup();
+        if (!group || !currentUser) {
+            return;
+        }
+        if (!confirm(`Delete "${group.name}" for everyone? This removes all of its tasks too. This can't be undone.`)) {
+            return;
+        }
+        try {
+            await deleteGroupCompletely(group.id, currentUser);
+            selectedGroupId = null;
+            activeMemberScope = 'all';
+            renderApp();
+        } catch (error) {
+            console.error('Failed to delete group:', error);
+            alert(error.message || 'Could not delete the group.');
+        }
+    });
+}
+
+// ---------------------------------------------------------------------
+// Add-task form (mirrors the solo app's .inputContainer/.taskDetailsPanel)
+// ---------------------------------------------------------------------
+
+if (detailsToggleBtn && taskDetailsPanel) {
+    detailsToggleBtn.addEventListener('click', () => {
+        playClickSound();
+        const isOpen = !taskDetailsPanel.classList.contains('open');
+        taskDetailsPanel.classList.toggle('open', isOpen);
+        detailsToggleBtn.setAttribute('aria-expanded', String(isOpen));
+    });
+}
+
+// Clicking anywhere in the deadline/schedule row opens its date picker, not
+// just the small icon (native datetime-local inputs otherwise only respond
+// to clicks on their own tiny icon).
+if (deadlineContainer && deadlineInput) {
+    deadlineContainer.addEventListener('click', () => {
+        playClickSound();
+        taskDetailsPanel?.classList.add('open');
+        if (typeof deadlineInput.showPicker === 'function') {
+            deadlineInput.showPicker();
+        } else {
+            deadlineInput.focus();
+        }
+    });
+}
+
+if (scheduleContainer && scheduleInput) {
+    scheduleContainer.addEventListener('click', () => {
+        playClickSound();
+        taskDetailsPanel?.classList.add('open');
+        if (typeof scheduleInput.showPicker === 'function') {
+            scheduleInput.showPicker();
+        } else {
+            scheduleInput.focus();
+        }
+    });
+}
+
+// Quick-add: typing a recognizable date/time phrase ("tomorrow 3pm", "in 2
+// hours", "friday") sets the deadline automatically on submit, same fixed
+// vocabulary as solo's quick-add (parseQuickAddPhrase, from task-shared.js).
+// An explicit deadline already set in the picker always wins.
+const quickAddHint = document.querySelector('.quickAddHint');
+
+function updateQuickAddHint() {
+    if (!quickAddHint || !taskInput) {
+        return;
+    }
+    if (deadlineInput.value.trim() !== '') {
+        quickAddHint.classList.add('hidden');
+        return;
+    }
+    const parsed = parseQuickAddPhrase(taskInput.value);
+    if (!parsed.dueAt) {
+        quickAddHint.classList.add('hidden');
+        return;
+    }
+    quickAddHint.textContent = `📅 ${formatFriendlyDateTime(parsed.dueAt)} detected. Press Enter to add.`;
+    quickAddHint.classList.remove('hidden');
+}
+
+taskInput?.addEventListener('input', updateQuickAddHint);
+deadlineInput?.addEventListener('input', updateQuickAddHint);
+
+// Time-estimate pills (mirrors solo's typePill/durationChip wiring exactly).
+function getSelectedTaskType() {
+    const activePill = typePills.find((pill) => pill.classList.contains('active'));
+    return getValidTaskType(activePill?.dataset.type || 'open');
+}
+
+function setTaskTypePillState(taskType) {
+    const normalizedTaskType = getValidTaskType(taskType);
+    typePills.forEach((pill) => {
+        pill.classList.toggle('active', pill.dataset.type === normalizedTaskType);
+    });
+}
+
+function syncDurationChipState() {
+    const selectedMinutes = String(parseDurationMinutes(durationInput?.value) || '');
+    durationChips.forEach((chip) => {
+        chip.classList.toggle('active', chip.dataset.minutes === selectedMinutes);
+    });
+}
+
+function updateDurationInputVisibility() {
+    const isTimeboxed = getSelectedTaskType() === 'timeboxed';
+    durationInput?.classList.toggle('hidden', !isTimeboxed);
+    durationWrap?.classList.toggle('hidden', !isTimeboxed);
+    if (!isTimeboxed && durationInput) {
+        durationInput.value = '';
+    }
+    syncDurationChipState();
+}
+
+typePills.forEach((pill) => {
+    pill.addEventListener('click', () => {
+        playClickSound();
+        setTaskTypePillState(pill.dataset.type || 'open');
+        updateDurationInputVisibility();
+    });
+});
+
+durationChips.forEach((chip) => {
+    chip.addEventListener('click', () => {
+        playClickSound();
+        setTaskTypePillState('timeboxed');
+        updateDurationInputVisibility();
+        durationInput.value = chip.dataset.minutes || '';
+        syncDurationChipState();
+    });
+});
+
+matrixSelect?.addEventListener('change', playClickSound);
+difficultySelect?.addEventListener('change', playClickSound);
+
+durationInput?.addEventListener('input', syncDurationChipState);
+sanitizeNumberInputAsPositiveInteger(durationInput);
+
+function addTaskFromInputs() {
+    playClickSound();
+    const group = getSelectedGroup();
+    if (!group || !currentUser || !taskInput || taskInput.value.trim() === '') {
+        return;
+    }
+
+    // An explicit manual deadline always wins over a quick-add guess.
+    let taskText = taskInput.value;
+    let dueAt = deadlineInput.value ? new Date(deadlineInput.value).toISOString() : null;
+
+    if (!dueAt) {
+        const parsed = parseQuickAddPhrase(taskInput.value);
+        if (parsed.dueAt) {
+            taskText = parsed.cleanedText;
+            dueAt = parsed.dueAt.toISOString();
+        }
+    }
+
+    const scheduledAt = scheduleInput?.value ? new Date(scheduleInput.value).toISOString() : null;
+    const taskType = getSelectedTaskType();
+    const estimateMinutes = taskType === 'timeboxed' ? parseDurationMinutes(durationInput?.value) : null;
+
+    addGroupTask(group.id, currentUser, {
+        text: taskText,
+        matrix: matrixSelect?.value,
+        difficulty: difficultySelect?.value,
+        dueAt,
+        scheduledAt,
+        taskType,
+        estimateMinutes
+    }).catch((error) => console.error('Failed to add task:', error));
+
+    taskInput.value = '';
+    if (deadlineInput) {
+        deadlineInput.value = '';
+    }
+    if (scheduleInput) {
+        scheduleInput.value = '';
+    }
+    setTaskTypePillState('open');
+    updateDurationInputVisibility();
+    quickAddHint?.classList.add('hidden');
+    taskInput.focus();
+}
+
+addBtn?.addEventListener('click', addTaskFromInputs);
+taskInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        addTaskFromInputs();
+    }
+});
+
+// ---------------------------------------------------------------------
+// Auth wiring
+// ---------------------------------------------------------------------
+
+function resetGroupState() {
+    if (unsubscribeGroups) {
+        unsubscribeGroups();
+        unsubscribeGroups = null;
+    }
+    if (unsubscribeTasks) {
+        unsubscribeTasks();
+        unsubscribeTasks = null;
+    }
+    if (unsubscribeSuggestions) {
+        unsubscribeSuggestions();
+        unsubscribeSuggestions = null;
+    }
+    currentUser = null;
+    groups = undefined;
+    groupTasks = [];
+    groupSuggestions = [];
+    showSetup = false;
+    expandedSubtaskTaskIds = new Set();
+    clearExpandedCommentSubscriptions();
+    profileDisplayName = null;
+    if (yourNameInput) {
+        yourNameInput.value = '';
+    }
+    // So a different account signing in during the same page load (sign out,
+    // then sign in as someone else) gets its own welcome/tour check, not
+    // whatever the previous account already resolved this session.
+    hasCheckedGroupWelcome = false;
+    hasAutoStartedGroupTour = false;
+    if (groupWelcomeOverlay) {
+        groupWelcomeOverlay.classList.add('hidden');
+        groupWelcomeOverlay.setAttribute('aria-hidden', 'true');
+    }
+    renderApp();
+}
+
+function watchSelectedGroupTasks() {
+    if (unsubscribeTasks) {
+        unsubscribeTasks();
+        unsubscribeTasks = null;
+    }
+
+    const group = getSelectedGroup();
+    if (!group) {
+        groupTasks = [];
+        renderApp();
+        return;
+    }
+
+    unsubscribeTasks = subscribeToGroupTasks(group.id, (tasks) => {
+        groupTasks = tasks;
+        renderApp();
+    }, (error) => {
+        console.error('Failed to load group tasks:', error);
+        groupTasks = [];
+        renderApp();
+    });
+
+    if (unsubscribeSuggestions) {
+        unsubscribeSuggestions();
+        unsubscribeSuggestions = null;
+    }
+    unsubscribeSuggestions = subscribeToGroupSuggestions(group.id, (suggestions) => {
+        groupSuggestions = suggestions;
+        renderApp();
+    }, (error) => {
+        console.error('Failed to load suggestions:', error);
+        groupSuggestions = [];
+        renderApp();
+    });
+}
+
+if (yourNameSaveBtn && yourNameInput) {
+    yourNameSaveBtn.addEventListener('click', async () => {
+        playClickSound();
+        if (!currentUser || yourNameInput.value.trim() === '') {
+            return;
+        }
+        try {
+            await saveProfileName(currentUser, yourNameInput.value);
+            if (yourNameSavedMsg) {
+                yourNameSavedMsg.classList.remove('hidden');
+                setTimeout(() => yourNameSavedMsg.classList.add('hidden'), 2000);
+            }
+        } catch (error) {
+            console.error('Failed to save your name:', error);
+        }
+    });
+}
+
+// ---------------------------------------------------------------------
+// Welcome modal (first time only - "name yourself" as an actual first-run
+// step, not just a form someone might scroll past) and the group tour
+// (auto-launched the first time the dashboard itself is actually visible,
+// since most of what it points at only exists once a group is selected).
+// ---------------------------------------------------------------------
+
+const GROUP_WELCOME_KEY = 'todoGroupWelcomeSeenV1';
+const GROUP_COACH_KEY = 'todoGroupCoachV1';
+
+const GROUP_TOUR_STEPS = [
+    {
+        selector: '.inputContainer',
+        title: 'Add a task',
+        text: 'Add your own tasks here, same as solo - matrix, difficulty, and deadline all carry over.'
+    },
+    {
+        selector: '.detailsToggleBtn',
+        title: 'Prioritize',
+        text: 'Set matrix, difficulty, deadline, and schedule for a new task.',
+        beforeShow: () => taskDetailsPanel?.classList.add('open')
+    },
+    {
+        selector: '.groupMemberScopeTabs',
+        title: 'Whose tasks',
+        text: 'See everyone\'s tasks together, just your own, or drill into one teammate\'s.'
+    },
+    {
+        selector: '.deadlineViewTabs',
+        title: 'Filter by deadline',
+        text: 'Jump to what\'s overdue, due today, this week, or already done - across whoever\'s selected above.'
+    },
+    {
+        selector: '.memberRoster',
+        title: 'Team progress',
+        text: 'See everyone\'s progress and current focus. Click a card to filter to their tasks, or suggest a task for them.'
+    },
+    {
+        selector: '.groupHistoryPanel',
+        title: 'Recently finished',
+        text: 'A running log of what the team has been completing.'
+    },
+    {
+        selector: '.groupBrowseAllLink',
+        title: 'Managing multiple groups',
+        text: 'See every group you\'re in, with each one\'s members, from here.'
+    }
+];
+
+const groupTourController = createTourController({
+    steps: GROUP_TOUR_STEPS,
+    storageKey: GROUP_COACH_KEY
+});
+
+let hasAutoStartedGroupTour = false;
+
+// Most of what the group tour points at (whose-tasks tabs, roster, etc.)
+// only exists once a real dashboard is showing - so this both fires right
+// after the welcome modal closes (if a group's already selected) AND gets
+// re-checked on every render, so a first-time user with zero groups yet
+// still gets the tour the moment they create or join their first one.
+function maybeAutoStartGroupTour() {
+    if (hasAutoStartedGroupTour || groupTourController.hasBeenSeen() || groupTourController.isOpen()) {
+        return;
+    }
+    if (groupWelcomeOverlay && !groupWelcomeOverlay.classList.contains('hidden')) {
+        return;
+    }
+    if (!groupDashboard || groupDashboard.classList.contains('hidden')) {
+        return;
+    }
+    hasAutoStartedGroupTour = true;
+    setTimeout(() => groupTourController.start(), 400);
+}
+
+if (helpTourBtn) {
+    helpTourBtn.addEventListener('click', () => {
+        playClickSound();
+        groupTourController.start();
+    });
+}
+
+function openGroupWelcomeModal(user, resolvedName) {
+    if (!groupWelcomeOverlay) {
+        return;
+    }
+    if (groupWelcomeNameInput) {
+        groupWelcomeNameInput.value = resolvedName || '';
+    }
+    groupWelcomeOverlay.classList.remove('hidden');
+    groupWelcomeOverlay.setAttribute('aria-hidden', 'false');
+    groupWelcomeNameInput?.focus();
+}
+
+function closeGroupWelcomeModal() {
+    if (!groupWelcomeOverlay) {
+        return;
+    }
+    groupWelcomeOverlay.classList.add('hidden');
+    groupWelcomeOverlay.setAttribute('aria-hidden', 'true');
+    try {
+        localStorage.setItem(GROUP_WELCOME_KEY, 'yes');
+    } catch {
+        // Non-fatal - worst case the welcome modal shows again next visit.
+    }
+    maybeAutoStartGroupTour();
+}
+
+if (groupWelcomeContinueBtn) {
+    groupWelcomeContinueBtn.addEventListener('click', async () => {
+        playClickSound();
+        const name = groupWelcomeNameInput?.value.trim();
+        if (name && currentUser) {
+            try {
+                await saveProfileName(currentUser, name);
+                if (yourNameInput) {
+                    yourNameInput.value = name;
+                }
+            } catch (error) {
+                console.error('Failed to save your name:', error);
+            }
+        }
+        closeGroupWelcomeModal();
+    });
+}
+
+if (groupWelcomeNameInput) {
+    groupWelcomeNameInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            groupWelcomeContinueBtn?.click();
+        }
+    });
+}
+
+let hasCheckedGroupWelcome = false;
+
+function maybeShowGroupWelcome(user, resolvedName) {
+    if (hasCheckedGroupWelcome) {
+        return;
+    }
+    hasCheckedGroupWelcome = true;
+
+    let alreadySeen = false;
+    try {
+        alreadySeen = localStorage.getItem(GROUP_WELCOME_KEY) === 'yes';
+    } catch {
+        // Treat as not-seen if localStorage is unavailable.
+    }
+
+    if (alreadySeen) {
+        maybeAutoStartGroupTour();
+        return;
+    }
+
+    openGroupWelcomeModal(user, resolvedName);
+}
+
+AuthGate.init({
+    onSignedIn: (user) => {
+        currentUser = user;
+        groups = undefined;
+        renderApp();
+        loadProfileName(user, (name) => {
+            if (yourNameInput) {
+                yourNameInput.value = name;
+            }
+            maybeShowGroupWelcome(user, name);
+        });
+
+        unsubscribeGroups = subscribeToMyGroups(user.uid, (nextGroups) => {
+            groups = nextGroups;
+            if (!groups.some((group) => group.id === selectedGroupId)) {
+                selectedGroupId = groups[0]?.id || null;
+            }
+            renderApp();
+            watchSelectedGroupTasks();
+        }, (error) => {
+            console.error('Failed to load your groups:', error);
+            groups = [];
+            renderApp();
+        });
+    },
+    onSignedOut: () => {
+        resetGroupState();
+    }
+});

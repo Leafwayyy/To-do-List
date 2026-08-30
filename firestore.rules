@@ -1,0 +1,153 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Feature 2: each signed-in user can only read/write their own profile doc.
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Feature 3: each signed-in user can only read/write their own tasks.
+    match /users/{uid}/tasks/{taskId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Feature 4: groups. The invite code IS the document ID (see
+    // group-app/src/groups.js), which is what lets "join by code" work as a
+    // narrow, self-contained security rule below instead of needing a Cloud
+    // Function to broker the join. memberNames is a parallel array to
+    // memberIds (same index = same person) so the roster can show real
+    // names without needing a separate cross-user profile-read rule.
+    match /groups/{groupId} {
+      // Only members can read a group's data.
+      allow read: if request.auth != null && request.auth.uid in resource.data.memberIds;
+
+      // Creating a group: you must be its sole owner and sole member, and
+      // the invite code you set must equal the document ID you're writing to.
+      allow create: if request.auth != null
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.memberIds == [request.auth.uid]
+        && request.resource.data.memberNames.size() == 1
+        && request.resource.data.inviteCode == groupId;
+
+      // Joining by code: the write may ONLY append your own uid (and your
+      // display name, in lockstep) to the member lists, one at a time, and
+      // change nothing else about the group. This is what lets someone who
+      // isn't a member yet join at all, since Firestore evaluates write
+      // rules independently of read rules.
+      //
+      // Leaving is the mirror image: the write may ONLY remove your own uid
+      // (and name) from the lists, one at a time. Requiring the member
+      // count to shrink by exactly one, plus "you're gone from the new
+      // list", together force the removed entry to be your own - removing
+      // a different single member would leave you still present and fail
+      // the second check, and removing more than one would fail the count
+      // check. The owner can't use this path (they delete the group
+      // instead, so it's never left without an owner).
+      allow update: if request.auth != null
+        && (
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames'])
+            && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
+            && request.resource.data.memberNames.size() == request.resource.data.memberIds.size()
+            && request.auth.uid in request.resource.data.memberIds
+            && !(request.auth.uid in resource.data.memberIds)
+          )
+          || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames'])
+            && request.resource.data.memberIds.size() == resource.data.memberIds.size() - 1
+            && request.resource.data.memberNames.size() == request.resource.data.memberIds.size()
+            && request.auth.uid in resource.data.memberIds
+            && !(request.auth.uid in request.resource.data.memberIds)
+            && request.auth.uid != resource.data.ownerId
+          )
+          // Renaming: owner-only, and only the name field changes.
+          || (
+            request.auth.uid == resource.data.ownerId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+          )
+        );
+
+      allow delete: if request.auth != null && request.auth.uid == resource.data.ownerId;
+
+      // Feature 5: each member's tasks within the group. Any member can
+      // read the whole group's tasks (that's the point - visible progress);
+      // only the task's own owner can edit it. Deleting is also allowed for
+      // the group's owner (not just the task's own owner), so deleting a
+      // group can clean up every member's tasks in it, not just the
+      // owner's own.
+      match /tasks/{taskId} {
+        allow read: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
+        allow create: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+          && request.resource.data.ownerId == request.auth.uid;
+        // The task's own owner can change anything about it. Any other
+        // group member may ONLY bump the two denormalized comment-count
+        // fields (see addComment/deleteComment) - never the task's real
+        // content - which is what lets the unread-comments indicator work
+        // off the already-loaded task list instead of a listener per task.
+        allow update: if request.auth != null
+          && (
+            request.auth.uid == resource.data.ownerId
+            || (
+              request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount', 'lastCommentAt'])
+            )
+          );
+        allow delete: if request.auth != null
+          && (
+            request.auth.uid == resource.data.ownerId
+            || request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId
+          );
+
+        // Feature 7: a discussion thread under each task. Any member can
+        // read/post; only the comment's own author can delete it. No
+        // update rule - comments aren't editable after posting, kept
+        // simple on purpose.
+        match /comments/{commentId} {
+          allow read: if request.auth != null
+            && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
+          allow create: if request.auth != null
+            && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+            && request.resource.data.authorId == request.auth.uid
+            && request.resource.data.text is string
+            && request.resource.data.text.size() > 0
+            && request.resource.data.text.size() <= 500;
+          allow delete: if request.auth != null && request.auth.uid == resource.data.authorId;
+        }
+      }
+
+      // Feature 7 (suggestions half): "suggest a task for them" - proposes
+      // a brand new task for a specific teammate, who can accept it (which
+      // creates a real task via the normal task-create rule above, owned
+      // by them) or dismiss it. Not tied to any existing task, so it's its
+      // own top-level subcollection rather than nested under /tasks.
+      match /suggestions/{suggestionId} {
+        allow read: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
+        allow create: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+          && request.resource.data.fromUserId == request.auth.uid
+          && request.resource.data.forUserId in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+          && request.resource.data.status == 'pending'
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 240;
+        // Only the person the suggestion is FOR can accept/dismiss it, and
+        // only the status field changes - they can't rewrite what was
+        // suggested.
+        allow update: if request.auth != null
+          && request.auth.uid == resource.data.forUserId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && request.resource.data.status in ['accepted', 'dismissed'];
+        // Either side of a still-pending suggestion can retract/clear it;
+        // once acted on, it stays as a record.
+        allow delete: if request.auth != null
+          && resource.data.status == 'pending'
+          && (request.auth.uid == resource.data.fromUserId || request.auth.uid == resource.data.forUserId);
+      }
+    }
+  }
+}

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>To-Do List - My Groups</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
+    <link rel="stylesheet" href="/style.css?v=20260830c">
+</head>
+<body class="authChecking">
+
+    <div class="authLoadingScreen" aria-hidden="true">
+        <div class="authGlow" aria-hidden="true"></div>
+        <div class="authSpinner"></div>
+    </div>
+
+    <div class="userBadge hidden">
+        <a class="groupNavLink" href="/">My Tasks</a>
+        <img class="userBadgeAvatar hidden" alt="">
+        <span class="userBadgeName"></span>
+        <button class="userSignOutBtn" type="button" title="Sign out">Sign out</button>
+    </div>
+
+    <div class="authOverlay">
+        <div class="authGlow" aria-hidden="true"></div>
+
+        <div class="authBrand">
+            <span class="authLogo"><i class="fa-solid fa-people-group"></i></span>
+            <h1 class="authBrandTitle">Group</h1>
+        </div>
+
+        <div class="authCardWrap">
+            <div class="authCard" role="dialog" aria-modal="true" aria-label="Sign in">
+                <form class="authEmailForm">
+                    <input type="email" class="authEmailInput" placeholder="Email" autocomplete="email" required>
+                    <input type="password" class="authPasswordInput" placeholder="Password" autocomplete="current-password" required>
+                    <button type="button" class="authForgotPasswordBtn">Forgot password?</button>
+                    <p class="authErrorText hidden"></p>
+                    <p class="authInfoText hidden"></p>
+                    <button type="submit" class="authSubmitBtn">Sign in</button>
+                </form>
+
+                <div class="authDivider"><span>or</span></div>
+
+                <button class="authGoogleBtn" type="button">
+                    <i class="fa-brands fa-google"></i> Continue with Google
+                </button>
+
+                <p class="authModeRow"><span class="authModeLeadText">No account yet?</span> <button type="button" class="authModeToggleBtn">Sign up</button></p>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h1 class="title">My Groups</h1>
+
+        <p class="groupStatusMsg hidden"></p>
+
+        <div class="groupBrowseGrid hidden"></div>
+    </div>
+
+    <script src="/task-shared.js?v=20260830a"></script>
+    <script src="/auth-gate.js?v=20260829a"></script>
+    <script src="groups-data.js?v=20260829b"></script>
+    <script src="browse.js?v=20260830a"></script>
+    <script type="module" src="/firebase-init.js?v=20260830a"></script>
+</body>
+</html>

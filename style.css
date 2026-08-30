@@ -1,0 +1,5782 @@
+*{
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body{
+    font-family: 'Poppins', sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100svh;
+    padding: clamp(12px, 2.6vh, 24px) 0;
+    background: linear-gradient(320deg, rgb(104, 255, 189), rgb(169, 228, 255), rgb(185, 198, 251), rgb(253, 255, 247));
+}
+
+.container{
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    width: min(640px, 96vw);
+    min-height: 300px;
+    height: auto;
+    background-color: rgba(255, 255, 255, 0.3);
+    backdrop-filter: blur(10px);
+    border: 3px solid #769ff880;
+    border-radius: 20px;
+    margin: 0 auto;
+}
+
+
+.to-doList{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    width: 100%;
+    height: auto;
+    padding: 35px 14px;
+}
+
+.title{
+    font-size: 36px;
+    font-weight: 750;
+    color: #1e1e1e;
+    margin-bottom: 20px;
+    
+}
+
+.motivatorContainer{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    width: 100%;
+    height: 100px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.3);
+    backdrop-filter: blur(10px);
+    border: 3px solid rgba(103, 159, 255, 0.7);
+    border-radius: 10px;
+    margin-bottom: 14px;
+}
+
+.motivatorText{
+    font-size: 24px;
+    font-weight: 600;
+    color: #1e1e1e;
+    position: relative;
+    left: -60px;
+    top: -15px;
+}
+
+.progressBarContainer{
+    width: 250px;
+    height: 20px;
+    background: rgba(5, 5, 5, 1);
+    position: absolute;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    border-radius: 10px;
+    top: 55px;
+    transform: translateX(-45px);
+    border: 2px solid rgba(100, 165, 255, 1);
+    overflow: hidden;
+}
+
+.progressBar{
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0%;
+    background: linear-gradient(90deg, #4ba2ff, #8bdaff);
+    border-radius: 8px;
+    transition: width 0.25s ease-in-out;
+}
+
+.taskAmountContainer{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 70px;
+    height: 70px;
+    background: rgba(35, 35, 35, 1);
+    border-radius: 50%;
+    border: 3px solid rgb(155, 215, 255);
+    position: relative;
+    left: 65px;
+}
+
+.taskAmount{
+    font-size: 24px;
+    font-weight: 500;
+    color: #8bdaff;
+}
+
+.inputContainer{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    flex-wrap: nowrap;
+}
+
+.quickAddHint{
+    width: 92%;
+    margin-top: 8px;
+    color: #2f557f;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+    text-align: left;
+}
+
+.quickAddHint.hidden{
+    display: none;
+}
+
+.taskInput{
+    width: auto;
+    flex: 1;
+    min-width: 0;
+    height: 50px;
+    padding: 15px 10px;
+    border: none;
+    outline: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.3);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(103, 159, 255, 0.7);
+
+}
+
+.detailsToggleBtn{
+    height: 42px;
+    border: 2px solid rgba(103, 159, 255, 0.65);
+    background: rgba(238, 248, 255, 0.78);
+    color: #2f557f;
+    border-radius: 999px;
+    padding: 0 14px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.detailsToggleBtn:hover{
+    border-color: rgba(63, 136, 252, 0.9);
+    background: rgba(223, 242, 255, 0.95);
+}
+
+.detailsToggleBtn[aria-expanded="true"]{
+    border-color: rgba(49, 132, 246, 0.95);
+    background: linear-gradient(90deg, rgba(84, 170, 255, 0.92), rgba(132, 203, 255, 0.95));
+    color: #ffffff;
+    box-shadow: 0 0 0 3px rgba(49, 132, 246, 0.2);
+}
+
+.taskDetailsPanel{
+    width: 92%;
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.18s ease, transform 0.18s ease, margin-top 0.18s ease;
+    margin-top: 0;
+}
+
+.taskDetailsPanel.open{
+    max-height: 520px;
+    overflow: visible;
+    opacity: 1;
+    transform: translateY(0);
+    margin-top: 10px;
+}
+
+.optionsHint{
+    margin-bottom: 8px;
+    color: #355d87;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.taskDetailsPanel .matrixSelect,
+.taskDetailsPanel .difficultySelect,
+.taskDetailsPanel .durationInput,
+.taskDetailsPanel .deadlineInput{
+    backdrop-filter: none;
+}
+
+.detailsGrid{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: visible;
+}
+
+.matrixSelect{
+    width: 100%;
+    height: 50px;
+    padding: 0 10px;
+    border: none;
+    outline: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(103, 159, 255, 0.7);
+    color: #1e1e1e;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.difficultySelect{
+    width: 100%;
+    height: 50px;
+    padding: 0 10px;
+    border: none;
+    outline: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(103, 159, 255, 0.7);
+    color: #1e1e1e;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.matrixSelect:hover{
+    border-color: rgba(72, 145, 255, 0.95);
+    background: rgba(246, 252, 255, 0.92);
+}
+
+.difficultySelect:hover{
+    border-color: rgba(72, 145, 255, 0.95);
+    background: rgba(246, 252, 255, 0.92);
+}
+
+.matrixSelect:focus,
+.matrixSelect:focus-visible{
+    border-color: rgba(47, 143, 255, 1);
+    box-shadow: 0 0 0 4px rgba(47, 143, 255, 0.18);
+    background: rgba(246, 252, 255, 0.98);
+}
+
+.difficultySelect:focus,
+.difficultySelect:focus-visible{
+    border-color: rgba(47, 143, 255, 1);
+    box-shadow: 0 0 0 4px rgba(47, 143, 255, 0.18);
+    background: rgba(246, 252, 255, 0.98);
+}
+
+.matrixSelect option{
+    background: #e8f2ff;
+    color: #17375f;
+    font-weight: 600;
+}
+
+.difficultySelect option{
+    background: #e8f2ff;
+    color: #17375f;
+    font-weight: 600;
+}
+
+.effortContainer{
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    gap: 8px;
+    overflow: visible;
+}
+
+.taskTypePills{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: visible;
+}
+
+.typePill{
+    border: 2px solid rgba(108, 166, 247, 0.62);
+    background: rgba(238, 248, 255, 0.82);
+    color: #365984;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    position: relative;
+}
+
+.typePill::after{
+    content: attr(data-tip);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 9px);
+    transform: translateX(-50%) translateY(6px);
+    width: 230px;
+    background: rgba(24, 43, 69, 0.95);
+    color: #f2f8ff;
+    border: 1px solid rgba(130, 186, 255, 0.5);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    text-align: left;
+    line-height: 1.35;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
+    z-index: 6;
+}
+
+.typePill:hover::after,
+.typePill:focus-visible::after{
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.typePill.active{
+    border-color: rgba(47, 143, 255, 0.95);
+    background: linear-gradient(90deg, rgba(89, 173, 255, 0.92), rgba(144, 211, 255, 0.95));
+    color: #ffffff;
+}
+
+.durationWrap{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.durationWrap.hidden{
+    display: none;
+}
+
+.durationInput{
+    width: 110px;
+    height: 44px;
+    padding: 0 10px;
+    border: none;
+    outline: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(103, 159, 255, 0.7);
+    color: #1e1e1e;
+    font-weight: 600;
+}
+
+.durationChips{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.durationChip{
+    border: 1px solid rgba(103, 159, 255, 0.62);
+    background: rgba(239, 249, 255, 0.85);
+    color: #365d87;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.durationChip:hover{
+    border-color: rgba(47, 143, 255, 0.9);
+    background: rgba(224, 243, 255, 1);
+}
+
+.durationChip.active{
+    border-color: rgba(47, 143, 255, 0.95);
+    background: rgba(74, 167, 255, 0.95);
+    color: #ffffff;
+}
+
+.deadlineContainer{
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    width: 100%;
+    gap: 8px;
+    cursor: pointer;
+    border-radius: 12px;
+    transition: box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.deadlineTag{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    background: rgba(43, 30, 100, 0.82);
+    border: 1px solid rgba(189, 173, 255, 0.45);
+    color: #f1ecff;
+}
+
+.deadlineContainer:hover{
+    background: rgba(235, 247, 255, 0.45);
+    box-shadow: 0 0 0 3px rgba(89, 158, 255, 0.14);
+}
+
+.deadlineInput{
+    width: 100%;
+    height: 50px;
+    padding: 0 10px;
+    border: none;
+    outline: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(103, 159, 255, 0.7);
+    color: #1e1e1e;
+    color-scheme: dark;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.deadlineInput::-webkit-calendar-picker-indicator{
+    filter: invert(1) sepia(0.18) saturate(1.4) hue-rotate(196deg) brightness(1.2);
+    opacity: 0.9;
+    cursor: pointer;
+}
+
+.deadlineInput:hover{
+    border-color: rgba(72, 145, 255, 0.95);
+    background: rgba(246, 252, 255, 0.92);
+}
+
+.deadlineInput:focus,
+.deadlineInput:focus-visible{
+    border-color: rgba(47, 143, 255, 1);
+    box-shadow: 0 0 0 4px rgba(47, 143, 255, 0.18);
+    background: rgba(246, 252, 255, 0.98);
+}
+
+.calendarBtn{
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    background: rgba(35, 35, 35, 1);
+    border-radius: 50%;
+    border: 3px solid rgb(155, 215, 255);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+}
+
+.calendarBtn i{
+    color: #8bdaff;
+    font-size: 13px;
+}
+
+.calendarBtn:hover{
+    background: rgba(39, 39, 39, 0.8);
+    transform: scale(1.08);
+    transition: all 0.2s ease-in-out;
+}
+
+.calendarBtn:active{
+    background: rgb(16, 16, 16);
+    transform: scale(0.92);
+    transition: all 0.2s ease-in-out;
+}
+
+.addBtn{
+    width: 35px;
+    height: 35px;
+    background: rgba(35, 35, 35, 1);
+    border-radius: 50%;
+    border: 3px solid rgb(155, 215, 255);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+}
+
+.addBtn i{
+    color: #8bdaff;
+    font-size: 12px;
+}
+
+.addBtn:hover{
+    background: rgba(39, 39, 39, 0.8);
+    transform: scale(1.1);
+    transition: all 0.2s ease-in-out;
+}
+
+.addBtn:active{
+    background: rgb(16, 16, 16);
+    transform: scale(0.9);
+    transition: all 0.2s ease-in-out;
+}
+
+.deadlinePresets{
+    width: 100%;
+    margin-top: 10px;
+    display: none;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+}
+
+.taskDetailsPanel.show-presets .deadlinePresets{
+    display: flex;
+}
+
+.schedulePresets{
+    width: 100%;
+    margin-top: 10px;
+    display: none;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+}
+
+.taskDetailsPanel.show-schedule-presets .schedulePresets{
+    display: flex;
+}
+
+.urgencyAlert{
+    width: 92%;
+    margin-top: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    border-radius: 10px;
+    border: 2px solid rgba(95, 160, 255, 0.58);
+    background: rgba(237, 248, 255, 0.75);
+    padding: 9px 11px;
+}
+
+.urgencyAlert.hidden{
+    display: none;
+}
+
+.urgencyAlert.urgency-soon{
+    border-color: rgba(255, 191, 84, 0.85);
+    background: rgba(255, 244, 218, 0.9);
+}
+
+.urgencyAlert.urgency-critical,
+.urgencyAlert.urgency-overdue{
+    border-color: rgba(250, 118, 107, 0.85);
+    background: rgba(255, 228, 224, 0.92);
+}
+
+.urgencyAlertText{
+    font-size: 12px;
+    color: #24476f;
+    font-weight: 700;
+}
+
+.notifyEnableBtn{
+    height: 30px;
+    border: 1px solid rgba(95, 160, 255, 0.65);
+    border-radius: 999px;
+    padding: 0 10px;
+    background: rgba(247, 252, 255, 0.86);
+    color: #265580;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.notifyEnableBtn.hidden{
+    display: none;
+}
+
+.deadlinePresetBtn{
+    border: 1px solid rgba(98, 160, 250, 0.6);
+    background: rgba(237, 248, 255, 0.78);
+    color: #2b4f7b;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+}
+
+.deadlinePresetBtn:hover{
+    background: rgba(219, 240, 255, 0.95);
+    border-color: rgba(63, 136, 252, 0.9);
+    transform: translateY(-1px);
+}
+
+.deadlinePresetBtn:active{
+    transform: translateY(0);
+}
+
+.priorityControls{
+    width: 92%;
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.33);
+    border: 2px solid rgba(103, 159, 255, 0.6);
+}
+
+.priorityHeaderRow{
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 8px;
+}
+
+.priorityToggleLabel{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #1e1e1e;
+    cursor: pointer;
+}
+
+.priorityToggle{
+    width: 16px;
+    height: 16px;
+    accent-color: #2f8fff;
+    cursor: pointer;
+}
+
+.priorityModeHint{
+    margin-top: 6px;
+    font-size: 12px;
+    color: #29334a;
+}
+
+.sortOnceBtn{
+    border: 2px solid rgba(80, 150, 250, 0.7);
+    background: rgba(233, 246, 255, 0.78);
+    color: #245787;
+    height: 32px;
+    border-radius: 999px;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.sortOnceBtn:hover:not(:disabled){
+    background: rgba(214, 237, 255, 0.98);
+    transform: translateY(-1px);
+}
+
+.sortOnceBtn:disabled{
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.alertToggleBtn{
+    border: 2px solid rgba(238, 176, 64, 0.72);
+    background: rgba(255, 247, 224, 0.9);
+    color: #8a5a16;
+    height: 32px;
+    border-radius: 999px;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    margin-left: auto;
+    transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.alertToggleBtn:hover{
+    border-color: rgba(226, 151, 30, 0.84);
+    background: rgba(255, 240, 199, 0.95);
+}
+
+.alertToggleBtn.enabled{
+    border-color: rgba(49, 156, 99, 0.86);
+    background: rgba(218, 248, 230, 0.95);
+    color: #146739;
+}
+
+.alertToggleBtn.enabled:hover{
+    border-color: rgba(36, 142, 87, 0.92);
+    background: rgba(204, 244, 220, 0.98);
+}
+
+.metaVisibilityRow{
+    display: none;
+}
+
+.taskViews{
+    width: 92%;
+    margin-top: 10px;
+    margin-bottom: 2px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+
+.activityPanel{
+    width: 92%;
+    margin-top: 4px;
+    margin-bottom: 14px;
+    padding: 10px 10px 12px;
+    border-radius: 10px;
+    border: 2px solid rgba(103, 159, 255, 0.58);
+    background: rgba(243, 250, 255, 0.62);
+}
+
+.activityHeader{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.activityTitle{
+    font-size: 14px;
+    font-weight: 800;
+    color: #264f79;
+}
+
+.activitySummary{
+    font-size: 11px;
+    color: #3d638e;
+}
+
+.activityGridWrap{
+    --weeks: 26;
+    --rows: 7;
+    --cell-gap: 3px;
+    --day-label-width: 30px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+}
+
+.activityMonthRow{
+    margin-left: calc(var(--day-label-width) + 4px);
+    display: grid;
+    grid-template-columns: repeat(var(--weeks), minmax(0, 1fr));
+    gap: var(--cell-gap);
+    margin-bottom: 5px;
+    min-height: 14px;
+}
+
+.activityMonthLabel{
+    font-size: 10px;
+    line-height: 1;
+    color: #4b6790;
+    white-space: nowrap;
+    justify-self: start;
+}
+
+.activityBody{
+    display: grid;
+    grid-template-columns: var(--day-label-width) 1fr;
+    align-items: stretch;
+    gap: 4px;
+}
+
+.activityDayLabels{
+    display: grid;
+    grid-template-rows: repeat(var(--rows), minmax(0, 1fr));
+    gap: var(--cell-gap);
+    width: var(--day-label-width);
+    height: 100%;
+}
+
+.activityDayLabel{
+    font-size: 9px;
+    line-height: 1;
+    color: #5d769a;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 3px;
+}
+
+.activityGrid{
+    display: grid;
+    grid-template-columns: repeat(var(--weeks), minmax(0, 1fr));
+    grid-template-rows: repeat(var(--rows), minmax(0, 1fr));
+    grid-auto-flow: column;
+    gap: var(--cell-gap);
+    width: 100%;
+    aspect-ratio: calc(var(--weeks) / var(--rows));
+}
+
+.heatCell{
+    width: 100%;
+    height: 100%;
+    border-radius: 3px;
+    border: 1px solid rgba(85, 133, 194, 0.25);
+    background: rgba(215, 227, 241, 0.8);
+}
+
+.heatCell.level-0{ background: rgba(213, 225, 240, 0.72); }
+.heatCell.level-1{ background: rgba(178, 218, 244, 0.78); }
+.heatCell.level-2{ background: rgba(134, 202, 245, 0.82); }
+.heatCell.level-3{ background: rgba(86, 182, 242, 0.9); }
+.heatCell.level-4{ background: rgba(35, 153, 235, 0.95); }
+
+.heatCell.outside-window{
+    opacity: 0.28;
+}
+
+.activityLegend{
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    font-size: 11px;
+    color: #3c618d;
+}
+
+.activityLegend .heatCell{
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    display: inline-block;
+}
+
+.taskViewBtn{
+    border: 2px solid rgba(120, 177, 255, 0.55);
+    background: rgba(255, 255, 255, 0.48);
+    color: #355780;
+    border-radius: 999px;
+    padding: 5px 11px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.taskViewBtn:hover{
+    border-color: rgba(71, 147, 255, 0.9);
+    background: rgba(231, 245, 255, 0.96);
+}
+
+.taskViewBtn.active{
+    border-color: rgba(46, 139, 255, 0.95);
+    background: linear-gradient(90deg, rgba(92, 175, 255, 0.9), rgba(141, 210, 255, 0.95));
+    color: #ffffff;
+}
+
+.tasks{
+    list-style: none;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    transform: translateY(20px);
+}
+
+.tasks li{
+    width: 90%;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.4);
+    border-radius: 10px;
+    border: 2px solid rgba(103, 159, 255, 0.7);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    cursor: grab;
+    will-change: transform;
+    position: relative;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+
+}
+
+.taskTopRow{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: 10px;
+}
+
+.tasks li.status-soon{
+    border-color: rgba(255, 191, 84, 0.9);
+}
+
+.tasks li.status-critical{
+    border-color: rgba(255, 147, 83, 0.95);
+    box-shadow: 0 0 0 3px rgba(255, 172, 104, 0.22);
+}
+
+.tasks li.status-overdue{
+    border-color: rgba(248, 118, 111, 0.95);
+    box-shadow: 0 0 0 3px rgba(248, 118, 111, 0.2);
+    animation: overduePulse 1.8s ease-in-out infinite;
+}
+
+@keyframes overduePulse{
+    0% { box-shadow: 0 0 0 0 rgba(248, 118, 111, 0.25); }
+    70% { box-shadow: 0 0 0 8px rgba(248, 118, 111, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(248, 118, 111, 0); }
+}
+
+.tasks.priority-on li{
+    cursor: default;
+}
+
+.tasks.priority-on li::after{
+    content: 'Auto sorted';
+    position: absolute;
+    top: -9px;
+    left: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    color: #ffffff;
+    background: rgba(41, 129, 236, 0.9);
+    border-radius: 999px;
+    padding: 3px 8px;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(-2px);
+    transition: opacity 0.2s ease;
+}
+
+.tasks.priority-on li:hover::after{
+    opacity: 1;
+}
+
+.tasks li:active{
+    cursor: grabbing;
+}
+
+.tasks li.dragging{
+    opacity: 0.55;
+    border-color: rgba(75, 162, 255, 1);
+    background: rgba(222, 244, 255, 0.9);
+    box-shadow: 0 14px 24px rgba(36, 112, 200, 0.25);
+}
+
+.tasks li.drag-over-slot{
+    border-color: rgba(47, 143, 255, 1);
+    background: rgba(236, 250, 255, 1);
+    box-shadow: 0 0 0 4px rgba(47, 143, 255, 0.24), 0 10px 20px rgba(47, 143, 255, 0.18);
+    transform: scale(1.015);
+}
+
+.tasks li.drag-over-slot::before{
+    content: 'Drop to swap';
+    position: absolute;
+    top: -11px;
+    right: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    color: #ffffff;
+    background: #2f8fff;
+    border-radius: 999px;
+    padding: 4px 8px;
+    box-shadow: 0 4px 10px rgba(47, 143, 255, 0.35);
+    pointer-events: none;
+}
+
+.tasks.drag-active li:not(.dragging):not(.drag-over-slot){
+    opacity: 0.72;
+    border-style: dashed;
+}
+
+.tasks.drag-active li.drag-over-slot,
+.tasks.drag-active li.dragging{
+    opacity: 1;
+}
+
+.tasks.drag-active li *{
+    pointer-events: none;
+}
+
+/* Premium gradient overdue alert */
+.urgencyAlert.urgency-overdue{
+    background: linear-gradient(135deg, rgba(255, 115, 140, 0.24) 0%, rgba(214, 90, 122, 0.28) 35%, rgba(132, 74, 171, 0.34) 100%);
+    border-color: rgba(255, 148, 169, 0.85);
+    box-shadow: 0 8px 24px rgba(112, 42, 86, 0.35), inset 0 1px 0 rgba(255, 220, 228, 0.28);
+}
+
+.urgencyAlert.urgency-overdue .urgencyAlertText{
+    color: #ffe9ef;
+    text-shadow: 0 1px 0 rgba(76, 24, 47, 0.45);
+}
+
+.taskMain{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    width: 100%;
+}
+
+.taskContent{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+}
+
+.taskText{
+    color: #1e1e1e;
+    word-break: break-word;
+}
+
+.taskMeta{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.matrixBadge,
+.deadlineBadge,
+.countdownBadge{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid transparent;
+}
+
+.effortBadge{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid transparent;
+    background: #eaf0ff;
+    border-color: #cbd8ff;
+    color: #2d468d;
+}
+
+.difficultyBadge{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid transparent;
+}
+
+.difficulty-1{
+    background: #edf9ee;
+    border-color: #cdeccd;
+    color: #2c6b35;
+}
+
+.difficulty-2{
+    background: #e8f6ff;
+    border-color: #c6e5fb;
+    color: #2b5e87;
+}
+
+.difficulty-3{
+    background: #fff5df;
+    border-color: #f3ddb1;
+    color: #8a6112;
+}
+
+.difficulty-4{
+    background: #ffeada;
+    border-color: #f7caad;
+    color: #8c4217;
+}
+
+.difficulty-5{
+    background: #ffe2e2;
+    border-color: #f3bcbc;
+    color: #8b2222;
+}
+
+.subtaskProgressBadge{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid #cbd8ff;
+    background: #eef2ff;
+    color: #3a4c8f;
+}
+
+.scheduleBadge{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid #cbd8ff;
+    background: #eef2ff;
+    color: #3a4c8f;
+}
+
+.snoozeSection{
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.35);
+    border: 1px solid rgba(103, 159, 255, 0.4);
+}
+
+.snoozeSection.hidden{
+    display: none;
+}
+
+.snoozeLabel{
+    font-size: 12px;
+    font-weight: 700;
+    color: #365984;
+}
+
+.subtasksSection{
+    width: 100%;
+}
+
+.subtasksToggleBtn{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+    background: transparent;
+    color: #365984;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 0;
+    cursor: pointer;
+}
+
+.subtasksToggleBtn i{
+    font-size: 9px;
+    width: 10px;
+    text-align: center;
+}
+
+.subtasksToggleBtn:hover{
+    color: #1f4c88;
+}
+
+.subtasksBody{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+    padding-left: 4px;
+}
+
+.subtasksBody.hidden{
+    display: none;
+}
+
+.subtasksList{
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.subtaskItem{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.4);
+    border: 1px solid rgba(103, 159, 255, 0.4);
+}
+
+.subtaskCheckBtn,
+.subtaskDeleteBtn{
+    background: transparent;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.subtaskCheckBtn{
+    border: 1px solid rgba(103, 159, 255, 0.7);
+    color: transparent;
+}
+
+.subtaskCheckBtn i{
+    font-size: 10px;
+}
+
+.subtaskItem.completed .subtaskCheckBtn{
+    background: rgba(35, 35, 35, 1);
+    border-color: rgb(155, 215, 255);
+    color: #8bdaff;
+}
+
+.subtaskDeleteBtn{
+    color: #8fa3c2;
+    font-size: 11px;
+}
+
+.subtaskDeleteBtn:hover{
+    color: #d0473f;
+}
+
+.subtaskText{
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+    font-size: 13px;
+    color: #1e1e1e;
+}
+
+.subtaskItem.completed .subtaskText{
+    text-decoration: line-through;
+    opacity: 0.65;
+}
+
+.subtaskAddRow{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.subtaskInput{
+    flex: 1;
+    min-width: 0;
+    height: 34px;
+    padding: 0 10px;
+    border: none;
+    outline: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid rgba(103, 159, 255, 0.5);
+    font-size: 12px;
+    color: #1e1e1e;
+}
+
+.subtaskAddBtn{
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(35, 35, 35, 1);
+    border: 2px solid rgb(155, 215, 255);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+}
+
+.subtaskAddBtn i{
+    color: #8bdaff;
+    font-size: 10px;
+}
+
+.subtaskAddBtn:hover{
+    background: rgba(39, 39, 39, 0.8);
+    transform: scale(1.08);
+    transition: all 0.2s ease-in-out;
+}
+
+.emptyTasksMsg{
+    width: 90%;
+    text-align: center;
+    padding: 14px 10px;
+    border-radius: 10px;
+    border: 2px dashed rgba(103, 159, 255, 0.55);
+    color: #406088;
+    font-size: 13px;
+    font-weight: 600;
+    background: rgba(245, 252, 255, 0.62);
+    cursor: default;
+}
+
+.matrix-do{
+    background: #ffe3de;
+    border-color: #ffb7ac;
+    color: #8f1f10;
+}
+
+.matrix-schedule{
+    background: #ecf0ff;
+    border-color: #cdd8ff;
+    color: #2e3f8f;
+}
+
+.matrix-delegate{
+    background: #fff3df;
+    border-color: #ffd8a6;
+    color: #8a4f00;
+}
+
+.matrix-eliminate{
+    background: #e7efe9;
+    border-color: #c8dacd;
+    color: #375846;
+}
+
+.deadline-none,
+.countdown-none{
+    background: #eef2f8;
+    border-color: #d5dce7;
+    color: #4d617f;
+}
+
+.deadline-normal,
+.countdown-normal{
+    background: #e8f4ff;
+    border-color: #bedffd;
+    color: #2e5f96;
+}
+
+.deadline-soon,
+.countdown-soon{
+    background: #fff2dd;
+    border-color: #ffd9a2;
+    color: #8b5600;
+}
+
+.deadline-critical,
+.countdown-critical{
+    background: #ffe4d8;
+    border-color: #ffc095;
+    color: #9a4b00;
+}
+
+.deadline-overdue,
+.countdown-overdue{
+    background: #ffe2e0;
+    border-color: #ffb9b4;
+    color: #9f2318;
+}
+
+.checkBtn{
+    background: transparent;
+    border: none;
+    outline: none;
+}
+
+.taskButtons{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    background: transparent;
+    
+}
+
+.taskButtons i{
+    color: #8bdaff;
+    font-size: 14px;
+    cursor: pointer;
+    background: rgba(35, 35, 35, 1);
+    width: 30px;
+    height: 30px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: 50%;
+    border: 1px solid rgb(155, 215, 255);
+        
+}
+
+.editBtn{
+    background: transparent;
+    border: none;
+    outline: none;
+}
+.deleteBtn{
+    background: transparent;
+    border: none;
+    outline: none;
+}
+.snoozeBtn{
+    background: transparent;
+    border: none;
+    outline: none;
+}
+
+.taskButtons i:hover{
+    background: rgba(39, 39, 39, 0.8);
+    transform: scale(1.1);
+    transition: all 0.2s ease-in-out;
+}
+
+.taskButtons i:active{
+    background: rgb(16, 16, 16);
+    transform: scale(0.9);
+    transition: all 0.2s ease-in-out;
+}
+
+.checkBtn i{
+    color: transparent;
+    font-size: 14px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.75);
+    width: 30px;
+    height: 30px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: 50%;
+    border: 1px solid rgba(155, 215, 255, 0.95);
+    opacity: 0.5;
+}
+
+.checkBtn i:hover{
+    background: rgba(255, 255, 255, 0.9);
+    transform: scale(1.1);
+    transition: all 0.2s ease-in-out;
+}
+
+.checkBtn i:active{
+    background: rgba(255, 255, 255, 1);
+    transform: scale(0.9);
+    transition: all 0.2s ease-in-out;
+}
+
+.tasks li.completed .checkBtn i{
+    color: #8bdaff;
+    background: rgba(35, 35, 35, 1);
+    border: 1px solid rgb(155, 215, 255);
+    opacity: 1;
+}
+
+.tasks li.completed .checkBtn i:hover{
+    background: rgba(39, 39, 39, 0.8);
+}
+
+.tasks li.completed .checkBtn i:active{
+    background: rgb(16, 16, 16);
+}
+
+.tasks li.completed .taskText{
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+.taskEditorOverlay{
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 18, 38, 0.42);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    z-index: 20;
+}
+
+.taskEditorOverlay.open{
+    display: flex;
+}
+
+.taskEditorCard{
+    width: min(460px, 95vw);
+    background: rgba(247, 252, 255, 0.95);
+    border: 2px solid rgba(74, 146, 246, 0.5);
+    border-radius: 16px;
+    box-shadow: 0 20px 44px rgba(28, 67, 128, 0.3);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.taskEditorCard h2{
+    font-size: 23px;
+    color: #1f2d4a;
+}
+
+.taskEditorCard label{
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #273451;
+}
+
+.editorTextInput,
+.editorMatrixSelect,
+.editorDeadlineInput{
+    width: 100%;
+    height: 44px;
+    padding: 0 10px;
+    border: 2px solid rgba(91, 152, 255, 0.45);
+    border-radius: 10px;
+    outline: none;
+    background: #ffffff;
+    color: #1a1a1a;
+    font-weight: 500;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.editorTaskTypeSelect,
+.editorDifficultySelect,
+.editorDurationInput{
+    width: 100%;
+    height: 44px;
+    padding: 0 10px;
+    border: 2px solid rgba(91, 152, 255, 0.45);
+    border-radius: 10px;
+    outline: none;
+    background: #ffffff;
+    color: #1a1a1a;
+    font-weight: 500;
+}
+
+.editorEffortRow{
+    display: flex;
+    gap: 8px;
+}
+
+.editorDurationInput.hidden{
+    display: none;
+}
+
+.editorTextInput:focus,
+.editorMatrixSelect:focus,
+.editorDeadlineInput:focus{
+    border-color: rgba(47, 143, 255, 1);
+    box-shadow: 0 0 0 4px rgba(47, 143, 255, 0.16);
+    background: #f6fbff;
+}
+
+.editorTaskTypeSelect:focus,
+.editorDifficultySelect:focus,
+.editorDurationInput:focus{
+    border-color: rgba(47, 143, 255, 1);
+    box-shadow: 0 0 0 4px rgba(47, 143, 255, 0.16);
+    background: #f6fbff;
+}
+
+.editorMatrixSelect,
+.editorDeadlineInput,
+.editorTaskTypeSelect,
+.editorDifficultySelect{
+    cursor: pointer;
+}
+
+.editorMatrixSelect:hover,
+.editorDeadlineInput:hover{
+    border-color: rgba(63, 136, 252, 0.95);
+    background: #f6fbff;
+}
+
+.editorMatrixSelect option{
+    background: #e8f2ff;
+    color: #17375f;
+    font-weight: 600;
+}
+
+.editorDeadlineWrap{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    border-radius: 10px;
+    transition: box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.editorDeadlineWrap:hover{
+    background: rgba(232, 243, 255, 0.75);
+    box-shadow: 0 0 0 3px rgba(89, 158, 255, 0.14);
+}
+
+.editorCalendarBtn{
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid #8ec6ff;
+    background: #243343;
+    cursor: pointer;
+    color: #8ec6ff;
+}
+
+.editorCalendarBtn:hover{
+    transform: scale(1.07);
+    transition: transform 0.2s ease;
+}
+
+.editorActions{
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.editorCancelBtn,
+.editorSaveBtn{
+    height: 38px;
+    padding: 0 14px;
+    border-radius: 10px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.editorCancelBtn{
+    background: rgba(232, 237, 248, 1);
+    border-color: rgba(186, 200, 226, 0.9);
+    color: #38517a;
+}
+
+.editorSaveBtn{
+    background: #2f8fff;
+    border-color: #58a4ff;
+    color: #ffffff;
+}
+
+@media (max-width: 620px){
+    .title{
+        font-size: 32px;
+    }
+
+    .motivatorText{
+        font-size: 21px;
+    }
+
+    .taskAmountContainer{
+        left: 55px;
+    }
+
+    .progressBarContainer{
+        width: 220px;
+        transform: translateX(-38px);
+    }
+
+    .addBtn{
+        width: 40px;
+        height: 40px;
+    }
+
+    .priorityHeaderRow{
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .activityHeader{
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+
+    .activityMonthLabel{
+        font-size: 9px;
+    }
+
+    .activityPanel{
+        margin-bottom: 16px;
+    }
+
+    .activityGridWrap{
+        --day-label-width: 24px;
+        --cell-gap: 2px;
+    }
+
+    .activityDayLabel{
+        font-size: 8px;
+        padding-right: 2px;
+    }
+}
+
+/* Premium dark aesthetic overrides */
+:root{
+    --lux-bg-1: #080a10;
+    --lux-bg-2: #0f1420;
+    --lux-panel: rgba(13, 18, 30, 0.82);
+    --lux-panel-soft: rgba(19, 26, 40, 0.72);
+    --lux-border: rgba(216, 183, 120, 0.42);
+    --lux-border-soft: rgba(216, 183, 120, 0.24);
+    --lux-text: #f3f0ea;
+    --lux-muted: #b8b3a7;
+    --lux-accent: #d7b778;
+    --lux-accent-2: #8ec5ff;
+}
+
+body{
+    font-family: 'Inter', sans-serif;
+    color: var(--lux-text);
+    background:
+        radial-gradient(1100px 560px at 12% 8%, rgba(215, 183, 120, 0.14), transparent 60%),
+        radial-gradient(900px 520px at 88% 92%, rgba(87, 126, 190, 0.17), transparent 62%),
+        linear-gradient(160deg, var(--lux-bg-1), var(--lux-bg-2));
+}
+
+.container{
+    background: linear-gradient(170deg, rgba(19, 25, 38, 0.9), rgba(9, 14, 24, 0.9));
+    border: 1px solid var(--lux-border);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.title{
+    font-family: 'Playfair Display', serif;
+    color: #f6f2ea;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+.activityTitle,
+.motivatorText{
+    font-family: 'Playfair Display', serif;
+    color: #f2ebe0;
+}
+
+.activitySummary,
+.quickAddHint,
+.optionsHint,
+.priorityModeHint{
+    color: var(--lux-muted);
+}
+
+.motivatorContainer,
+.activityPanel,
+.taskDetailsPanel.open,
+.urgencyAlert,
+.priorityControls{
+    background: var(--lux-panel-soft);
+    border-color: var(--lux-border-soft);
+}
+
+.progressBarContainer{
+    background: rgba(7, 11, 20, 0.95);
+    border-color: rgba(142, 197, 255, 0.5);
+}
+
+.progressBar{
+    background: linear-gradient(90deg, #6da6e8, #d7b778 85%);
+}
+
+.taskAmountContainer,
+.addBtn,
+.calendarBtn,
+.taskButtons i,
+.checkBtn i{
+    background: #0c131f;
+    border-color: rgba(142, 197, 255, 0.5);
+}
+
+.taskAmount,
+.addBtn i,
+.calendarBtn i,
+.taskButtons i,
+.detailsToggleBtn,
+.sortOnceBtn,
+.alertToggleBtn{
+    color: #d6e7ff;
+}
+
+.taskInput,
+.matrixSelect,
+.difficultySelect,
+.durationInput,
+.deadlineInput,
+.editorTextInput,
+.editorMatrixSelect,
+.editorTaskTypeSelect,
+.editorDifficultySelect,
+.editorDurationInput,
+.editorDeadlineInput{
+    background: rgba(14, 21, 33, 0.93);
+    color: var(--lux-text);
+    border-color: rgba(142, 197, 255, 0.38);
+}
+
+.taskInput::placeholder,
+.durationInput::placeholder,
+.editorTextInput::placeholder,
+.editorDurationInput::placeholder{
+    color: rgba(184, 179, 167, 0.74);
+}
+
+.matrixSelect option,
+.difficultySelect option,
+.editorMatrixSelect option{
+    background: #121b2a;
+    color: #f1ebe0;
+}
+
+.typePill,
+.durationChip,
+.detailsToggleBtn,
+.sortOnceBtn,
+.alertToggleBtn,
+.taskViewBtn,
+.deadlinePresetBtn{
+    background: rgba(18, 28, 43, 0.88);
+    color: #dbe9fb;
+    border-color: rgba(142, 197, 255, 0.3);
+}
+
+.typePill.active,
+.durationChip.active,
+.taskViewBtn.active,
+.detailsToggleBtn[aria-expanded="true"]{
+    background: linear-gradient(100deg, rgba(215, 183, 120, 0.88), rgba(114, 161, 224, 0.9));
+    border-color: rgba(232, 213, 178, 0.7);
+    color: #0a111b;
+}
+
+.tasks li{
+    background: rgba(16, 23, 35, 0.88);
+    border-color: rgba(142, 197, 255, 0.28);
+}
+
+.taskText{
+    color: var(--lux-text);
+}
+
+.emptyTasksMsg{
+    background: rgba(16, 25, 39, 0.8);
+    border-color: rgba(142, 197, 255, 0.28);
+    color: var(--lux-muted);
+}
+
+.editorTaskTypeSelect,
+.editorDifficultySelect,
+.editorDurationInput,
+.editorCancelBtn,
+.editorSaveBtn,
+.editorCalendarBtn{
+    font-family: 'Inter', sans-serif;
+}
+
+.editorTaskTypeSelect,
+.editorDifficultySelect,
+.editorDurationInput,
+.editorTextInput,
+.editorMatrixSelect,
+.editorDeadlineInput{
+    background: rgba(14, 21, 33, 0.96);
+    color: var(--lux-text);
+}
+
+.editorCancelBtn{
+    background: rgba(20, 30, 45, 0.95);
+    border-color: rgba(142, 197, 255, 0.34);
+    color: #dce8fb;
+}
+
+.editorSaveBtn{
+    background: linear-gradient(96deg, rgba(215, 183, 120, 0.9), rgba(113, 161, 225, 0.92));
+    border-color: rgba(230, 211, 173, 0.8);
+    color: #0a111b;
+}
+
+/* Readability + animated gradient orbs tune */
+:root{
+    --lux-bg-1: #070b14;
+    --lux-bg-2: #111a2a;
+    --lux-panel: rgba(16, 24, 38, 0.9);
+    --lux-panel-soft: rgba(19, 29, 46, 0.84);
+    --lux-border: rgba(143, 191, 255, 0.45);
+    --lux-border-soft: rgba(143, 191, 255, 0.3);
+    --lux-text: #f7fbff;
+    --lux-muted: #d6e3f5;
+}
+
+body{
+    position: relative;
+    overflow-x: hidden;
+    background: linear-gradient(160deg, var(--lux-bg-1), var(--lux-bg-2));
+}
+
+body::before,
+body::after{
+    content: '';
+    position: fixed;
+    inset: auto;
+    width: 74vmax;
+    height: 74vmax;
+    border-radius: 50%;
+    filter: blur(70px);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.42;
+    will-change: transform;
+}
+
+body::before{
+    top: -24vmax;
+    left: -24vmax;
+    background:
+        radial-gradient(circle at 28% 30%, rgba(245, 247, 252, 0.9), rgba(194, 201, 214, 0.42) 38%, rgba(0, 0, 0, 0) 64%),
+        radial-gradient(circle at 70% 58%, rgba(205, 211, 223, 0.82), rgba(141, 149, 166, 0.34) 36%, rgba(0, 0, 0, 0) 66%);
+    animation: orbFloatA 28s ease-in-out infinite alternate;
+}
+
+body::after{
+    right: -24vmax;
+    bottom: -24vmax;
+    background:
+        radial-gradient(circle at 35% 42%, rgba(234, 239, 247, 0.88), rgba(178, 186, 200, 0.4) 37%, rgba(0, 0, 0, 0) 66%),
+        radial-gradient(circle at 74% 26%, rgba(212, 219, 231, 0.78), rgba(131, 140, 157, 0.3) 34%, rgba(0, 0, 0, 0) 67%);
+    animation: orbFloatB 32s ease-in-out infinite alternate;
+}
+
+@keyframes orbFloatA {
+    0% { transform: translate3d(0, 0, 0) scale(1); }
+    25% { transform: translate3d(12vmax, 6vmax, 0) scale(1.06); }
+    50% { transform: translate3d(20vmax, 18vmax, 0) scale(1.12); }
+    75% { transform: translate3d(4vmax, 28vmax, 0) scale(0.98); }
+    100% { transform: translate3d(-8vmax, 16vmax, 0) scale(0.92); }
+}
+
+@keyframes orbFloatB {
+    0% { transform: translate3d(0, 0, 0) scale(1); }
+    25% { transform: translate3d(-14vmax, -5vmax, 0) scale(1.07); }
+    50% { transform: translate3d(-24vmax, -18vmax, 0) scale(1.11); }
+    75% { transform: translate3d(-8vmax, -30vmax, 0) scale(1); }
+    100% { transform: translate3d(6vmax, -16vmax, 0) scale(0.93); }
+}
+
+.container{
+    position: relative;
+    z-index: 1;
+    background: linear-gradient(170deg, rgba(14, 22, 36, 0.93), rgba(9, 14, 24, 0.93));
+    border-color: rgba(148, 199, 255, 0.45);
+}
+
+.activitySummary,
+.quickAddHint,
+.optionsHint,
+.priorityModeHint,
+.activityDayLabel,
+.activityMonthLabel,
+.urgencyAlertText,
+.priorityToggleLabel span{
+    color: #dbe8fa;
+}
+
+.taskInput,
+.matrixSelect,
+.difficultySelect,
+.durationInput,
+.deadlineInput,
+.editorTextInput,
+.editorMatrixSelect,
+.editorTaskTypeSelect,
+.editorDifficultySelect,
+.editorDurationInput,
+.editorDeadlineInput,
+.taskViewBtn,
+.typePill,
+.durationChip,
+.detailsToggleBtn,
+.sortOnceBtn,
+.alertToggleBtn,
+.deadlinePresetBtn{
+    border-color: rgba(138, 194, 255, 0.52);
+    color: #eef5ff;
+}
+
+.taskInput::placeholder,
+.durationInput::placeholder,
+.editorTextInput::placeholder,
+.editorDurationInput::placeholder{
+    color: rgba(214, 230, 247, 0.78);
+}
+
+.tasks li{
+    background: rgba(15, 23, 38, 0.94);
+    border-color: rgba(138, 194, 255, 0.4);
+}
+
+.matrixBadge,
+.effortBadge,
+.difficultyBadge,
+.deadlineBadge,
+.countdownBadge{
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+.checkBtn i,
+.taskButtons i,
+.calendarBtn,
+.addBtn{
+    border-color: rgba(138, 194, 255, 0.66);
+}
+
+/* Final monochrome minimalism refinement */
+:root{
+    --mono-bg-1: #101214;
+    --mono-bg-2: #1a1d22;
+    --mono-surface: rgba(17, 20, 25, 0.9);
+    --mono-surface-soft: rgba(22, 26, 33, 0.86);
+    --mono-border: rgba(192, 196, 204, 0.34);
+    --mono-border-strong: rgba(214, 218, 226, 0.48);
+    --mono-text: #eceff4;
+    --mono-muted: #c7ced9;
+}
+
+body{
+    color: var(--mono-text);
+    background: linear-gradient(155deg, var(--mono-bg-1), var(--mono-bg-2));
+}
+
+body::before{
+    background: radial-gradient(circle at 30% 30%, rgba(245, 247, 252, 0.38), rgba(188, 194, 206, 0.22) 44%, rgba(0, 0, 0, 0) 74%);
+    opacity: 0.22;
+    animation: orbFloatA 30s ease-in-out infinite alternate;
+}
+
+body::after{
+    background: radial-gradient(circle at 40% 40%, rgba(222, 227, 236, 0.34), rgba(156, 164, 180, 0.18) 46%, rgba(0, 0, 0, 0) 76%);
+    opacity: 0.2;
+    animation: orbFloatB 34s ease-in-out infinite alternate;
+}
+
+.container{
+    background: linear-gradient(170deg, rgba(18, 22, 28, 0.94), rgba(12, 15, 20, 0.94));
+    border-color: var(--mono-border-strong);
+    box-shadow: 0 26px 62px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.title,
+.activityTitle,
+.motivatorText,
+.taskText,
+.taskAmount,
+.priorityToggleLabel span,
+.detailsToggleBtn,
+.sortOnceBtn,
+.alertToggleBtn,
+.taskViewBtn,
+.typePill,
+.durationChip,
+.deadlinePresetBtn,
+.addBtn i,
+.calendarBtn i,
+.taskButtons i{
+    color: var(--mono-text);
+}
+
+.activitySummary,
+.quickAddHint,
+.optionsHint,
+.priorityModeHint,
+.activityDayLabel,
+.activityMonthLabel,
+.urgencyAlertText{
+    color: var(--mono-muted);
+}
+
+.motivatorContainer,
+.activityPanel,
+.taskDetailsPanel.open,
+.urgencyAlert,
+.priorityControls,
+.tasks li{
+    background: var(--mono-surface-soft);
+    border-color: var(--mono-border);
+}
+
+.taskInput,
+.matrixSelect,
+.difficultySelect,
+.durationInput,
+.deadlineInput,
+.editorTextInput,
+.editorMatrixSelect,
+.editorTaskTypeSelect,
+.editorDifficultySelect,
+.editorDurationInput,
+.editorDeadlineInput,
+.typePill,
+.durationChip,
+.detailsToggleBtn,
+.sortOnceBtn,
+.alertToggleBtn,
+.taskViewBtn,
+.deadlinePresetBtn{
+    background: var(--mono-surface);
+    border-color: var(--mono-border);
+    color: var(--mono-text);
+}
+
+.taskInput::placeholder,
+.durationInput::placeholder,
+.editorTextInput::placeholder,
+.editorDurationInput::placeholder{
+    color: rgba(199, 206, 217, 0.76);
+}
+
+.matrixSelect:hover,
+.difficultySelect:hover,
+.deadlineInput:hover,
+.typePill:hover,
+.durationChip:hover,
+.detailsToggleBtn:hover,
+.sortOnceBtn:hover:not(:disabled),
+.alertToggleBtn:hover,
+.taskViewBtn:hover,
+.deadlinePresetBtn:hover{
+    background: rgba(35, 40, 49, 0.96);
+    border-color: var(--mono-border-strong);
+    color: #ffffff;
+}
+
+.matrixSelect:focus,
+.matrixSelect:focus-visible,
+.difficultySelect:focus,
+.difficultySelect:focus-visible,
+.deadlineInput:focus,
+.deadlineInput:focus-visible,
+.taskInput:focus,
+.taskInput:focus-visible,
+.editorTextInput:focus,
+.editorMatrixSelect:focus,
+.editorDeadlineInput:focus,
+.editorTaskTypeSelect:focus,
+.editorDifficultySelect:focus,
+.editorDurationInput:focus{
+    background: rgba(35, 40, 49, 0.98);
+    color: #ffffff;
+    border-color: rgba(238, 241, 247, 0.66);
+    box-shadow: 0 0 0 3px rgba(238, 241, 247, 0.14);
+}
+
+.typePill.active,
+.durationChip.active,
+.taskViewBtn.active,
+.detailsToggleBtn[aria-expanded="true"],
+.sortOnceBtn:active,
+.alertToggleBtn.enabled{
+    background: linear-gradient(120deg, #f0f2f5, #d8dde6);
+    border-color: #f1f4f8;
+    color: #12151a;
+}
+
+.addBtn,
+.calendarBtn,
+.taskButtons i,
+.checkBtn i,
+.taskAmountContainer,
+.editorCalendarBtn{
+    background: #13171d;
+    border-color: var(--mono-border-strong);
+}
+
+.taskButtons i:hover,
+.checkBtn i:hover,
+.calendarBtn:hover,
+.addBtn:hover,
+.editorCalendarBtn:hover{
+    background: #21262f;
+    color: #ffffff;
+}
+
+.matrixSelect option,
+.difficultySelect option,
+.editorMatrixSelect option{
+    background: #171b22;
+    color: #edf1f6;
+}
+
+/* Keep semantic color cues for status badges */
+.matrix-do{ background: #ffd8d3; border-color: #ffb5ab; color: #7f1f17; }
+.matrix-schedule{ background: #dde7ff; border-color: #becdfa; color: #2c3d7c; }
+.matrix-delegate{ background: #ffe8c9; border-color: #f6c78a; color: #815005; }
+.matrix-eliminate{ background: #dbe8df; border-color: #bfd3c5; color: #2e5540; }
+
+.difficulty-1{ background: #dbf1df; border-color: #bce0c2; color: #275e32; }
+.difficulty-2{ background: #d8ebff; border-color: #b7d8f5; color: #1f527c; }
+.difficulty-3{ background: #fff0cd; border-color: #efd59c; color: #7e5a13; }
+.difficulty-4{ background: #ffdfc8; border-color: #f0bfa0; color: #7b3c16; }
+.difficulty-5{ background: #ffd6d6; border-color: #f2b1b1; color: #7f2121; }
+
+.deadline-none, .countdown-none{ background: #e4e8ef; border-color: #c9d1dd; color: #405470; }
+.deadline-normal, .countdown-normal{ background: #dcedff; border-color: #b9d5f5; color: #244f83; }
+.deadline-soon, .countdown-soon{ background: #ffe9c9; border-color: #f2c78b; color: #7e4f0c; }
+.deadline-critical, .countdown-critical{ background: #ffd9bf; border-color: #f0b187; color: #86400f; }
+.deadline-overdue, .countdown-overdue{ background: #ffd2d2; border-color: #efabab; color: #8a1e1e; }
+
+/* Premium violet gradient mode */
+:root{
+    --violet-bg-1: #050225;
+    --violet-bg-2: #0a0537;
+    --violet-bg-3: #140a46;
+    --violet-surface: rgba(20, 13, 56, 0.82);
+    --violet-surface-soft: rgba(24, 16, 66, 0.72);
+    --violet-border: rgba(170, 152, 255, 0.44);
+    --violet-border-soft: rgba(170, 152, 255, 0.28);
+    --violet-text: #f6f4ff;
+    --violet-muted: #d7d0ff;
+    --violet-accent: #b58bff;
+    --violet-accent-2: #7f86ff;
+}
+
+html{
+    position: relative;
+    background: linear-gradient(150deg, var(--violet-bg-1), var(--violet-bg-2), var(--violet-bg-3));
+}
+
+html::before,
+html::after{
+    content: '';
+    position: fixed;
+    width: 62vmax;
+    height: 62vmax;
+    border-radius: 50%;
+    filter: blur(72px);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.46;
+    will-change: transform;
+}
+
+html::before{
+    top: -28vmax;
+    right: -20vmax;
+    background: radial-gradient(circle at 36% 32%, rgba(174, 140, 255, 0.95), rgba(98, 79, 228, 0.42) 48%, rgba(0, 0, 0, 0) 72%);
+    animation: orbFloatC 26s ease-in-out infinite alternate;
+}
+
+html::after{
+    left: -24vmax;
+    bottom: -26vmax;
+    background: radial-gradient(circle at 42% 42%, rgba(125, 154, 255, 0.9), rgba(95, 77, 225, 0.36) 46%, rgba(0, 0, 0, 0) 74%);
+    animation: orbFloatD 30s ease-in-out infinite alternate;
+}
+
+body{
+    color: var(--violet-text);
+    background: linear-gradient(150deg, var(--violet-bg-1), var(--violet-bg-2), var(--violet-bg-3));
+}
+
+body::before,
+body::after{
+    opacity: 0.48;
+}
+
+body::before{
+    top: -26vmax;
+    left: -22vmax;
+    background:
+        radial-gradient(circle at 28% 30%, rgba(179, 144, 255, 0.9), rgba(89, 76, 222, 0.46) 38%, rgba(0, 0, 0, 0) 66%),
+        radial-gradient(circle at 74% 56%, rgba(147, 165, 255, 0.78), rgba(76, 93, 214, 0.34) 36%, rgba(0, 0, 0, 0) 67%);
+    animation: orbFloatA 24s ease-in-out infinite alternate;
+}
+
+body::after{
+    right: -22vmax;
+    bottom: -24vmax;
+    background:
+        radial-gradient(circle at 38% 44%, rgba(198, 150, 255, 0.88), rgba(109, 85, 232, 0.42) 37%, rgba(0, 0, 0, 0) 66%),
+        radial-gradient(circle at 72% 28%, rgba(134, 159, 255, 0.72), rgba(77, 95, 214, 0.28) 34%, rgba(0, 0, 0, 0) 68%);
+    animation: orbFloatB 32s ease-in-out infinite alternate;
+}
+
+@keyframes orbFloatC {
+    0% { transform: translate3d(0, 0, 0) scale(1); }
+    50% { transform: translate3d(-16vmax, 8vmax, 0) scale(1.09); }
+    100% { transform: translate3d(-6vmax, 22vmax, 0) scale(0.94); }
+}
+
+@keyframes orbFloatD {
+    0% { transform: translate3d(0, 0, 0) scale(1); }
+    50% { transform: translate3d(17vmax, -10vmax, 0) scale(1.12); }
+    100% { transform: translate3d(8vmax, -22vmax, 0) scale(0.93); }
+}
+
+.container{
+    background: linear-gradient(170deg, rgba(22, 14, 62, 0.9), rgba(12, 8, 44, 0.9));
+    border-color: var(--violet-border);
+    box-shadow: 0 28px 68px rgba(4, 3, 24, 0.56), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.title,
+.activityTitle,
+.motivatorText,
+.taskText,
+.taskAmount,
+.priorityToggleLabel span,
+.detailsToggleBtn,
+.sortOnceBtn,
+.alertToggleBtn,
+.taskViewBtn,
+.typePill,
+.durationChip,
+.deadlinePresetBtn,
+.addBtn i,
+.calendarBtn i,
+.taskButtons i{
+    color: var(--violet-text);
+}
+
+.activitySummary,
+.quickAddHint,
+.optionsHint,
+.priorityModeHint,
+.activityDayLabel,
+.activityMonthLabel,
+.urgencyAlertText{
+    color: var(--violet-muted);
+}
+
+.motivatorContainer,
+.activityPanel,
+.taskDetailsPanel.open,
+.urgencyAlert,
+.priorityControls,
+.tasks li{
+    background: var(--violet-surface-soft);
+    border-color: var(--violet-border-soft);
+}
+
+.taskInput,
+.matrixSelect,
+.difficultySelect,
+.durationInput,
+.deadlineInput,
+.editorTextInput,
+.editorMatrixSelect,
+.editorTaskTypeSelect,
+.editorDifficultySelect,
+.editorDurationInput,
+.editorDeadlineInput,
+.typePill,
+.durationChip,
+.detailsToggleBtn,
+.sortOnceBtn,
+.alertToggleBtn,
+.taskViewBtn,
+.deadlinePresetBtn{
+    background: var(--violet-surface);
+    border-color: var(--violet-border-soft);
+    color: var(--violet-text);
+}
+
+.taskInput::placeholder,
+.durationInput::placeholder,
+.editorTextInput::placeholder,
+.editorDurationInput::placeholder{
+    color: rgba(215, 208, 255, 0.76);
+}
+
+.matrixSelect:hover,
+.difficultySelect:hover,
+.deadlineInput:hover,
+.typePill:hover,
+.durationChip:hover,
+.detailsToggleBtn:hover,
+.sortOnceBtn:hover:not(:disabled),
+.alertToggleBtn:hover,
+.taskViewBtn:hover,
+.deadlinePresetBtn:hover{
+    background: rgba(42, 30, 100, 0.96);
+    border-color: rgba(205, 194, 255, 0.62);
+    color: #ffffff;
+}
+
+.matrixSelect:focus,
+.matrixSelect:focus-visible,
+.difficultySelect:focus,
+.difficultySelect:focus-visible,
+.deadlineInput:focus,
+.deadlineInput:focus-visible,
+.taskInput:focus,
+.taskInput:focus-visible,
+.editorTextInput:focus,
+.editorMatrixSelect:focus,
+.editorDeadlineInput:focus,
+.editorTaskTypeSelect:focus,
+.editorDifficultySelect:focus,
+.editorDurationInput:focus{
+    background: rgba(45, 33, 106, 0.98);
+    color: #ffffff;
+    border-color: rgba(225, 217, 255, 0.72);
+    box-shadow: 0 0 0 3px rgba(171, 145, 255, 0.3);
+}
+
+.typePill.active,
+.durationChip.active,
+.taskViewBtn.active,
+.detailsToggleBtn[aria-expanded="true"],
+.sortOnceBtn:active,
+.alertToggleBtn.enabled{
+    background: linear-gradient(120deg, #b58bff, #7f86ff);
+    border-color: rgba(232, 225, 255, 0.8);
+    color: #fdfcff;
+}
+
+.progressBarContainer{
+    background: rgba(10, 7, 33, 0.95);
+    border-color: rgba(180, 164, 255, 0.56);
+}
+
+.progressBar{
+    background: linear-gradient(90deg, #7f86ff, #b58bff 60%, #d2a0ff 100%);
+}
+
+.addBtn,
+.calendarBtn,
+.taskButtons i,
+.checkBtn i,
+.taskAmountContainer,
+.editorCalendarBtn{
+    background: #1a123f;
+    border-color: rgba(188, 173, 255, 0.68);
+}
+
+.taskButtons i:hover,
+.checkBtn i:hover,
+.calendarBtn:hover,
+.addBtn:hover,
+.editorCalendarBtn:hover{
+    background: #2b1f69;
+    color: #ffffff;
+}
+
+.urgencyAlert.urgency-soon{
+    background: #ffe6bf;
+    border-color: #f1bf71;
+}
+
+.urgencyAlert.urgency-critical{
+    background: #ffd6be;
+    border-color: #efad81;
+}
+
+.urgencyAlert.urgency-overdue{
+    background: linear-gradient(135deg, #ffd7d7 0%, #ffc9c9 52%, #ffbdbd 100%);
+    border-color: #e98f8f;
+}
+
+.urgencyAlert.urgency-soon .urgencyAlertText{
+    color: #6f470d;
+}
+
+.urgencyAlert.urgency-critical .urgencyAlertText{
+    color: #7b370f;
+}
+
+.urgencyAlert.urgency-overdue .urgencyAlertText{
+    color: #7c1d1d;
+}
+
+.tasks li.dragging{
+    background: linear-gradient(165deg, rgba(66, 49, 145, 0.94), rgba(44, 31, 108, 0.95));
+    border-color: rgba(204, 191, 255, 0.8);
+    box-shadow: 0 14px 28px rgba(17, 10, 48, 0.55);
+}
+
+.tasks li.dragging .taskText,
+.tasks li.dragging .taskMeta,
+.tasks li.dragging .taskButtons i,
+.tasks li.dragging .checkBtn i{
+    color: #ffffff;
+}
+
+.tasks li.drag-over-slot{
+    background: linear-gradient(165deg, rgba(74, 55, 162, 0.96), rgba(49, 35, 121, 0.96));
+    border-color: rgba(216, 204, 255, 0.86);
+    box-shadow: 0 0 0 4px rgba(181, 156, 255, 0.28), 0 12px 24px rgba(22, 12, 58, 0.52);
+}
+
+.matrixSelect option,
+.difficultySelect option,
+.editorMatrixSelect option{
+    background: #191040;
+    color: #f7f4ff;
+}
+
+@media (prefers-reduced-motion: reduce){
+    html::before,
+    html::after,
+    body::before,
+    body::after{
+        animation: none;
+    }
+}
+
+/* Gradient-everywhere pass */
+.container{
+    background:
+        radial-gradient(140% 120% at 0% 0%, rgba(181, 133, 255, 0.24), transparent 56%),
+        radial-gradient(120% 120% at 100% 100%, rgba(124, 141, 255, 0.22), transparent 52%),
+        linear-gradient(165deg, rgba(35, 22, 92, 0.95), rgba(20, 12, 64, 0.94) 48%, rgba(12, 8, 44, 0.95));
+}
+
+.to-doList{
+    background:
+        radial-gradient(95% 80% at 8% 0%, rgba(173, 127, 255, 0.16), transparent 58%),
+        radial-gradient(95% 80% at 95% 100%, rgba(124, 142, 255, 0.14), transparent 62%);
+}
+
+.motivatorContainer,
+.activityPanel,
+.taskDetailsPanel.open,
+.urgencyAlert,
+.priorityControls,
+.tasks li{
+    background:
+        linear-gradient(155deg, rgba(50, 34, 118, 0.84), rgba(30, 21, 83, 0.88) 52%, rgba(22, 14, 66, 0.9));
+}
+
+.taskInput,
+.matrixSelect,
+.difficultySelect,
+.durationInput,
+.deadlineInput,
+.editorTextInput,
+.editorMatrixSelect,
+.editorTaskTypeSelect,
+.editorDifficultySelect,
+.editorDurationInput,
+.editorDeadlineInput,
+.typePill,
+.durationChip,
+.detailsToggleBtn,
+.sortOnceBtn,
+.alertToggleBtn,
+.taskViewBtn,
+.deadlinePresetBtn{
+    background:
+        linear-gradient(145deg, rgba(49, 34, 117, 0.92), rgba(32, 22, 86, 0.94));
+}
+
+.addBtn,
+.calendarBtn,
+.taskButtons i,
+.checkBtn i,
+.taskAmountContainer,
+.editorCalendarBtn{
+    background:
+        linear-gradient(145deg, rgba(63, 46, 140, 0.94), rgba(36, 25, 95, 0.96));
+}
+
+.typePill.active,
+.durationChip.active,
+.taskViewBtn.active,
+.detailsToggleBtn[aria-expanded="true"],
+.sortOnceBtn:active,
+.alertToggleBtn.enabled{
+    background:
+        linear-gradient(120deg, rgba(193, 152, 255, 0.98), rgba(132, 140, 255, 0.98));
+}
+
+.matrixBadge,
+.difficultyBadge,
+.effortBadge,
+.deadlineBadge,
+.countdownBadge{
+    background:
+        linear-gradient(135deg, rgba(243, 236, 255, 0.98), rgba(222, 231, 255, 0.98));
+}
+
+.urgencyAlert.urgency-soon{
+    background:
+        linear-gradient(135deg, rgba(255, 229, 168, 0.96), rgba(255, 205, 133, 0.96));
+}
+
+.urgencyAlert.urgency-critical{
+    background:
+        linear-gradient(135deg, rgba(255, 205, 164, 0.96), rgba(255, 174, 128, 0.96));
+}
+
+.urgencyAlert.urgency-overdue{
+    background:
+        linear-gradient(135deg, rgba(255, 114, 114, 0.98), rgba(226, 72, 72, 0.98) 52%, rgba(126, 22, 50, 0.98));
+    border-color: rgba(255, 164, 164, 0.92);
+    box-shadow: 0 8px 22px rgba(120, 12, 28, 0.42), inset 0 1px 0 rgba(255, 214, 214, 0.28);
+}
+
+.urgencyAlert.urgency-overdue .urgencyAlertText{
+    color: #fff1f1;
+    text-shadow: 0 1px 0 rgba(92, 8, 22, 0.55);
+}
+
+.checkBtn i{
+    color: rgba(198, 183, 255, 0.25);
+    border-color: rgba(188, 173, 255, 0.68);
+}
+
+.tasks li.completed .checkBtn i{
+    color: #f3edff;
+    background: linear-gradient(140deg, rgba(180, 132, 255, 0.98), rgba(122, 128, 255, 0.98));
+    border-color: rgba(229, 218, 255, 0.85);
+    opacity: 1;
+}
+
+/* Wrapper and panel gradient polish */
+.container{
+    background:
+        linear-gradient(165deg, rgba(39, 24, 96, 0.94) 0%, rgba(22, 14, 62, 0.93) 38%, rgba(12, 8, 44, 0.94) 100%);
+}
+
+.to-doList{
+    background:
+        radial-gradient(90% 80% at 10% 0%, rgba(173, 128, 255, 0.12), transparent 55%),
+        radial-gradient(90% 80% at 95% 100%, rgba(123, 139, 255, 0.1), transparent 58%);
+}
+
+.motivatorContainer,
+.activityPanel,
+.taskDetailsPanel.open,
+.urgencyAlert,
+.priorityControls,
+.tasks li{
+    background:
+        linear-gradient(160deg, rgba(34, 22, 87, 0.82) 0%, rgba(23, 16, 66, 0.86) 52%, rgba(17, 11, 53, 0.88) 100%);
+}
+
+.taskInput,
+.matrixSelect,
+.difficultySelect,
+.durationInput,
+.deadlineInput,
+.typePill,
+.durationChip,
+.detailsToggleBtn,
+.sortOnceBtn,
+.alertToggleBtn,
+.taskViewBtn,
+.deadlinePresetBtn{
+    background:
+        linear-gradient(145deg, rgba(39, 27, 92, 0.9), rgba(27, 18, 72, 0.9));
+}
+
+/* Calmer badge palette: neutral by default, color only for urgency */
+.matrixBadge,
+.difficultyBadge,
+.effortBadge,
+.deadlineBadge,
+.countdownBadge,
+.subtaskProgressBadge,
+.scheduleBadge{
+    background: rgba(233, 238, 255, 0.92);
+    color: #2f3f66;
+    border: 1px solid rgba(184, 198, 232, 0.95);
+}
+
+.matrix-do,
+.matrix-schedule,
+.matrix-delegate,
+.matrix-eliminate,
+.difficulty-1,
+.difficulty-2,
+.difficulty-3,
+.difficulty-4,
+.difficulty-5,
+.deadline-none,
+.countdown-none,
+.deadline-normal,
+.countdown-normal{
+    background: rgba(233, 238, 255, 0.92);
+    color: #2f3f66;
+    border: 1px solid rgba(184, 198, 232, 0.95);
+}
+
+.deadline-soon,
+.countdown-soon{
+    background: #ffeccd;
+    color: #7d4f0e;
+    border-color: #f3ca8e;
+}
+
+.deadline-critical,
+.countdown-critical{
+    background: #ffdcca;
+    color: #884315;
+    border-color: #efb48f;
+}
+
+.deadline-overdue,
+.countdown-overdue{
+    background: #ffd6d6;
+    color: #8b2020;
+    border-color: #efaaaa;
+}
+
+/* Final control icon clarity */
+.matrixSelect,
+.difficultySelect{
+    appearance: auto;
+    -webkit-appearance: menulist;
+    -moz-appearance: auto;
+    padding-right: 12px;
+}
+
+.deadlineInput{
+    color-scheme: dark;
+}
+
+.deadlineInput::-webkit-calendar-picker-indicator{
+    filter: invert(90%) sepia(22%) saturate(315%) hue-rotate(205deg) brightness(108%) contrast(102%) !important;
+    opacity: 0.92;
+    cursor: pointer;
+}
+
+.deadlineInput::-webkit-calendar-picker-indicator:hover{
+    opacity: 1;
+}
+
+/* Final compact UX refinements */
+.durationWrap{
+    gap: 10px;
+}
+
+.durationInput{
+    width: 132px;
+    min-width: 132px;
+}
+
+.durationChips{
+    gap: 8px;
+}
+
+.durationChip{
+    min-width: 48px;
+    text-align: center;
+}
+
+.priorityToggleLabel{
+    gap: 10px;
+}
+
+.priorityToggle{
+    appearance: none;
+    -webkit-appearance: none;
+    width: 44px;
+    height: 24px;
+    border-radius: 999px;
+    border: 1px solid rgba(184, 167, 255, 0.62);
+    background: linear-gradient(135deg, rgba(50, 35, 115, 0.92), rgba(33, 23, 82, 0.94));
+    cursor: pointer;
+    position: relative;
+    display: inline-grid;
+    align-items: center;
+    padding: 2px;
+    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.priorityToggle::before{
+    content: '';
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: linear-gradient(140deg, #f5f0ff, #e1d3ff);
+    box-shadow: 0 2px 6px rgba(11, 7, 34, 0.45);
+    transform: translateX(0);
+    transition: transform 0.2s ease;
+}
+
+.priorityToggle:checked{
+    background: linear-gradient(120deg, rgba(182, 141, 255, 0.95), rgba(126, 138, 255, 0.95));
+    border-color: rgba(232, 225, 255, 0.82);
+    box-shadow: 0 0 0 3px rgba(173, 145, 255, 0.26);
+}
+
+.priorityToggle:checked::before{
+    transform: translateX(20px);
+    background: linear-gradient(140deg, #ffffff, #f1e8ff);
+}
+
+.priorityToggle:focus-visible{
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(173, 145, 255, 0.3);
+}
+
+/* Overdue notification badge */
+.taskViewBtn[data-view="overdue"]{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.overdueCountBadge{
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    line-height: 1;
+    font-weight: 800;
+    color: #fff4ed;
+    background: linear-gradient(135deg, #ff864d, #ff4b31 58%, #b9152b);
+    border: 1px solid rgba(255, 199, 173, 0.9);
+    box-shadow: 0 3px 10px rgba(167, 35, 23, 0.42), inset 0 1px 0 rgba(255, 230, 210, 0.4);
+}
+
+.overdueCountBadge.visible{
+    display: inline-flex;
+    animation: overdueBadgePulse 1.9s ease-in-out infinite;
+}
+
+.taskViewBtn.active .overdueCountBadge{
+    background: linear-gradient(135deg, #ff9967, #ff5a3b 60%, #c31c35);
+    border-color: rgba(255, 224, 206, 0.95);
+}
+
+@keyframes overdueBadgePulse{
+    0%, 100%{
+        transform: scale(1);
+        box-shadow: 0 3px 10px rgba(167, 35, 23, 0.42), inset 0 1px 0 rgba(255, 230, 210, 0.4);
+    }
+    50%{
+        transform: scale(1.08);
+        box-shadow: 0 5px 14px rgba(188, 36, 20, 0.5), inset 0 1px 0 rgba(255, 240, 228, 0.48);
+    }
+}
+
+/* Final editor modal theming (prevents legacy light overrides) */
+.taskEditorOverlay{
+    background: rgba(6, 4, 24, 0.68);
+    backdrop-filter: blur(4px);
+}
+
+.taskEditorCard{
+    background:
+        linear-gradient(160deg, rgba(33, 22, 86, 0.96) 0%, rgba(24, 16, 67, 0.96) 52%, rgba(16, 11, 52, 0.97) 100%);
+    border: 2px solid rgba(178, 161, 255, 0.52);
+    box-shadow: 0 22px 52px rgba(8, 4, 30, 0.62), inset 0 1px 0 rgba(235, 229, 255, 0.09);
+}
+
+.taskEditorCard h2,
+.taskEditorCard label{
+    color: #f4efff;
+}
+
+.taskEditorCard .editorTextInput,
+.taskEditorCard .editorMatrixSelect,
+.taskEditorCard .editorTaskTypeSelect,
+.taskEditorCard .editorDifficultySelect,
+.taskEditorCard .editorDurationInput,
+.taskEditorCard .editorDeadlineInput{
+    background: linear-gradient(145deg, rgba(53, 39, 120, 0.95), rgba(35, 24, 92, 0.96));
+    border-color: rgba(185, 167, 255, 0.48);
+    color: #f7f3ff;
+}
+
+.taskEditorCard .editorTextInput::placeholder,
+.taskEditorCard .editorDurationInput::placeholder{
+    color: rgba(217, 206, 255, 0.72);
+}
+
+.taskEditorCard .editorTextInput:hover,
+.taskEditorCard .editorMatrixSelect:hover,
+.taskEditorCard .editorTaskTypeSelect:hover,
+.taskEditorCard .editorDifficultySelect:hover,
+.taskEditorCard .editorDurationInput:hover,
+.taskEditorCard .editorDeadlineInput:hover,
+.taskEditorCard .editorTextInput:focus,
+.taskEditorCard .editorMatrixSelect:focus,
+.taskEditorCard .editorTaskTypeSelect:focus,
+.taskEditorCard .editorDifficultySelect:focus,
+.taskEditorCard .editorDurationInput:focus,
+.taskEditorCard .editorDeadlineInput:focus,
+.taskEditorCard .editorTextInput:focus-visible,
+.taskEditorCard .editorMatrixSelect:focus-visible,
+.taskEditorCard .editorTaskTypeSelect:focus-visible,
+.taskEditorCard .editorDifficultySelect:focus-visible,
+.taskEditorCard .editorDurationInput:focus-visible,
+.taskEditorCard .editorDeadlineInput:focus-visible{
+    background: linear-gradient(145deg, rgba(61, 45, 133, 0.98), rgba(41, 29, 108, 0.99));
+    border-color: rgba(223, 213, 255, 0.74);
+    color: #ffffff;
+    box-shadow: 0 0 0 3px rgba(170, 143, 255, 0.3);
+}
+
+.taskEditorCard .editorDeadlineWrap:hover{
+    background: rgba(58, 42, 132, 0.56);
+    box-shadow: 0 0 0 3px rgba(171, 145, 255, 0.2);
+}
+
+.taskEditorCard .editorCancelBtn,
+.taskEditorCard .editorSaveBtn{
+    border-radius: 12px;
+    border: 2px solid rgba(194, 178, 255, 0.58);
+    transition: transform 0.16s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.taskEditorCard .editorCancelBtn{
+    background: linear-gradient(145deg, rgba(40, 51, 75, 0.95), rgba(27, 36, 58, 0.96));
+    color: #e6ecff;
+}
+
+.taskEditorCard .editorSaveBtn{
+    background: linear-gradient(120deg, rgba(202, 167, 255, 0.97), rgba(143, 150, 255, 0.98));
+    border-color: rgba(231, 222, 255, 0.9);
+    color: #120b30;
+}
+
+.taskEditorCard .editorCancelBtn:hover,
+.taskEditorCard .editorSaveBtn:hover{
+    transform: translateY(-1px);
+}
+
+.taskEditorCard .editorCancelBtn:hover{
+    background: linear-gradient(145deg, rgba(53, 66, 95, 0.98), rgba(36, 46, 73, 0.99));
+    color: #ffffff;
+    border-color: rgba(214, 201, 255, 0.78);
+}
+
+.taskEditorCard .editorSaveBtn:hover{
+    background: linear-gradient(120deg, rgba(212, 181, 255, 0.99), rgba(154, 161, 255, 0.99));
+    color: #10082b;
+    border-color: rgba(246, 240, 255, 0.96);
+    box-shadow: 0 6px 18px rgba(93, 67, 176, 0.38);
+}
+
+.taskEditorCard .editorCancelBtn:active,
+.taskEditorCard .editorSaveBtn:active{
+    transform: translateY(0);
+}
+
+.taskEditorCard .editorCancelBtn:focus-visible,
+.taskEditorCard .editorSaveBtn:focus-visible{
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(174, 148, 255, 0.32);
+}
+
+/* Final dropdown popup theming */
+.matrixSelect,
+.difficultySelect,
+.editorMatrixSelect,
+.editorTaskTypeSelect,
+.editorDifficultySelect{
+    color-scheme: dark;
+}
+
+.matrixSelect option,
+.difficultySelect option,
+.editorMatrixSelect option,
+.editorTaskTypeSelect option,
+.editorDifficultySelect option{
+    background: #1a1143;
+    color: #f7f3ff;
+    font-weight: 600;
+}
+
+/* Clarity + guidance UI */
+.onboardingHint{
+    width: 92%;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(188, 170, 255, 0.5);
+    background: linear-gradient(135deg, rgba(66, 50, 143, 0.84), rgba(43, 31, 105, 0.88));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.onboardingHint.hidden{
+    display: none;
+}
+
+.onboardingHintText{
+    font-size: 12px;
+    line-height: 1.4;
+    color: #f6f0ff;
+}
+
+.onboardingDismissBtn{
+    border: 1px solid rgba(221, 208, 255, 0.75);
+    border-radius: 999px;
+    height: 30px;
+    padding: 0 11px;
+    background: rgba(233, 222, 255, 0.2);
+    color: #f8f3ff;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.onboardingDismissBtn:hover{
+    background: rgba(245, 238, 255, 0.28);
+}
+
+.detailsHelp{
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: rgba(232, 224, 255, 0.9);
+    font-weight: 600;
+}
+
+.nextTaskPanel{
+    width: 92%;
+    margin-top: 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(189, 172, 255, 0.54);
+    background: linear-gradient(155deg, rgba(62, 46, 140, 0.84), rgba(37, 26, 96, 0.88));
+    padding: 10px 12px;
+}
+
+.nextTaskPanel.hidden{
+    display: none;
+}
+
+.nextTaskLabel{
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    color: rgba(220, 209, 255, 0.92);
+    text-transform: uppercase;
+}
+
+.nextTaskTitle{
+    margin-top: 4px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.nextTaskReasonWrap{
+    margin-top: 8px;
+}
+
+.nextTaskReasonLabel{
+    font-size: 12px;
+    color: rgba(231, 221, 255, 0.92);
+    margin-bottom: 4px;
+}
+
+.nextTaskReasons{
+    margin-left: 16px;
+    color: rgba(245, 240, 255, 0.95);
+    font-size: 12px;
+    line-height: 1.4;
+    display: grid;
+    gap: 3px;
+}
+
+.nextTaskActions{
+    margin-top: 9px;
+    display: flex;
+    gap: 8px;
+}
+
+.rankNowBtn,
+.focusNextBtn{
+    border: 1px solid rgba(192, 174, 255, 0.62);
+    background: linear-gradient(145deg, rgba(46, 33, 109, 0.95), rgba(31, 22, 82, 0.95));
+    color: #f4efff;
+    border-radius: 999px;
+    height: 32px;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.rankNowBtn,
+.focusNextBtn{
+    cursor: pointer;
+}
+
+.rankNowBtn:hover,
+.focusNextBtn:hover{
+    border-color: rgba(223, 212, 255, 0.84);
+    background: linear-gradient(145deg, rgba(61, 45, 132, 0.96), rgba(42, 30, 108, 0.96));
+}
+
+/* Usability fixes for new controls */
+.rankNowBtn,
+.focusNextBtn,
+.onboardingDismissBtn{
+    white-space: nowrap;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.rankNowBtn{
+    min-width: 92px;
+}
+
+.onboardingDismissBtn{
+    min-width: 72px;
+}
+
+.priorityHeaderRow{
+    flex-wrap: wrap;
+    align-items: center;
+    row-gap: 8px;
+}
+
+.priorityToggleLabel{
+    flex: 1 1 190px;
+    min-width: 180px;
+}
+
+.sortOnceBtn,
+.alertToggleBtn{
+    flex: 0 0 auto;
+}
+
+/* Use desktop space better: split into main + side rail */
+@media (min-width: 1060px){
+    .container{
+        width: min(1160px, 96vw);
+    }
+
+    .to-doList{
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 330px;
+        column-gap: 16px;
+        align-items: start;
+    }
+
+    .title,
+    .motivatorContainer,
+    .inputContainer,
+    .taskDetailsPanel,
+    .onboardingHint,
+    .urgencyAlert,
+    .taskViews,
+    .tasks{
+        grid-column: 1;
+        width: 100%;
+    }
+
+    .activityPanel,
+    .nextTaskPanel,
+    .priorityControls{
+        grid-column: 2;
+        width: 100%;
+    }
+
+    .activityPanel{
+        margin-top: 4px;
+    }
+
+    .tasks{
+        margin-top: 2px;
+    }
+
+    .priorityControls{
+        position: static;
+        margin-top: 10px;
+    }
+}
+
+@media (max-width: 700px){
+    .onboardingHint{
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .priorityHeaderRow{
+        flex-wrap: wrap;
+    }
+
+    .nextTaskActions{
+        flex-wrap: wrap;
+    }
+}
+
+/* Structural layout split: not one centered block */
+.container{
+    width: min(1280px, 97vw);
+    min-height: auto;
+    height: auto;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+.appShell{
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 430px;
+    gap: 18px;
+    align-items: stretch;
+}
+
+.mainColumn,
+.sideColumn{
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.mainColumn{
+    margin-top: 10px;
+}
+
+.sideColumn{
+    margin-top: 100px;
+}
+
+.mainColumn .title,
+.mainColumn .motivatorContainer,
+.mainColumn .inputContainer,
+.mainColumn .onboardingHint,
+.mainColumn .taskDetailsPanel,
+.mainColumn .urgencyAlert,
+.mainColumn .nextTaskPanel,
+.mainColumn .taskViews,
+.mainColumn .tasks,
+.sideColumn .priorityControls{
+    width: 100%;
+    margin-top: 0;
+}
+
+.sideColumn .activityPanel{
+    width: 100%;
+    margin-top: 0;
+    min-height: 0;
+}
+
+.mainColumn .tasks{
+    transform: none;
+}
+
+.mainColumn .title{
+    margin-bottom: 4px;
+    text-align: center;
+}
+
+.sideColumn .priorityControls{
+    position: static;
+}
+
+@media (max-width: 1060px){
+    .appShell{
+        grid-template-columns: 1fr;
+    }
+
+    .mainColumn{
+        margin-top: 0;
+    }
+
+    .sideColumn{
+        margin-top: 0;
+    }
+
+    .sideColumn .priorityControls{
+        position: static;
+    }
+
+    .sideColumn .activityPanel{
+        margin-top: 0;
+        min-height: 0;
+    }
+}
+
+/* Prioritize panel layout: avoid flat full-width stack */
+.mainColumn .taskDetailsPanel.open{
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(169, 152, 245, 0.38);
+    background: linear-gradient(160deg, rgba(41, 28, 104, 0.5), rgba(26, 18, 79, 0.54));
+}
+
+.mainColumn .taskDetailsPanel .detailsGrid{
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    gap: 10px 12px;
+    align-items: start;
+}
+
+.mainColumn .taskDetailsPanel .matrixSelect{
+    grid-column: 1;
+}
+
+.mainColumn .taskDetailsPanel .difficultySelect{
+    grid-column: 2;
+}
+
+.mainColumn .taskDetailsPanel .effortContainer,
+.mainColumn .taskDetailsPanel .deadlineContainer{
+    border: 1px solid rgba(173, 156, 246, 0.32);
+    border-radius: 12px;
+    background: rgba(30, 20, 84, 0.44);
+    padding: 10px;
+}
+
+.mainColumn .taskDetailsPanel .effortContainer{
+    grid-column: 1;
+    gap: 10px;
+}
+
+.mainColumn .taskDetailsPanel .deadlineContainer{
+    grid-column: 2;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+}
+
+.mainColumn .taskDetailsPanel .deadlineTag{
+    height: 36px;
+}
+
+.mainColumn .taskDetailsPanel .deadlineInput{
+    height: 46px;
+}
+
+.mainColumn .taskDetailsPanel .durationWrap{
+    align-items: flex-start;
+    flex-direction: column;
+}
+
+@media (max-width: 1060px){
+    .mainColumn .taskDetailsPanel .detailsGrid{
+        grid-template-columns: 1fr;
+    }
+
+    .mainColumn .taskDetailsPanel .matrixSelect,
+    .mainColumn .taskDetailsPanel .difficultySelect,
+    .mainColumn .taskDetailsPanel .effortContainer,
+    .mainColumn .taskDetailsPanel .deadlineContainer{
+        grid-column: 1;
+    }
+}
+
+/* Activity panel refinements */
+.activityPanel{
+    padding: 10px 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.activityHeader{
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.activitySummary{
+    width: 100%;
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.activityLegend{
+    margin-top: 2px;
+}
+
+@media (max-width: 740px){
+    .activitySummary{
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+    }
+}
+
+/* Themed tooltip replaces native black tooltip */
+.activityTooltip{
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 1200;
+    pointer-events: none;
+    border: 1px solid rgba(220, 207, 255, 0.72);
+    border-radius: 9px;
+    padding: 7px 9px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #f6efff;
+    background: linear-gradient(145deg, rgba(67, 50, 143, 0.98), rgba(40, 28, 103, 0.99));
+    box-shadow: 0 8px 22px rgba(17, 9, 49, 0.5);
+}
+
+.activityTooltip.hidden{
+    display: none;
+}
+
+
+/* Task slot visual separation: active vs completed */
+.tasks li{
+    background:
+        linear-gradient(160deg, rgba(47, 31, 111, 0.88) 0%, rgba(30, 21, 86, 0.9) 52%, rgba(22, 15, 68, 0.92) 100%);
+    border-color: rgba(168, 154, 243, 0.62);
+}
+
+.tasks li.completed{
+    background:
+        linear-gradient(160deg, rgba(33, 27, 70, 0.8) 0%, rgba(26, 21, 57, 0.82) 52%, rgba(21, 18, 46, 0.84) 100%);
+    border-color: rgba(137, 136, 175, 0.48);
+    box-shadow: inset 0 1px 0 rgba(221, 214, 255, 0.08);
+}
+
+.tasks li.completed .taskText,
+.tasks li.completed .taskMeta{
+    opacity: 0.66;
+}
+
+/* Keep popup-alert ON state in theme colors (not green) */
+.alertToggleBtn.enabled{
+    border-color: rgba(203, 176, 255, 0.86);
+    background: linear-gradient(120deg, rgba(201, 165, 255, 0.94), rgba(141, 148, 255, 0.95));
+    color: #f7f1ff;
+}
+
+.alertToggleBtn.enabled:hover{
+    border-color: rgba(225, 205, 255, 0.96);
+    background: linear-gradient(120deg, rgba(212, 181, 255, 0.98), rgba(154, 161, 255, 0.98));
+    color: #ffffff;
+}
+
+/* Activity heatmap: purple scale */
+.heatCell{
+    border: 1px solid rgba(170, 145, 235, 0.32);
+    background: rgba(214, 204, 243, 0.74);
+}
+
+.heatCell.level-0{ background: rgba(211, 200, 240, 0.7); }
+.heatCell.level-1{ background: rgba(192, 170, 241, 0.78); }
+.heatCell.level-2{ background: rgba(170, 138, 239, 0.84); }
+.heatCell.level-3{ background: rgba(145, 102, 232, 0.9); }
+.heatCell.level-4{ background: rgba(119, 72, 218, 0.96); }
+
+/* Mobile-only usability layer (desktop unchanged) */
+@media (max-width: 900px){
+    html,
+    body{
+        overflow-x: hidden;
+    }
+
+    body{
+        padding: 10px 0 16px;
+    }
+
+    .container{
+        width: min(100%, calc(100vw - 12px));
+        border-radius: 14px;
+    }
+
+    .appShell{
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .mainColumn,
+    .sideColumn{
+        gap: 10px;
+        margin-top: 0;
+        min-width: 0;
+    }
+
+    .mainColumn .title{
+        margin-bottom: 2px;
+    }
+
+    .mainColumn .motivatorContainer{
+        min-height: 86px;
+        height: auto;
+        padding: 14px;
+    }
+
+    .mainColumn .inputContainer{
+        gap: 8px;
+        align-items: center;
+    }
+
+    .mainColumn .taskInput{
+        height: 46px;
+        padding: 12px;
+    }
+
+    .mainColumn .detailsToggleBtn,
+    .sideColumn .sortOnceBtn,
+    .sideColumn .alertToggleBtn,
+    .mainColumn .taskViewBtn,
+    .mainColumn .typePill{
+        min-height: 40px;
+    }
+
+    .mainColumn .addBtn,
+    .mainColumn .checkBtn,
+    .mainColumn .editBtn,
+    .mainColumn .deleteBtn{
+        width: 42px;
+        height: 42px;
+        min-width: 42px;
+    }
+
+    .mainColumn .taskViews{
+        flex-wrap: wrap;
+        overflow: visible;
+        padding-bottom: 0;
+        row-gap: 8px;
+    }
+
+    .mainColumn .taskViewBtn{
+        flex: 0 0 auto;
+        padding: 0 10px;
+        font-size: 10px;
+    }
+
+    .mainColumn .activityPanel,
+    .sideColumn .activityPanel{
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .mainColumn .activityGridWrap,
+    .sideColumn .activityGridWrap{
+        --day-label-width: 22px;
+        --cell-gap: 1px;
+        overflow-x: hidden;
+    }
+
+    .mainColumn .activityMonthLabel,
+    .sideColumn .activityMonthLabel{
+        font-size: 8px;
+    }
+
+    .mainColumn .activityDayLabel,
+    .sideColumn .activityDayLabel{
+        font-size: 8px;
+        padding-right: 1px;
+    }
+
+    .mainColumn .activityLegend,
+    .sideColumn .activityLegend{
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 4px;
+    }
+
+    .mainColumn .tasks li{
+        padding: 12px 10px;
+        gap: 10px;
+    }
+
+    .mainColumn .taskButtons{
+        gap: 8px;
+    }
+
+    .mainColumn .taskDetailsPanel.open{
+        padding: 8px;
+    }
+
+    .mainColumn .taskDetailsPanel .detailsGrid{
+        gap: 8px;
+    }
+
+    .mainColumn .taskDetailsPanel .taskTypePills{
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .mainColumn .taskDetailsPanel .deadlineContainer{
+        grid-template-columns: 1fr;
+        gap: 7px;
+    }
+
+    .mainColumn .priorityControls,
+    .sideColumn .priorityControls{
+        width: 100%;
+        margin-top: 6px;
+        padding: 10px;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        align-items: stretch;
+        gap: 6px;
+    }
+
+    .mainColumn .priorityHeaderRow,
+    .sideColumn .priorityHeaderRow{
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "toggle sort"
+            "toggle alert";
+        align-items: start;
+        column-gap: 10px;
+        row-gap: 8px;
+    }
+
+    .mainColumn .priorityToggleLabel,
+    .sideColumn .priorityToggleLabel{
+        grid-area: toggle;
+        min-width: 0;
+        align-self: start;
+        margin-top: 2px;
+    }
+
+    .mainColumn .sortOnceBtn,
+    .sideColumn .sortOnceBtn{
+        grid-area: sort;
+        justify-self: end;
+    }
+
+    .mainColumn .alertToggleBtn,
+    .sideColumn .alertToggleBtn{
+        grid-area: alert;
+        justify-self: end;
+    }
+
+    .mainColumn .priorityModeHint,
+    .sideColumn .priorityModeHint{
+        margin-top: 0;
+    }
+
+    .mainColumn .metaVisibilityRow,
+    .sideColumn .metaVisibilityRow{
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: rgba(236, 229, 255, 0.94);
+    }
+
+    .mainColumn .metaVisibilityRow input,
+    .sideColumn .metaVisibilityRow input{
+        appearance: none;
+        width: 38px;
+        height: 22px;
+        border-radius: 999px;
+        border: 1px solid rgba(195, 178, 255, 0.7);
+        background: rgba(67, 51, 132, 0.72);
+        position: relative;
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+    }
+
+    .mainColumn .metaVisibilityRow input::after,
+    .sideColumn .metaVisibilityRow input::after{
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #efe9ff;
+        transition: transform 0.2s ease;
+    }
+
+    .mainColumn .metaVisibilityRow input:checked,
+    .sideColumn .metaVisibilityRow input:checked{
+        background: linear-gradient(130deg, rgba(179, 150, 255, 0.95), rgba(129, 141, 255, 0.94));
+    }
+
+    .mainColumn .metaVisibilityRow input:checked::after,
+    .sideColumn .metaVisibilityRow input:checked::after{
+        transform: translateX(16px);
+    }
+
+    .sideColumn .activitySummary{
+        white-space: normal;
+    }
+}
+
+@media (max-width: 560px){
+    .mainColumn .inputContainer{
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "task add"
+            "prioritize prioritize";
+    }
+
+    .mainColumn .taskInput{
+        grid-area: task;
+    }
+
+    .mainColumn .addBtn{
+        grid-area: add;
+    }
+
+    .mainColumn .detailsToggleBtn{
+        grid-area: prioritize;
+        width: 100%;
+    }
+
+    .mainColumn .taskDetailsPanel .durationWrap{
+        align-items: stretch;
+    }
+}
+
+/* Activity details, undo, and guided tutorial */
+.onboardingActions{
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.onboardingStartTourBtn{
+    border: 1px solid rgba(210, 194, 255, 0.76);
+    border-radius: 999px;
+    height: 30px;
+    padding: 0 11px;
+    background: linear-gradient(130deg, rgba(191, 162, 255, 0.82), rgba(135, 146, 255, 0.84));
+    color: #100829;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.onboardingStartTourBtn:hover{
+    filter: brightness(1.06);
+}
+
+.activityDetailsOverlay{
+    position: fixed;
+    inset: 0;
+    background: rgba(7, 4, 30, 0.62);
+    backdrop-filter: blur(3px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 1400;
+}
+
+.activityDetailsOverlay.hidden{
+    display: none;
+}
+
+.activityDetailsCard{
+    width: min(540px, 96vw);
+    max-height: min(78vh, 620px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    border-radius: 14px;
+    border: 1px solid rgba(205, 194, 255, 0.56);
+    background: linear-gradient(165deg, rgba(43, 30, 105, 0.97), rgba(24, 16, 72, 0.98));
+    box-shadow: 0 20px 52px rgba(8, 4, 31, 0.58);
+    padding: 14px;
+}
+
+.activityDetailsHeader{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.activityDetailsTitle{
+    font-size: 16px;
+    font-weight: 800;
+    color: #f6f2ff;
+}
+
+.activityDetailsCloseBtn{
+    border: 1px solid rgba(205, 194, 255, 0.64);
+    border-radius: 999px;
+    height: 30px;
+    padding: 0 10px;
+    background: rgba(91, 72, 170, 0.5);
+    color: #f2edff;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.activityDetailsMeta{
+    margin-top: 8px;
+    font-size: 12px;
+    color: rgba(218, 208, 255, 0.92);
+}
+
+.activityDetailsList{
+    margin-top: 10px;
+    list-style: none;
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.activityDetailsItem,
+.activityDetailsEmpty{
+    border: 1px solid rgba(181, 162, 245, 0.42);
+    border-radius: 10px;
+    background: rgba(45, 31, 112, 0.54);
+    padding: 9px 10px;
+    min-width: 0;
+}
+
+.activityDetailsTaskText{
+    color: #f5f1ff;
+    font-size: 13px;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.activityDetailsTaskTime,
+.activityDetailsEmpty{
+    margin-top: 4px;
+    color: rgba(214, 203, 255, 0.9);
+    font-size: 11px;
+}
+
+.undoToast{
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    z-index: 1450;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    max-width: min(94vw, 560px);
+    border: 1px solid rgba(203, 184, 255, 0.55);
+    border-radius: 12px;
+    background: linear-gradient(155deg, rgba(58, 42, 131, 0.97), rgba(34, 24, 92, 0.98));
+    box-shadow: 0 12px 36px rgba(8, 5, 30, 0.55);
+    padding: 10px 12px;
+}
+
+.undoToast.hidden{
+    display: none;
+}
+
+.undoToastText{
+    color: #f4efff;
+    font-size: 13px;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.undoDeleteBtn{
+    border: 1px solid rgba(206, 193, 255, 0.82);
+    border-radius: 999px;
+    height: 30px;
+    padding: 0 12px;
+    background: linear-gradient(120deg, rgba(198, 168, 255, 0.96), rgba(145, 154, 255, 0.97));
+    color: #120a32;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+
+.tourOverlay{
+    position: fixed;
+    inset: 0;
+    z-index: 1500;
+    background: rgba(6, 5, 24, 0.56);
+    pointer-events: auto;
+}
+
+.tourOverlay.hidden{
+    display: none;
+}
+
+.tourCard{
+    position: fixed;
+    left: 12px;
+    top: 12px;
+    width: min(340px, calc(100vw - 24px));
+    border-radius: 14px;
+    border: 1px solid rgba(209, 197, 255, 0.64);
+    background: linear-gradient(165deg, rgba(60, 44, 136, 0.98), rgba(34, 24, 95, 0.99));
+    box-shadow: 0 18px 48px rgba(6, 3, 25, 0.56);
+    padding: 12px;
+    color: #f7f4ff;
+}
+
+.tourStepLabel{
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(225, 217, 255, 0.9);
+}
+
+.tourTitle{
+    margin-top: 5px;
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.tourText{
+    margin-top: 6px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: rgba(235, 230, 255, 0.95);
+}
+
+.tourActions{
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.tourSkipBtn,
+.tourNextBtn{
+    border: 1px solid rgba(206, 194, 255, 0.76);
+    border-radius: 999px;
+    height: 31px;
+    padding: 0 12px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.tourSkipBtn{
+    background: rgba(82, 65, 156, 0.66);
+    color: #ece4ff;
+}
+
+.tourNextBtn{
+    background: linear-gradient(120deg, rgba(198, 168, 255, 0.98), rgba(145, 154, 255, 0.98));
+    color: #120a32;
+}
+
+.tourTarget{
+    position: relative;
+    z-index: 1510;
+    box-shadow: 0 0 0 3px rgba(214, 201, 255, 0.78), 0 0 0 8px rgba(133, 111, 224, 0.32) !important;
+    border-radius: 12px;
+}
+
+.rewardOverlay{
+    position: fixed;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    background: rgba(8, 18, 38, 0.5);
+    z-index: 1500;
+}
+
+.rewardOverlay.hidden{
+    display: none;
+}
+
+.rewardCard{
+    position: relative;
+    width: min(380px, 92vw);
+    background: rgba(247, 252, 255, 0.95);
+    border: 2px solid rgba(74, 146, 246, 0.5);
+    border-radius: 18px;
+    box-shadow: 0 24px 54px rgba(28, 67, 128, 0.32);
+    padding: 30px 22px 26px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 4px;
+    overflow: hidden;
+}
+
+.confettiField{
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.confettiPiece{
+    position: absolute;
+    top: -14px;
+    width: 8px;
+    height: 14px;
+    border-radius: 2px;
+    animation-name: confettiFall;
+    animation-timing-function: ease-in;
+    animation-fill-mode: forwards;
+}
+
+@keyframes confettiFall{
+    0%{
+        transform: translateY(-20px) rotate(0deg);
+        opacity: 1;
+    }
+    100%{
+        transform: translateY(360px) rotate(320deg);
+        opacity: 0;
+    }
+}
+
+.rewardKicker{
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: #8a6112;
+}
+
+.rewardTitle{
+    font-size: 22px;
+    font-weight: 800;
+    color: #1f2d4a;
+}
+
+.rewardReelViewport{
+    position: relative;
+    width: 100%;
+    height: 84px;
+    margin-top: 16px;
+    overflow: hidden;
+    border-radius: 12px;
+    background: rgba(15, 30, 55, 0.08);
+    -webkit-mask-image: linear-gradient(90deg, transparent, black 14%, black 86%, transparent);
+    mask-image: linear-gradient(90deg, transparent, black 14%, black 86%, transparent);
+    transition: opacity 0.3s ease, max-height 0.3s ease, margin-top 0.3s ease;
+}
+
+.rewardCard.revealed .rewardReelViewport{
+    opacity: 0;
+    max-height: 0;
+    height: 0;
+    margin-top: 0;
+    pointer-events: none;
+}
+
+.rewardReelTrack{
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.rewardReelPointer{
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    transform: translateX(-50%);
+    background: #2f8fff;
+    opacity: 0.8;
+    z-index: 2;
+}
+
+.rewardReelPointer::before,
+.rewardReelPointer::after{
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+}
+
+.rewardReelPointer::before{
+    top: -1px;
+    border-top: 6px solid #2f8fff;
+}
+
+.rewardReelPointer::after{
+    bottom: -1px;
+    border-bottom: 6px solid #2f8fff;
+}
+
+.rewardTile{
+    flex: 0 0 auto;
+    width: 108px;
+    height: 68px;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+    color: #23375f;
+}
+
+.rewardTile i{
+    font-size: 16px;
+}
+
+.rewardTile-tier-1{ background: rgba(233, 238, 255, 0.95); border: 1px solid rgba(184, 198, 232, 0.9); }
+.rewardTile-tier-2{ background: rgba(214, 233, 255, 0.95); border: 1px solid rgba(140, 190, 245, 0.9); }
+.rewardTile-tier-3{ background: rgba(228, 214, 255, 0.95); border: 1px solid rgba(181, 139, 255, 0.9); color: #3a2a6e; }
+.rewardTile-tier-4{ background: rgba(255, 238, 205, 0.95); border: 1px solid rgba(215, 183, 120, 0.95); color: #7a5a12; }
+
+.rewardTile.landed{
+    animation: rewardTileLanded 0.6s ease-out;
+    box-shadow: 0 0 0 3px rgba(47, 143, 255, 0.55), 0 0 22px rgba(47, 143, 255, 0.45);
+}
+
+@keyframes rewardTileLanded{
+    0%{ transform: scale(1); }
+    40%{ transform: scale(1.16); }
+    100%{ transform: scale(1); }
+}
+
+.rewardResult{
+    max-height: 0;
+    margin-top: 0;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(6px);
+    pointer-events: none;
+    transition: opacity 0.35s ease, transform 0.35s ease, max-height 0.35s ease, margin-top 0.35s ease;
+}
+
+.rewardCard.revealed .rewardResult{
+    max-height: 140px;
+    margin-top: 10px;
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.rewardSuggestionLabel{
+    margin-top: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #4d617f;
+}
+
+.rewardSuggestionText{
+    font-size: 17px;
+    font-weight: 700;
+    color: #1f2d4a;
+}
+
+.rewardCloseBtn{
+    margin-top: 0;
+    height: 40px;
+    max-height: 0;
+    padding: 0 24px;
+    border-radius: 999px;
+    border: 2px solid #58a4ff;
+    background: #2f8fff;
+    color: #ffffff;
+    font-weight: 700;
+    cursor: pointer;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease, max-height 0.35s ease, margin-top 0.35s ease;
+}
+
+.rewardCard.revealed .rewardCloseBtn{
+    margin-top: 16px;
+    max-height: 40px;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.rewardCloseBtn:hover{
+    filter: brightness(1.06);
+}
+
+@media (prefers-reduced-motion: reduce){
+    .confettiPiece{
+        animation: none;
+        display: none;
+    }
+
+    .rewardReelViewport,
+    .rewardResult,
+    .rewardCloseBtn{
+        transition: none;
+    }
+
+    .rewardTile.landed{
+        animation: none;
+    }
+}
+
+/* Sign-in gate + signed-in user badge */
+body.authGateActive .container,
+body.authChecking .container{
+    display: none;
+}
+
+body.authGateActive .userBadge,
+body.authChecking .userBadge{
+    display: none;
+}
+
+/* Shown only while the first onAuthChange callback hasn't fired yet, so we
+   never flash the full sign-in form for someone who's actually signed in. */
+.authLoadingScreen{
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 1900;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+body.authChecking .authLoadingScreen{
+    display: flex;
+}
+
+.authSpinner{
+    position: relative;
+    z-index: 1;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 3px solid rgba(170, 152, 255, 0.25);
+    border-top-color: var(--violet-accent, #b58bff);
+    animation: authSpinnerSpin 0.9s linear infinite;
+}
+
+@keyframes authSpinnerSpin{
+    to{ transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce){
+    .authSpinner{
+        animation: none;
+    }
+}
+
+.userBadge{
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.5);
+    border: 2px solid rgba(103, 159, 255, 0.6);
+    backdrop-filter: blur(8px);
+}
+
+.userBadge.hidden{
+    display: none;
+}
+
+.userBadgeAvatar{
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.userBadgeAvatar.hidden{
+    display: none;
+}
+
+.userBadgeName{
+    font-size: 12px;
+    font-weight: 700;
+    color: #1e1e1e;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.groupNavLink{
+    border: 1px solid rgba(103, 159, 255, 0.6);
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #2f557f;
+    text-decoration: none;
+}
+
+.groupNavLink:hover{
+    background: rgba(255, 255, 255, 0.85);
+}
+
+.userSignOutBtn{
+    border: 1px solid rgba(103, 159, 255, 0.6);
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #2f557f;
+    cursor: pointer;
+}
+
+.userSignOutBtn:hover{
+    background: rgba(255, 255, 255, 0.85);
+}
+
+.authOverlay{
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    flex-direction: column;
+    align-items: center;
+    padding: clamp(28px, 8vh, 72px) 20px 20px;
+    overflow: hidden;
+    background: linear-gradient(160deg, #070b16 0%, #131a30 55%, #0a0e1c 100%);
+}
+
+body.authGateActive .authOverlay{
+    display: flex;
+}
+
+.authOverlay::before,
+.authOverlay::after{
+    content: '';
+    position: absolute;
+    width: 65vmax;
+    height: 65vmax;
+    border-radius: 50%;
+    filter: blur(70px);
+    opacity: 0.8;
+    pointer-events: none;
+}
+
+.authOverlay::before{
+    top: -24vmax;
+    left: -20vmax;
+    background: radial-gradient(circle, rgba(198, 168, 255, 0.9) 0%, rgba(143, 111, 232, 0.55) 28%, rgba(181, 139, 255, 0.32) 54%, transparent 76%);
+    animation: authOrbFloatA 20s ease-in-out infinite alternate;
+}
+
+.authOverlay::after{
+    bottom: -26vmax;
+    right: -22vmax;
+    background: radial-gradient(circle, rgba(163, 195, 255, 0.9) 0%, rgba(127, 134, 255, 0.6) 28%, rgba(74, 146, 246, 0.32) 54%, transparent 76%);
+    animation: authOrbFloatB 24s ease-in-out infinite alternate;
+}
+
+@keyframes authOrbFloatA{
+    0%{ transform: translate3d(0, 0, 0) scale(1); }
+    50%{ transform: translate3d(10vmax, 8vmax, 0) scale(1.12); }
+    100%{ transform: translate3d(-6vmax, 14vmax, 0) scale(0.94); }
+}
+
+@keyframes authOrbFloatB{
+    0%{ transform: translate3d(0, 0, 0) scale(1); }
+    50%{ transform: translate3d(-12vmax, -6vmax, 0) scale(1.1); }
+    100%{ transform: translate3d(6vmax, -16vmax, 0) scale(0.92); }
+}
+
+.authGlow{
+    position: absolute;
+    top: 55%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(620px, 100vw);
+    height: min(620px, 100vw);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(198, 168, 255, 0.6) 0%, rgba(143, 111, 232, 0.42) 26%, rgba(127, 134, 255, 0.3) 52%, transparent 74%);
+    filter: blur(45px);
+    animation: authGlowPulse 4.5s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 0;
+}
+
+@keyframes authGlowPulse{
+    0%, 100%{ opacity: 0.7; transform: translate(-50%, -50%) scale(1); }
+    50%{ opacity: 1; transform: translate(-50%, -50%) scale(1.14); }
+}
+
+@media (prefers-reduced-motion: reduce){
+    .authOverlay::before,
+    .authOverlay::after,
+    .authGlow{
+        animation: none;
+    }
+}
+
+.authBrand{
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    flex: 0 0 auto;
+}
+
+.authLogo{
+    width: 76px;
+    height: 76px;
+    border-radius: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    background: linear-gradient(135deg, var(--violet-accent, #b58bff), var(--violet-accent-2, #7f86ff));
+    color: #120b30;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);
+}
+
+.authBrandTitle{
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(34px, 6vw, 48px);
+    font-weight: 700;
+    color: #f7f4ff;
+    letter-spacing: 0.3px;
+}
+
+.authCardWrap{
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.authCard{
+    width: min(340px, 90vw);
+    background: rgba(247, 252, 255, 0.95);
+    border: 2px solid rgba(74, 146, 246, 0.5);
+    border-radius: 18px;
+    box-shadow: 0 24px 54px rgba(28, 67, 128, 0.32);
+    padding: 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+}
+
+.authGoogleBtn{
+    height: 44px;
+    border-radius: 999px;
+    border: 2px solid rgba(103, 159, 255, 0.7);
+    background: #ffffff;
+    color: #1f2d4a;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.authGoogleBtn:hover{
+    background: rgba(240, 246, 255, 1);
+}
+
+.authGoogleBtn i{
+    font-size: 16px;
+    color: #4285f4;
+}
+
+.authDivider{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #8a99b3;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin: 4px 0;
+}
+
+.authDivider::before,
+.authDivider::after{
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(103, 159, 255, 0.3);
+}
+
+.authEmailForm{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.authEmailInput,
+.authPasswordInput{
+    height: 44px;
+    padding: 0 14px;
+    border-radius: 10px;
+    border: 2px solid rgba(103, 159, 255, 0.5);
+    background: #ffffff;
+    color: #1e1e1e;
+    font-size: 14px;
+    outline: none;
+}
+
+.authEmailInput:focus,
+.authPasswordInput:focus{
+    border-color: rgba(47, 143, 255, 1);
+    box-shadow: 0 0 0 3px rgba(47, 143, 255, 0.16);
+}
+
+.authErrorText{
+    font-size: 12px;
+    font-weight: 700;
+    color: #b3261e;
+    text-align: left;
+}
+
+.authErrorText.hidden{
+    display: none;
+}
+
+.authInfoText{
+    font-size: 12px;
+    font-weight: 700;
+    color: #1f7a3f;
+    text-align: left;
+}
+
+.authInfoText.hidden{
+    display: none;
+}
+
+.authForgotPasswordBtn{
+    align-self: flex-end;
+    margin-top: -2px;
+    background: transparent;
+    border: none;
+    color: #2f8fff;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.authForgotPasswordBtn:hover{
+    text-decoration: underline;
+}
+
+.authForgotPasswordBtn:disabled{
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.authSubmitBtn{
+    height: 44px;
+    border-radius: 999px;
+    border: 2px solid #58a4ff;
+    background: #2f8fff;
+    color: #ffffff;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.authSubmitBtn:hover{
+    filter: brightness(1.05);
+}
+
+.authSubmitBtn:disabled{
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.authModeRow{
+    margin-top: 2px;
+    font-size: 12px;
+    color: #4d617f;
+}
+
+.authModeLeadText{
+    color: #4d617f;
+}
+
+.authModeToggleBtn{
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: #2f8fff;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.authModeToggleBtn:hover{
+    text-decoration: underline;
+}
+
+@media (max-width: 900px){
+    .activityDetailsOverlay{
+        align-items: flex-end;
+        padding: 10px;
+    }
+
+    .activityDetailsCard{
+        width: 100%;
+        max-height: min(74vh, 520px);
+        border-radius: 14px 14px 10px 10px;
+    }
+
+    .undoToast{
+        bottom: 10px;
+        width: min(96vw, 560px);
+    }
+
+    .undoToastText{
+        white-space: normal;
+    }
+
+}
+
+/* Micro-tasks (subtasks): theme this in line with the violet dark palette */
+.subtasksToggleBtn{
+    color: var(--violet-muted);
+}
+
+.subtasksToggleBtn:hover{
+    color: #ffffff;
+}
+
+.subtaskItem{
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(168, 154, 243, 0.35);
+}
+
+.subtaskCheckBtn{
+    border-color: rgba(188, 173, 255, 0.68);
+    background: #1a123f;
+}
+
+.subtaskItem.completed .subtaskCheckBtn{
+    color: #f3edff;
+    background: linear-gradient(140deg, rgba(180, 132, 255, 0.98), rgba(122, 128, 255, 0.98));
+    border-color: rgba(229, 218, 255, 0.85);
+}
+
+.subtaskDeleteBtn{
+    color: rgba(215, 208, 255, 0.6);
+}
+
+.subtaskDeleteBtn:hover{
+    color: #ff9d9d;
+}
+
+.subtaskText{
+    color: var(--violet-text);
+}
+
+.subtaskInput{
+    background: var(--violet-surface);
+    border-color: rgba(188, 173, 255, 0.42);
+    color: var(--violet-text);
+}
+
+.subtaskInput::placeholder{
+    color: rgba(215, 208, 255, 0.6);
+}
+
+.subtaskInput:focus,
+.subtaskInput:focus-visible{
+    outline: none;
+    background: rgba(45, 33, 106, 0.98);
+    border-color: rgba(225, 217, 255, 0.72);
+    box-shadow: 0 0 0 3px rgba(171, 145, 255, 0.3);
+}
+
+.subtaskAddBtn{
+    background: #1a123f;
+    border-color: rgba(188, 173, 255, 0.68);
+}
+
+.subtaskAddBtn:hover{
+    background: #2b1f69;
+}
+
+/* Faster capture, snooze, and time-block scheduling */
+.quickAddHint{
+    color: var(--violet-muted);
+}
+
+.snoozeSection{
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(168, 154, 243, 0.35);
+}
+
+.snoozeLabel{
+    color: var(--violet-muted);
+}
+
+.editorScheduleWrap:hover{
+    background: rgba(232, 243, 255, 0.12);
+}
+
+/* Reward / milestone celebration */
+.rewardOverlay{
+    background: rgba(6, 4, 24, 0.68);
+    backdrop-filter: blur(4px);
+}
+
+.rewardCard{
+    background: linear-gradient(165deg, rgba(60, 44, 136, 0.98), rgba(34, 24, 95, 0.99));
+    border-color: rgba(170, 152, 255, 0.5);
+    box-shadow: 0 24px 58px rgba(6, 3, 25, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.rewardKicker{
+    color: var(--violet-accent, #b58bff);
+}
+
+.rewardTitle,
+.rewardSuggestionText{
+    color: #f7f4ff;
+}
+
+.rewardSuggestionLabel{
+    color: var(--violet-muted);
+}
+
+.rewardCloseBtn{
+    border-color: rgba(206, 194, 255, 0.76);
+    background: linear-gradient(120deg, rgba(202, 167, 255, 0.97), rgba(143, 150, 255, 0.98));
+    color: #120b30;
+}
+
+.rewardReelViewport{
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.rewardReelPointer{
+    background: var(--violet-accent, #d7b778);
+    opacity: 0.9;
+}
+
+.rewardReelPointer::before{
+    border-top-color: var(--violet-accent, #d7b778);
+}
+
+.rewardReelPointer::after{
+    border-bottom-color: var(--violet-accent, #d7b778);
+}
+
+.rewardTile{
+    color: #f2edff;
+}
+
+.rewardTile-tier-1{ background: rgba(255, 255, 255, 0.08); border-color: rgba(190, 190, 210, 0.3); }
+.rewardTile-tier-2{ background: rgba(90, 150, 230, 0.22); border-color: rgba(140, 190, 245, 0.5); }
+.rewardTile-tier-3{ background: rgba(150, 110, 230, 0.28); border-color: rgba(181, 139, 255, 0.55); }
+.rewardTile-tier-4{ background: rgba(215, 183, 120, 0.26); border-color: rgba(215, 183, 120, 0.7); }
+
+.rewardTile.landed{
+    box-shadow: 0 0 0 3px rgba(215, 183, 120, 0.7), 0 0 24px rgba(215, 183, 120, 0.5);
+}
+
+/* Sign-in gate + signed-in user badge */
+.authCard{
+    background: linear-gradient(165deg, rgba(60, 44, 136, 0.98), rgba(34, 24, 95, 0.99));
+    border-color: rgba(170, 152, 255, 0.5);
+    box-shadow: 0 24px 58px rgba(6, 3, 25, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.authGoogleBtn{
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(170, 152, 255, 0.4);
+}
+
+.authDivider{
+    color: rgba(215, 208, 255, 0.6);
+}
+
+.authDivider::before,
+.authDivider::after{
+    background: rgba(188, 173, 255, 0.3);
+}
+
+.authEmailInput,
+.authPasswordInput{
+    background: var(--violet-surface, rgba(20, 13, 56, 0.82));
+    border-color: rgba(188, 173, 255, 0.42);
+    color: var(--violet-text, #f6f4ff);
+}
+
+.authEmailInput::placeholder,
+.authPasswordInput::placeholder{
+    color: rgba(215, 208, 255, 0.6);
+}
+
+.authEmailInput:focus,
+.authPasswordInput:focus{
+    background: rgba(45, 33, 106, 0.98);
+    border-color: rgba(225, 217, 255, 0.72);
+    box-shadow: 0 0 0 3px rgba(171, 145, 255, 0.3);
+}
+
+.authSubmitBtn{
+    border-color: rgba(206, 194, 255, 0.76);
+    background: linear-gradient(120deg, rgba(202, 167, 255, 0.97), rgba(143, 150, 255, 0.98));
+    color: #120b30;
+}
+
+.authModeToggleBtn{
+    color: var(--violet-accent, #d7b778);
+}
+
+.userBadge{
+    background: rgba(19, 26, 40, 0.72);
+    border-color: rgba(170, 152, 255, 0.4);
+}
+
+.userBadgeName{
+    color: #f2edff;
+}
+
+.groupNavLink{
+    background: rgba(20, 30, 45, 0.95);
+    border-color: rgba(142, 197, 255, 0.34);
+    color: #dce8fb;
+}
+
+.groupNavLink:hover{
+    background: rgba(35, 40, 49, 0.96);
+}
+
+.userSignOutBtn{
+    background: rgba(20, 30, 45, 0.95);
+    border-color: rgba(142, 197, 255, 0.34);
+    color: #dce8fb;
+}
+
+.userSignOutBtn:hover{
+    background: rgba(35, 40, 49, 0.96);
+}
+
+.helpTourBtn{
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid rgba(142, 197, 255, 0.34);
+    background: rgba(20, 30, 45, 0.95);
+    color: #dce8fb;
+    font-size: 10px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.helpTourBtn:hover{
+    background: rgba(35, 40, 49, 0.96);
+    border-color: var(--violet-accent, #d7b778);
+}
+
+.authModeRow,
+.authModeLeadText{
+    color: var(--violet-muted);
+}
+
+.authInfoText{
+    color: #7fe0a3;
+}
+
+.authForgotPasswordBtn{
+    color: var(--violet-accent, #d7b778);
+}
+
+/* ===================================================================
+   Group workspace (group/index.html). New concepts with no solo
+   equivalent - switcher, member roster, invite codes - get their own
+   styling here; everything that IS shared with solo (buttons, badges,
+   .inputContainer, .taskDetailsPanel, .tasks li) reuses the rules above
+   as-is, since group/index.html loads this same stylesheet directly.
+   =================================================================== */
+
+.groupStatusMsg{
+    color: var(--violet-muted);
+    font-size: 14px;
+    margin-top: 10px;
+}
+
+.groupStatusMsg.hidden{
+    display: none;
+}
+
+.groupPageWrap{
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding-bottom: 60px;
+}
+
+/* Group tasks reuse the exact .appShell/.mainColumn/.sideColumn layout
+   solo's page uses (see index.html), which is what makes the Prioritize
+   panel/task list sit at the same proportions as solo's instead of
+   stretching full-bleed across a much wider single-column page. A couple
+   of small overrides for the parts that don't apply here (no effort/
+   schedule panel, no tall solo header above it). */
+.groupDashboard .sideColumn{
+    margin-top: 0;
+}
+
+/* No override needed for .scheduleContainer here: it shares the
+   .deadlineContainer class, so solo's own shared rule (column 2) applies
+   to it too, and grid auto-flow stacks deadline then schedule underneath
+   each other in that column - same width, same as solo's real layout -
+   rather than side by side. */
+
+/* Two stacked rows of identical-looking pills (whose tasks vs. which
+   deadline filter) read as one confusing row without a caption telling
+   you what each is choosing between. */
+.taskViewsLabel{
+    margin: 14px 0 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--violet-muted);
+}
+
+.taskViewsLabel:first-of-type{
+    margin-top: 10px;
+}
+
+.yourNameRow{
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.yourNameRow label{
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--violet-muted);
+}
+
+.yourNameInputRow{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.yourNameInput{
+    height: 38px;
+    padding: 0 12px;
+    border: none;
+    outline: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--violet-text);
+    font-size: 13px;
+    width: min(240px, 60vw);
+}
+
+.yourNameSaveBtn{
+    height: 34px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 10px;
+    background: var(--violet-accent);
+    color: #1a1330;
+    font-weight: 700;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.yourNameSaveBtn:hover{
+    filter: brightness(1.08);
+}
+
+.yourNameSavedMsg{
+    font-size: 12px;
+    color: #7fe0a3;
+    font-weight: 700;
+}
+
+.yourNameSavedMsg.hidden{
+    display: none;
+}
+
+.memberCardFocus{
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--violet-text);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.memberCardFocusLabel{
+    color: var(--violet-accent);
+    font-weight: 700;
+}
+
+.groupPageWrap.hidden{
+    display: none;
+}
+
+.groupSwitcherRow{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.groupSwitcherRow.hidden{
+    display: none;
+}
+
+.groupBrowseAllLink{
+    align-self: flex-start;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--violet-accent);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.groupBrowseAllLink:hover{
+    text-decoration: underline;
+}
+
+.groupBrowseAllLink.hidden{
+    display: none;
+}
+
+.groupSwitcherCard{
+    padding: 10px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface-soft);
+    color: var(--violet-text);
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.groupSwitcherCard:hover{
+    border-color: var(--violet-border);
+}
+
+.groupSwitcherCard.active{
+    border-color: var(--violet-accent);
+    background: var(--violet-surface);
+    box-shadow: 0 0 0 1px var(--violet-accent) inset;
+}
+
+.groupSwitcherNewCard{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--violet-accent);
+}
+
+.groupSetupSection{
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.groupSetupSection.hidden{
+    display: none;
+}
+
+.groupSetupIntro{
+    color: var(--violet-muted);
+    font-size: 14px;
+}
+
+.groupSetupForms{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+}
+
+.groupCreateForm,
+.groupJoinForm{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border-radius: 14px;
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface-soft);
+}
+
+.groupCreateForm h2,
+.groupJoinForm h2{
+    font-size: 15px;
+    color: var(--violet-text);
+    margin: 0;
+}
+
+.groupCreateNameInput,
+.groupJoinCodeInput{
+    height: 42px;
+    padding: 0 12px;
+    border: none;
+    outline: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--violet-text);
+    font-size: 14px;
+}
+
+.groupCreateNameInput::placeholder,
+.groupJoinCodeInput::placeholder{
+    color: var(--violet-muted);
+}
+
+.groupCreateBtn,
+.groupJoinBtn{
+    height: 40px;
+    border: none;
+    border-radius: 10px;
+    background: var(--violet-accent);
+    color: #1a1330;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.groupCreateBtn:hover,
+.groupJoinBtn:hover{
+    filter: brightness(1.08);
+}
+
+.groupFormError{
+    color: #ff9f9f;
+    font-size: 13px;
+    margin: 0;
+}
+
+.groupFormError.hidden{
+    display: none;
+}
+
+.groupDashboard{
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.groupDashboard.hidden{
+    display: none;
+}
+
+.groupDashboardHeader{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.pageTitleRow{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.pageTitleRow .title{
+    margin-bottom: 0;
+}
+
+.groupRenameBtn{
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    border: 1px solid var(--violet-border-soft);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--violet-muted);
+    cursor: pointer;
+}
+
+.groupRenameBtn:hover{
+    color: var(--violet-accent);
+    border-color: var(--violet-accent);
+}
+
+.groupRenameBtn.hidden{
+    display: none;
+}
+
+.groupLeaveBtn,
+.groupDeleteBtn{
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid rgba(255, 120, 120, 0.4);
+    border-radius: 10px;
+    background: rgba(255, 90, 90, 0.12);
+    color: #ffb3b3;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.groupLeaveBtn:hover,
+.groupDeleteBtn:hover{
+    background: rgba(255, 90, 90, 0.22);
+}
+
+.groupLeaveBtn.hidden,
+.groupDeleteBtn.hidden{
+    display: none;
+}
+
+.groupDashboardName{
+    margin: 0;
+    font-size: 22px;
+    color: var(--violet-text);
+}
+
+.groupInviteRow{
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--violet-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.groupInviteCode{
+    font-family: monospace;
+    font-size: 14px;
+    letter-spacing: 1px;
+    color: var(--violet-text);
+    background: var(--violet-surface);
+    padding: 2px 8px;
+    border-radius: 6px;
+}
+
+.groupCopyInviteBtn{
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--violet-muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.groupCopyInviteBtn:hover{
+    color: var(--violet-text);
+}
+
+.memberRoster{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.memberCard{
+    display: block;
+    width: 100%;
+    min-width: 0;
+    text-align: left;
+    font-family: inherit;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface-soft);
+    cursor: pointer;
+    overflow: hidden;
+}
+
+.memberCard:hover{
+    border-color: var(--violet-border);
+}
+
+.memberCard.isYou{
+    border-color: var(--violet-accent);
+}
+
+.memberCard.active{
+    border-color: var(--violet-accent);
+    box-shadow: 0 0 0 1px var(--violet-accent) inset;
+}
+
+.memberCardSuggestBtn{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--violet-border-soft);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--violet-muted);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.memberCardSuggestBtn:hover{
+    color: var(--violet-accent);
+    border-color: var(--violet-accent);
+}
+
+.suggestionsForYouPanel{
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 4px;
+}
+
+.suggestionsForYouPanel.hidden{
+    display: none;
+}
+
+.suggestionRow{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(181, 139, 255, 0.4);
+    background: rgba(181, 139, 255, 0.1);
+}
+
+.suggestionRowText{
+    margin: 0;
+    font-size: 13px;
+    color: var(--violet-text);
+    flex: 1;
+    min-width: 200px;
+}
+
+.suggestionRowBadges{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex: 0 1 100%;
+}
+
+.suggestForLabel{
+    margin: -8px 0 4px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--violet-accent);
+}
+
+.suggestionRowFrom{
+    font-weight: 700;
+    color: var(--violet-accent);
+}
+
+.suggestionRowActions{
+    display: flex;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.suggestionAcceptBtn,
+.suggestionDismissBtn{
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.suggestionAcceptBtn{
+    border: none;
+    background: var(--violet-accent);
+    color: #1a1330;
+}
+
+.suggestionAcceptBtn:hover{
+    filter: brightness(1.08);
+}
+
+.suggestionDismissBtn{
+    border: 1px solid var(--violet-border-soft);
+    background: transparent;
+    color: var(--violet-muted);
+}
+
+.suggestionDismissBtn:hover{
+    color: var(--violet-text);
+}
+
+.memberCardName{
+    margin: 0 0 4px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--violet-text);
+    overflow-wrap: anywhere;
+}
+
+.memberCardProgress{
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: var(--violet-muted);
+}
+
+.memberProgressBarOuter{
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+}
+
+.memberProgressBarInner{
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--violet-accent-2), var(--violet-accent));
+}
+
+.groupBrowseGrid{
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+    padding-bottom: 60px;
+}
+
+.groupBrowseGrid.hidden{
+    display: none;
+}
+
+.groupBrowseCard{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border-radius: 14px;
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface-soft);
+    min-width: 0;
+}
+
+.groupBrowseCardName{
+    margin: 0;
+    font-size: 18px;
+    color: var(--violet-text);
+    overflow-wrap: anywhere;
+}
+
+.groupBrowseCardInvite{
+    margin: 0;
+    font-size: 12px;
+    color: var(--violet-muted);
+    font-family: monospace;
+}
+
+.groupBrowseCardMembers{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.groupBrowseMemberChip{
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--violet-text);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.groupBrowseMemberChip.isOwnerChip{
+    background: rgba(181, 139, 255, 0.22);
+    color: var(--violet-accent);
+}
+
+.groupBrowseCardActions{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: auto;
+    padding-top: 6px;
+}
+
+.groupBrowseOpenBtn{
+    flex: 1;
+    text-align: center;
+    height: 34px;
+    line-height: 34px;
+    border-radius: 10px;
+    background: var(--violet-accent);
+    color: #1a1330;
+    font-weight: 700;
+    font-size: 12px;
+    text-decoration: none;
+}
+
+.groupBrowseOpenBtn:hover{
+    filter: brightness(1.08);
+}
+
+.groupBrowseCardActions .groupLeaveBtn,
+.groupBrowseCardActions .groupDeleteBtn{
+    height: 34px;
+}
+
+.groupBrowseNewCard{
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 8px;
+    color: var(--violet-accent);
+    text-decoration: none;
+    border-style: dashed;
+    font-weight: 700;
+    min-height: 120px;
+}
+
+.groupBrowseNewCard i{
+    font-size: 20px;
+}
+
+.groupHistoryPanel{
+    margin-top: 16px;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface-soft);
+}
+
+.groupHistoryTitle{
+    margin: 0 0 10px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--violet-muted);
+}
+
+.groupHistoryList{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.groupHistoryEmpty{
+    font-size: 12px;
+    color: var(--violet-muted);
+}
+
+.groupHistoryItem{
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.groupHistoryItem:last-child{
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.groupHistoryItemText{
+    font-size: 12px;
+    color: var(--violet-text);
+    overflow-wrap: anywhere;
+}
+
+.groupHistoryItemMeta{
+    font-size: 11px;
+    color: var(--violet-muted);
+}
+
+.commentsSection{
+    width: 100%;
+    margin-top: 4px;
+}
+
+.commentsToggleBtn{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+    background: transparent;
+    color: var(--violet-muted);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 0;
+    cursor: pointer;
+}
+
+.commentsToggleBtn:hover{
+    color: var(--violet-text);
+}
+
+.commentsUnreadDot{
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ff5a5a;
+    box-shadow: 0 0 0 2px rgba(255, 90, 90, 0.25);
+}
+
+.commentsBody{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+    padding-left: 4px;
+}
+
+.commentsBody.hidden{
+    display: none;
+}
+
+.commentsEmpty{
+    font-size: 12px;
+    color: var(--violet-muted);
+    margin: 0;
+}
+
+.commentsError{
+    color: #ffb3b3;
+}
+
+.commentsList{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.commentItem{
+    position: relative;
+    padding: 8px 28px 8px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(168, 154, 243, 0.3);
+}
+
+.commentItemMeta{
+    margin: 0 0 2px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--violet-accent);
+}
+
+.commentItemText{
+    margin: 0;
+    font-size: 12px;
+    color: var(--violet-text);
+    overflow-wrap: anywhere;
+}
+
+.commentDeleteBtn{
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: transparent;
+    border: none;
+    color: rgba(215, 208, 255, 0.5);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.commentDeleteBtn:hover{
+    color: #ff9d9d;
+}
+
+.commentAddRow{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.commentInput{
+    flex: 1;
+    min-width: 0;
+    height: 34px;
+    padding: 0 10px;
+    border: none;
+    outline: none;
+    border-radius: 8px;
+    background: var(--violet-surface);
+    border: 1px solid rgba(188, 173, 255, 0.42);
+    color: var(--violet-text);
+    font-size: 12px;
+}
+
+.commentInput::placeholder{
+    color: rgba(215, 208, 255, 0.6);
+}
+
+.commentAddBtn{
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #1a123f;
+    border: 2px solid rgba(188, 173, 255, 0.68);
+    color: var(--violet-text);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+}
+
+.commentAddBtn:hover{
+    background: #2b1f69;
+}
+
+.ownerBadge{
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--violet-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+
+
+
