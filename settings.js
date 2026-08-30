@@ -13,6 +13,17 @@
 (function () {
     const SOUND_MUTED_KEY = 'todoSoundMutedV1';
 
+    // settings.js is always the same physical file at the repo root
+    // regardless of whether it's loaded from index.html (root) or the
+    // group pages (one directory down), so links to other root-level pages
+    // are resolved relative to *this script's own* URL, not the page's -
+    // same reasoning as the sound files in task-shared.js.
+    const SETTINGS_SCRIPT_URL = document.currentScript?.src || window.location.href;
+    const PRIVACY_URL = new URL('privacy.html', SETTINGS_SCRIPT_URL).href;
+    const TERMS_URL = new URL('terms.html', SETTINGS_SCRIPT_URL).href;
+    const MANAGE_GROUPS_URL = new URL('group/browse.html', SETTINGS_SCRIPT_URL).href;
+    const APP_ROOT_URL = new URL('.', SETTINGS_SCRIPT_URL).href;
+
     let currentUser = null;
     let overlay = null;
     let nameInput = null;
@@ -184,12 +195,12 @@
                 <section class="settingsSection">
                     <h3>Groups</h3>
                     <p class="settingsHint">Manage, leave, or delete groups you belong to.</p>
-                    <a class="settingsLinkBtn" href="/group/browse.html">Manage my groups</a>
+                    <a class="settingsLinkBtn" href="${MANAGE_GROUPS_URL}">Manage my groups</a>
                 </section>
 
                 <section class="settingsSection">
                     <h3>Privacy &amp; legal</h3>
-                    <p class="settingsHint"><a href="/privacy.html">Privacy Policy</a> &middot; <a href="/terms.html">Terms of Service</a></p>
+                    <p class="settingsHint"><a href="${PRIVACY_URL}">Privacy Policy</a> &middot; <a href="${TERMS_URL}">Terms of Service</a></p>
                 </section>
 
                 <section class="settingsSection settingsDangerSection">
@@ -414,7 +425,7 @@
         try {
             await window.ToDoAuth.deleteAccountAuth();
             window.ToDoAuth.signOutUser?.();
-            window.location.href = '/';
+            window.location.href = APP_ROOT_URL;
         } catch (error) {
             console.error('Failed to delete auth account:', error);
             if (error?.code === 'auth/requires-recent-login') {
@@ -424,7 +435,7 @@
             } else {
                 deleteStatus.textContent = 'Your data is deleted, but signing out your login failed. Please sign out manually.';
                 window.ToDoAuth.signOutUser?.();
-                window.location.href = '/';
+                window.location.href = APP_ROOT_URL;
             }
         }
     }

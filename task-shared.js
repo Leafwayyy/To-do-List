@@ -525,12 +525,21 @@ function getDateKey(date) {
 }
 
 // Sound effects - shared by solo and group so both play the exact same
-// clips. Absolute paths (not relative) since group/index.html serves from
-// /group/, and the mp3 files live at the repo root either way.
-const clickAudio = new Audio('/Button Click SFX.mp3');
+// clips. task-shared.js is always the same physical file at the repo root
+// regardless of whether the page loading it is at the root (index.html) or
+// one directory down (group/index.html, group/browse.html), so the mp3s
+// are resolved relative to *this script's own* URL (via document.currentScript,
+// captured synchronously here before any later async code could clear it),
+// not the page's - a plain relative path would mean two different places
+// depending on which page loaded it, and a leading "/" would break entirely
+// once the site is served from a subpath (e.g. github.io/repo-name/) rather
+// than a domain root.
+const TASK_SHARED_SCRIPT_URL = document.currentScript?.src || window.location.href;
+
+const clickAudio = new Audio(new URL('Button Click SFX.mp3', TASK_SHARED_SCRIPT_URL).href);
 clickAudio.preload = 'auto';
 
-const taskCompleteAudio = new Audio('/Goal SFX.mp3');
+const taskCompleteAudio = new Audio(new URL('Goal SFX.mp3', TASK_SHARED_SCRIPT_URL).href);
 taskCompleteAudio.preload = 'auto';
 
 // Read fresh on every play (not cached) so the Settings panel's mute
@@ -563,7 +572,7 @@ function playTaskCompleteSound() {
 // A separate Audio element (not the shared clickAudio) so rapid reel ticks
 // don't fight with an ordinary button click the user makes elsewhere while
 // the reel is still spinning.
-const reelTickAudio = new Audio('/Button Click SFX.mp3');
+const reelTickAudio = new Audio(new URL('Button Click SFX.mp3', TASK_SHARED_SCRIPT_URL).href);
 reelTickAudio.preload = 'auto';
 
 function playReelTickSound() {
