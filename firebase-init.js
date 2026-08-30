@@ -6,6 +6,7 @@
 // below before touching window.ToDoAuth.
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app-check.js';
 import {
     getAuth,
     GoogleAuthProvider,
@@ -48,6 +49,19 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
+// App Check: proves requests are coming from this real web app (via an
+// invisible reCAPTCHA Enterprise score check), not a script hitting the
+// Firebase project directly. Must run before any Auth/Firestore calls so
+// every request carries a token. Stays in "Monitor" mode with no real
+// effect until Firestore/Authentication are switched to "Enforced" in the
+// Firebase Console's App Check page - don't flip that until real traffic
+// through this app is showing up as verified there.
+initializeAppCheck(app, {
+    provider: new ReCaptchaEnterpriseProvider('6Lfl5p8tAAAAACAMGgsF09HtWiRrawm2-hrVxTNs'),
+    isTokenAutoRefreshEnabled: true
+});
+
 const auth = getAuth(app);
 // Persistent local cache means the solo list keeps working offline and
 // across a page reload before the network round-trip finishes, backed by
