@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy - To-Do List</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-1: #080a10;
+    --bg-2: #0f1420;
+    --panel: rgba(13, 18, 30, 0.82);
+    --border: rgba(216, 183, 120, 0.42);
+    --border-soft: rgba(216, 183, 120, 0.24);
+    --text: #f3f0ea;
+    --text-dim: rgba(243, 240, 234, 0.72);
+    --accent: #d7b778;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: 'Inter', system-ui, sans-serif;
+    color: var(--text);
+    background: linear-gradient(160deg, var(--bg-1), var(--bg-2));
+    padding: 48px 20px 80px;
+  }
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  .backLink {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.92rem;
+    margin-bottom: 28px;
+  }
+  .backLink:hover { color: var(--accent); }
+  h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 2.1rem;
+    margin: 0 0 6px;
+  }
+  .updated {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    margin: 0 0 32px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border-soft);
+    border-radius: 16px;
+    padding: 28px 32px;
+  }
+  h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.25rem;
+    color: var(--accent);
+    margin: 32px 0 10px;
+  }
+  h2:first-child { margin-top: 0; }
+  p, li { line-height: 1.65; color: var(--text-dim); font-size: 0.98rem; }
+  ul { padding-left: 22px; margin: 8px 0 0; }
+  li { margin-bottom: 6px; }
+  a { color: var(--accent); }
+  strong { color: var(--text); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text-dim);
+  }
+  th { color: var(--text); font-weight: 600; }
+  .footNote {
+    margin-top: 28px;
+    font-size: 0.85rem;
+    color: rgba(243, 240, 234, 0.5);
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <a class="backLink" href="/">&larr; Back to To-Do List</a>
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated August 30, 2026</p>
+
+    <div class="card">
+      <h2>What this covers</h2>
+      <p>This policy explains what the To-Do List app collects, why, and what control you have over it. It applies to the main task list and the shared Group workspace.</p>
+
+      <h2>What we collect</h2>
+      <table>
+        <tr><th>Data</th><th>Where it comes from</th></tr>
+        <tr><td>Email address</td><td>When you sign in with Google or create an account with email and password</td></tr>
+        <tr><td>Display name and profile photo</td><td>From your Google account, or a name you set yourself for group display</td></tr>
+        <tr><td>Task content</td><td>Everything you type into a task: text, subtasks, deadlines, priority, difficulty, effort estimate</td></tr>
+        <tr><td>Group data</td><td>Group names, invite codes, membership, task comments, and task suggestions if you use the Group workspace</td></tr>
+        <tr><td>Local preferences</td><td>Stored only on your device: auto-sort setting, popup alert setting, activity history for the streak chart, onboarding progress</td></tr>
+      </table>
+
+      <h2>Where it's stored</h2>
+      <p>Your account and task data are stored in <strong>Firebase Authentication</strong> and <strong>Cloud Firestore</strong>, both Google Cloud services. We don't run our own separate servers or databases outside of Firebase. Some preferences (like whether auto-sort is on) live only in your browser's local storage and never leave your device.</p>
+
+      <h2>Who else sees it</h2>
+      <p>Nobody outside of Firebase/Google Cloud, which acts purely as the hosting and database provider. We do not sell your data, and we do not currently run any analytics or ad tracking. If that changes, this page will be updated first.</p>
+      <p>If you join a Group, the tasks, comments, and suggestions you post there are visible to the other members of that specific group, that's the point of a shared workspace, but never to anyone outside it.</p>
+
+      <h2>Your choices and rights</h2>
+      <ul>
+        <li><strong>Access:</strong> everything tied to your account is visible to you directly in the app.</li>
+        <li><strong>Export:</strong> you can export your tasks from Settings at any time.</li>
+        <li><strong>Deletion:</strong> you can permanently delete your account and all associated data from Settings &rarr; Account. This removes your profile, your tasks, and your membership in any groups. Deletion is immediate and can't be undone.</li>
+        <li><strong>Correction:</strong> you can edit your display name and any task content at any time.</li>
+      </ul>
+
+      <h2>How long we keep it</h2>
+      <p>Your data is kept for as long as your account exists. Deleting your account removes it right away, we don't keep backups beyond what's needed for a short operational window.</p>
+
+      <h2>Children's privacy</h2>
+      <p>This app is not directed at children under 13, and we don't knowingly collect data from anyone in that age group.</p>
+
+      <h2>Changes to this policy</h2>
+      <p>If this policy changes in a way that matters, we'll update the date at the top of this page. Continued use of the app after a change means you accept the update.</p>
+
+      <h2>Contact</h2>
+      <p>Questions about your data or a deletion request that didn't go through cleanly: <a href="mailto:abirraiyan1234@gmail.com">abirraiyan1234@gmail.com</a>.</p>
+
+      <p class="footNote">This is a plain-language policy for a small independent app, not a substitute for legal advice. See also the <a href="/terms.html">Terms of Service</a>.</p>
+    </div>
+  </div>
+</body>
+</html>

@@ -533,12 +533,29 @@ clickAudio.preload = 'auto';
 const taskCompleteAudio = new Audio('/Goal SFX.mp3');
 taskCompleteAudio.preload = 'auto';
 
+// Read fresh on every play (not cached) so the Settings panel's mute
+// toggle takes effect immediately without needing to notify this file.
+const SOUND_MUTED_KEY = 'todoSoundMutedV1';
+function isSoundMuted() {
+    try {
+        return localStorage.getItem(SOUND_MUTED_KEY) === 'true';
+    } catch (error) {
+        return false;
+    }
+}
+
 function playClickSound() {
+    if (isSoundMuted()) {
+        return;
+    }
     clickAudio.currentTime = 0;
     clickAudio.play();
 }
 
 function playTaskCompleteSound() {
+    if (isSoundMuted()) {
+        return;
+    }
     taskCompleteAudio.currentTime = 0;
     taskCompleteAudio.play();
 }

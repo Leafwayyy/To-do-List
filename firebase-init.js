@@ -14,6 +14,7 @@ import {
     signInWithEmailAndPassword,
     sendPasswordResetEmail,
     signOut,
+    deleteUser,
     onAuthStateChanged
 } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
 import {
@@ -91,6 +92,11 @@ window.ToDoAuth = {
     signInWithEmail: (email, password) => signInWithEmailAndPassword(auth, email, password),
     sendPasswordReset: (email) => sendPasswordResetEmail(auth, email),
     signOutUser: () => signOut(auth),
+    // Deletes the Firebase Auth account itself (not Firestore data - callers
+    // should delete a user's profile/tasks/group memberships first). Throws
+    // 'auth/requires-recent-login' if the session is old; callers should
+    // catch that and prompt a fresh sign-in before retrying.
+    deleteAccountAuth: () => deleteUser(auth.currentUser),
     // callback(user, isFirstTimeEver) - the second argument is only ever
     // true the one time a brand-new account's profile doc gets created.
     onAuthChange: (callback) => onAuthStateChanged(auth, async (user) => {
