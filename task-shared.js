@@ -560,6 +560,69 @@ function playTaskCompleteSound() {
     taskCompleteAudio.play();
 }
 
+// A separate Audio element (not the shared clickAudio) so rapid reel ticks
+// don't fight with an ordinary button click the user makes elsewhere while
+// the reel is still spinning.
+const reelTickAudio = new Audio('/Button Click SFX.mp3');
+reelTickAudio.preload = 'auto';
+
+function playReelTickSound() {
+    if (isSoundMuted()) {
+        return;
+    }
+    reelTickAudio.currentTime = 0;
+    reelTickAudio.play();
+}
+
+// Rolling sound for the reward reel spin - rather than assuming the CSS
+// easing curve, this samples the track's actual on-screen position every
+// frame and fires one tick each time it crosses a full tile width. That
+// makes the ticking automatically fast at the start and taper off exactly
+// as the reel visually slows down, in sync with whatever's really
+// rendered, not a guess at the timing. Returns a stop() function the
+// caller must call both on normal spin-end and on any early interruption
+// (closing the overlay mid-spin), or the sampling loop runs forever.
+function startRewardReelTicking(track, tileStepPx) {
+    let lastTileCount = 0;
+    let rafId = null;
+    let stopped = false;
+
+    function readTranslateXPx() {
+        const transform = getComputedStyle(track).transform;
+        if (!transform || transform === 'none') {
+            return 0;
+        }
+        const match = transform.match(/matrix\(([^)]+)\)/);
+        if (!match) {
+            return 0;
+        }
+        const parts = match[1].split(',').map((value) => parseFloat(value.trim()));
+        return Math.abs(parts[4] || 0);
+    }
+
+    function frame() {
+        if (stopped) {
+            return;
+        }
+        const tileCount = Math.floor(readTranslateXPx() / tileStepPx);
+        if (tileCount > lastTileCount) {
+            lastTileCount = tileCount;
+            playReelTickSound();
+        }
+        rafId = requestAnimationFrame(frame);
+    }
+
+    rafId = requestAnimationFrame(frame);
+
+    return function stop() {
+        stopped = true;
+        if (rafId !== null) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+        }
+    };
+}
+
 // Guided-tour engine - shared by solo's tutorial and the group workspace's
 // own tutorial, since both use the exact same overlay markup
 // (.tourOverlay/.tourCard/.tourStepLabel/.tourTitle/.tourText/.tourSkipBtn/

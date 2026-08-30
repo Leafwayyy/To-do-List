@@ -618,6 +618,7 @@ function applyGroupSnoozeToTask(groupId, taskId, preset) {
 
 let groupSessionCompletionCount = 0;
 let rewardSpinToken = 0;
+let stopRewardReelTicking = null;
 
 // justCompletedTaskId is passed explicitly rather than relying on groupTasks
 // already reflecting the completion - the live listener's snapshot for this
@@ -711,11 +712,16 @@ function spinGroupRewardReel(winningReward, spinToken) {
     rewardReelTrack.style.transition = 'transform 6.5s cubic-bezier(0.16, 1, 0.3, 1)';
     rewardReelTrack.style.transform = `translateX(-${targetOffset}px)`;
 
+    stopRewardReelTicking?.();
+    stopRewardReelTicking = startRewardReelTicking(rewardReelTrack, REEL_TILE_STEP);
+
     rewardReelTrack.addEventListener('transitionend', function onSpinEnd(event) {
         if (event.propertyName !== 'transform') {
             return;
         }
         rewardReelTrack.removeEventListener('transitionend', onSpinEnd);
+        stopRewardReelTicking?.();
+        stopRewardReelTicking = null;
         if (spinToken !== rewardSpinToken) {
             return;
         }
@@ -743,6 +749,8 @@ function closeGroupRewardCelebration() {
     }
 
     rewardSpinToken += 1;
+    stopRewardReelTicking?.();
+    stopRewardReelTicking = null;
     rewardOverlay.classList.add('hidden');
     rewardOverlay.setAttribute('aria-hidden', 'true');
     rewardCard?.classList.remove('revealed');
@@ -764,6 +772,8 @@ if (rewardCloseBtn) {
 }
 
 function spawnConfetti() {
+    playTaskCompleteSound();
+
     if (!confettiField) {
         return;
     }
@@ -775,7 +785,7 @@ function spawnConfetti() {
         return;
     }
 
-    const colors = ['#d7b778', '#b58bff', '#7f86ff', '#8bdaff', '#f6f2ea'];
+    const colors = ['#b58bff', '#7f86ff', '#8bdaff', '#f6f2ea', '#d7d0ff'];
     const pieceCount = 28;
 
     for (let i = 0; i < pieceCount; i += 1) {
