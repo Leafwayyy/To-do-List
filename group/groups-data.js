@@ -175,10 +175,10 @@ async function renameGroup(groupId, newName) {
     await updateDoc(doc(db(), 'groups', groupId), { name: trimmedName.slice(0, 80) });
 }
 
-// Owner-only. Deletes every task in the group (the security rule lets the
-// group's owner delete any member's task, not just their own, specifically
-// for this) before deleting the group document itself, so nothing is left
-// orphaned in Firestore.
+// Owner-only. Deletes every task and every history entry in the group (the
+// security rule lets the group's owner delete any member's task/history
+// entry, not just their own, specifically for this) before deleting the
+// group document itself, so nothing is left orphaned in Firestore.
 async function deleteGroupCompletely(groupId, user) {
     const { doc, getDoc, getDocs, collection, deleteDoc } = fs();
     const groupRef = doc(db(), 'groups', groupId);
@@ -192,6 +192,9 @@ async function deleteGroupCompletely(groupId, user) {
 
     const tasksSnapshot = await getDocs(collection(db(), 'groups', groupId, 'tasks'));
     await Promise.all(tasksSnapshot.docs.map((taskDoc) => deleteDoc(taskDoc.ref)));
+
+    const historySnapshot = await getDocs(collection(db(), 'groups', groupId, 'history'));
+    await Promise.all(historySnapshot.docs.map((entryDoc) => deleteDoc(entryDoc.ref)));
 
     await deleteDoc(groupRef);
 }

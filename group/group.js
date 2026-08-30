@@ -30,6 +30,44 @@ function subscribeToGroupTasks(groupId, callback, onError) {
 }
 
 // ---------------------------------------------------------------------
+// "Recently finished" history - a permanent log, separate from the live
+// tasks collection, so a completion still shows here after the task
+// itself gets deleted. See firestore.rules' groups/{groupId}/history for
+// why this is its own top-level subcollection rather than nested under
+// /tasks. Capped at 50 most recent (across the whole group, before any
+// per-member scope filtering in renderGroupHistory) so this doesn't grow
+// into an ever-larger download as a group racks up history over time.
+// ---------------------------------------------------------------------
+
+function subscribeToGroupHistory(groupId, callback, onError) {
+    const { collection, query, orderBy, limit, onSnapshot } = fs();
+    const historyRef = query(
+        collection(db(), 'groups', groupId, 'history'),
+        orderBy('completedAt', 'desc'),
+        limit(50)
+    );
+    return onSnapshot(historyRef, (snapshot) => {
+        callback(snapshot.docs.map((entryDoc) => ({ id: entryDoc.id, ...entryDoc.data() })));
+    }, onError);
+}
+
+// Called once, right when a task transitions into completed (not on every
+// update) - see the two call sites below. task.ownerId/ownerName are used
+// as-is rather than looked up fresh, since only a task's own owner can
+// ever complete it (enforced by firestore.rules), so they're already
+// correct for whoever triggered this.
+async function logGroupTaskCompletion(groupId, task, completedAt) {
+    const { doc, setDoc } = fs();
+    await setDoc(doc(db(), 'groups', groupId, 'history', generateTaskId()), {
+        taskId: task.id,
+        taskText: task.text,
+        ownerId: task.ownerId,
+        ownerName: task.ownerName || 'Teammate',
+        completedAt
+    });
+}
+
+// ---------------------------------------------------------------------
 // Comments - a discussion thread per task. Only subscribed while a given
 // task's comment section is expanded (see toggleGroupCommentsExpanded),
 // not one big always-on listener per task in the list.
@@ -197,6 +235,22 @@ function subtaskDrivenTaskUpdate(subtasks) {
     };
 }
 
+// Writes the subtask-driven update, then logs a history entry if that
+// update is what just auto-completed the task (checking the last subtask)
+// - shared by all three subtask mutators below so "log on the completed
+// transition" isn't repeated three times.
+async function applySubtaskDrivenUpdate(groupId, task, subtasks) {
+    const update = subtaskDrivenTaskUpdate(subtasks);
+    const { doc, updateDoc } = fs();
+    await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), update);
+
+    if (!task.completed && update.completed) {
+        logGroupTaskCompletion(groupId, task, update.completedAt).catch((error) => {
+            console.error('Failed to log completion history:', error);
+        });
+    }
+}
+
 async function addGroupSubtask(groupId, task, text) {
     const trimmedText = text.trim();
     if (!trimmedText) {
@@ -208,8 +262,7 @@ async function addGroupSubtask(groupId, task, text) {
         { id: generateSubtaskId(), text: trimmedText, completed: false, createdAt: new Date().toISOString() }
     ];
 
-    const { doc, updateDoc } = fs();
-    await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), subtaskDrivenTaskUpdate(subtasks));
+    await applySubtaskDrivenUpdate(groupId, task, subtasks);
 }
 
 async function toggleGroupSubtask(groupId, task, subtaskId) {
@@ -217,15 +270,13 @@ async function toggleGroupSubtask(groupId, task, subtaskId) {
         subtask.id === subtaskId ? { ...subtask, completed: !subtask.completed } : subtask
     ));
 
-    const { doc, updateDoc } = fs();
-    await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), subtaskDrivenTaskUpdate(subtasks));
+    await applySubtaskDrivenUpdate(groupId, task, subtasks);
 }
 
 async function deleteGroupSubtask(groupId, task, subtaskId) {
     const subtasks = (task.subtasks || []).filter((subtask) => subtask.id !== subtaskId);
 
-    const { doc, updateDoc } = fs();
-    await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), subtaskDrivenTaskUpdate(subtasks));
+    await applySubtaskDrivenUpdate(groupId, task, subtasks);
 }
 
 // ---------------------------------------------------------------------
@@ -309,6 +360,7 @@ let groups = undefined; // undefined = loading, [] = none yet
 let selectedGroupId = null;
 let groupTasks = [];
 let groupSuggestions = [];
+let groupHistoryEntries = [];
 let showSetup = new URLSearchParams(window.location.search).get('new') === '1';
 let expandedSubtaskTaskIds = new Set();
 let expandedSnoozeTaskIds = new Set();
@@ -323,6 +375,7 @@ let activeMemberScope = 'all';
 let unsubscribeGroups = null;
 let unsubscribeTasks = null;
 let unsubscribeSuggestions = null;
+let unsubscribeHistory = null;
 
 // A link from the "all my groups" browse page (?g=<id>) always wins over
 // whatever was last selected here.
@@ -526,12 +579,16 @@ function createGroupTaskItem(groupId, task, isOwner) {
         }
         playClickSound();
         const willBeCompleted = !task.completed;
+        const completedAt = new Date().toISOString();
         setGroupTaskCompleted(groupId, task.id, willBeCompleted).catch((error) => {
             console.error('Failed to update task:', error);
         });
         if (willBeCompleted) {
             playTaskCompleteSound();
             checkGroupMilestone(groupId, task.id);
+            logGroupTaskCompletion(groupId, task, completedAt).catch((error) => {
+                console.error('Failed to log completion history:', error);
+            });
         }
     });
 
@@ -1576,20 +1633,20 @@ function setActiveMemberScope(scope) {
 // heatmap: the last several completions across the group (or just the
 // selected member-scope), each showing who finished it and when, so it
 // doubles as both a per-member history and an overall group history.
-function renderGroupHistory(group) {
+// Reads from the permanent groupHistoryEntries log (see
+// subscribeToGroupHistory) rather than filtering the live groupTasks list,
+// so a completion stays here even after its task is later deleted.
+function renderGroupHistory() {
     if (!groupHistoryList) {
         return;
     }
     groupHistoryList.innerHTML = '';
 
-    const scopedTasks = activeMemberScope === 'all'
-        ? groupTasks
-        : groupTasks.filter((task) => task.ownerId === activeMemberScope);
+    const scopedEntries = activeMemberScope === 'all'
+        ? groupHistoryEntries
+        : groupHistoryEntries.filter((entry) => entry.ownerId === activeMemberScope);
 
-    const finished = scopedTasks
-        .filter((task) => task.completed && task.completedAt)
-        .sort((a, b) => b.completedAt.localeCompare(a.completedAt))
-        .slice(0, 12);
+    const finished = scopedEntries.slice(0, 12);
 
     if (finished.length === 0) {
         const empty = document.createElement('p');
@@ -1599,26 +1656,20 @@ function renderGroupHistory(group) {
         return;
     }
 
-    const memberIds = group.memberIds || [];
-    const memberNames = group.memberNames || [];
-
-    finished.forEach((task) => {
+    finished.forEach((entry) => {
         const item = document.createElement('div');
         item.classList.add('groupHistoryItem');
 
         const text = document.createElement('p');
         text.classList.add('groupHistoryItemText');
-        text.textContent = task.text;
+        text.textContent = entry.taskText;
         item.appendChild(text);
 
-        const memberIndex = memberIds.indexOf(task.ownerId);
-        const ownerName = task.ownerId === currentUser?.uid
-            ? 'You'
-            : resolveMemberName(task.ownerId, memberIndex >= 0 ? memberNames[memberIndex] : null, groupTasks);
+        const ownerName = entry.ownerId === currentUser?.uid ? 'You' : (entry.ownerName || 'Teammate');
 
         const meta = document.createElement('p');
         meta.classList.add('groupHistoryItemMeta');
-        meta.textContent = `${ownerName} - ${formatFriendlyDateTime(new Date(task.completedAt))}`;
+        meta.textContent = `${ownerName} - ${formatFriendlyDateTime(new Date(entry.completedAt))}`;
         item.appendChild(meta);
 
         groupHistoryList.appendChild(item);
@@ -2534,6 +2585,7 @@ function watchSelectedGroupTasks() {
     const group = getSelectedGroup();
     if (!group) {
         groupTasks = [];
+        groupHistoryEntries = [];
         renderApp();
         return;
     }
@@ -2557,6 +2609,19 @@ function watchSelectedGroupTasks() {
     }, (error) => {
         console.error('Failed to load suggestions:', error);
         groupSuggestions = [];
+        renderApp();
+    });
+
+    if (unsubscribeHistory) {
+        unsubscribeHistory();
+        unsubscribeHistory = null;
+    }
+    unsubscribeHistory = subscribeToGroupHistory(group.id, (entries) => {
+        groupHistoryEntries = entries;
+        renderApp();
+    }, (error) => {
+        console.error('Failed to load group history:', error);
+        groupHistoryEntries = [];
         renderApp();
     });
 }

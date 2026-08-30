@@ -371,6 +371,8 @@
                 if (group.ownerId === uid) {
                     const tasksSnapshot = await getDocs(collection(db, 'groups', groupDoc.id, 'tasks'));
                     await Promise.all(tasksSnapshot.docs.map((taskDoc) => deleteDoc(taskDoc.ref)));
+                    const historySnapshot = await getDocs(collection(db, 'groups', groupDoc.id, 'history'));
+                    await Promise.all(historySnapshot.docs.map((entryDoc) => deleteDoc(entryDoc.ref)));
                     await deleteDoc(groupDoc.ref);
                 } else {
                     const memberIds = group.memberIds || [];
@@ -382,6 +384,15 @@
                             memberNames: memberNames.filter((_, index) => index !== myIndex)
                         });
                     }
+                    // Own history entries in a group left behind - the rule
+                    // lets each person delete only their own, matching what
+                    // leaving normally leaves alone, but account deletion
+                    // should still take a leaver's name/task text with it.
+                    const ownHistorySnapshot = await getDocs(query(
+                        collection(db, 'groups', groupDoc.id, 'history'),
+                        where('ownerId', '==', uid)
+                    ));
+                    await Promise.all(ownHistorySnapshot.docs.map((entryDoc) => deleteDoc(entryDoc.ref)));
                 }
             }
 

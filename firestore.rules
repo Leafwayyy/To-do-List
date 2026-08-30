@@ -171,6 +171,31 @@ service cloud.firestore {
           && resource.data.status == 'pending'
           && (request.auth.uid == resource.data.fromUserId || request.auth.uid == resource.data.forUserId);
       }
+
+      // Feature 8: a permanent completion log for the "Recently finished"
+      // panel, kept as its own top-level subcollection (not nested under
+      // /tasks) specifically so it survives a task being deleted later -
+      // that's the whole point of it existing instead of the panel just
+      // filtering the live task list. Entries are immutable (no update
+      // rule), same as comments.
+      match /history/{entryId} {
+        allow read: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
+        allow create: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.taskText is string
+          && request.resource.data.taskText.size() > 0
+          && request.resource.data.taskText.size() <= 2000;
+        // Own-entry delete lets a leaving/deleted member's own history clean
+        // itself up; group-owner delete lets deleteGroupCompletely wipe the
+        // whole log along with everything else when the group itself goes.
+        allow delete: if request.auth != null
+          && (
+            request.auth.uid == resource.data.ownerId
+            || request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId
+          );
+      }
     }
   }
 }

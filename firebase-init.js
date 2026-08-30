@@ -32,6 +32,8 @@ import {
     collection,
     query,
     where,
+    orderBy,
+    limit,
     onSnapshot,
     writeBatch,
     serverTimestamp,
@@ -99,7 +101,7 @@ window.ToDoAuth = {
     db,
     firestore: {
         doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, arrayUnion,
-        collection, query, where, onSnapshot, writeBatch, serverTimestamp, increment
+        collection, query, where, orderBy, limit, onSnapshot, writeBatch, serverTimestamp, increment
     },
     signInWithGoogle: () => signInWithPopup(auth, googleProvider),
     signUpWithEmail: (email, password) => createUserWithEmailAndPassword(auth, email, password),
