@@ -18,6 +18,8 @@
     const authSubmitBtn = document.querySelector('.authSubmitBtn');
     const authModeToggleBtn = document.querySelector('.authModeToggleBtn');
     const authModeLeadText = document.querySelector('.authModeLeadText');
+    const authConsentRow = document.querySelector('.authConsentRow');
+    const authConsentCheckbox = document.querySelector('.authConsentCheckbox');
     const userBadge = document.querySelector('.userBadge');
     const userBadgeAvatar = document.querySelector('.userBadgeAvatar');
     const userBadgeName = document.querySelector('.userBadgeName');
@@ -35,6 +37,9 @@
         }
         if (authModeToggleBtn) {
             authModeToggleBtn.textContent = authMode === 'signup' ? 'Sign in' : 'Sign up';
+        }
+        if (authConsentRow) {
+            authConsentRow.classList.toggle('hidden', authMode !== 'signup');
         }
     }
 
@@ -166,6 +171,10 @@
             const password = authPasswordInput.value;
             if (!email || !password) {
                 showAuthError('Enter an email and password.');
+                return;
+            }
+            if (authMode === 'signup' && authConsentCheckbox && !authConsentCheckbox.checked) {
+                showAuthError('Please agree to the Privacy Policy and Terms of Service to create an account.');
                 return;
             }
 

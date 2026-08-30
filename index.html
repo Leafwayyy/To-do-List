@@ -9,6 +9,29 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
     <link rel="stylesheet" href="style.css?v=20260830c">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <meta name="theme-color" content="#080a10">
+    <style>
+        /* Kept inline (rather than in style.css) so it's self-contained. */
+        .authConsentRow {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            font-size: 0.82rem;
+            line-height: 1.4;
+            color: rgba(243, 240, 234, 0.75);
+            cursor: pointer;
+        }
+        .authConsentRow input { margin-top: 3px; }
+        .authConsentRow a, .authGoogleConsentNote a { color: #d7b778; }
+        .authGoogleConsentNote {
+            font-size: 0.78rem;
+            text-align: center;
+            color: rgba(243, 240, 234, 0.6);
+            margin: 8px 0 0;
+        }
+    </style>
 </head>
 <body class="authChecking">
 
@@ -270,6 +293,10 @@
                     <input type="email" class="authEmailInput" placeholder="Email" autocomplete="email" required>
                     <input type="password" class="authPasswordInput" placeholder="Password" autocomplete="current-password" required>
                     <button type="button" class="authForgotPasswordBtn">Forgot password?</button>
+                    <label class="authConsentRow hidden">
+                        <input type="checkbox" class="authConsentCheckbox">
+                        <span>I agree to the <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a> and <a href="/terms.html" target="_blank" rel="noopener">Terms of Service</a></span>
+                    </label>
                     <p class="authErrorText hidden"></p>
                     <p class="authInfoText hidden"></p>
                     <button type="submit" class="authSubmitBtn">Sign in</button>
@@ -280,6 +307,7 @@
                 <button class="authGoogleBtn" type="button">
                     <i class="fa-brands fa-google"></i> Continue with Google
                 </button>
+                <p class="authGoogleConsentNote">By continuing you agree to the <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a> and <a href="/terms.html" target="_blank" rel="noopener">Terms of Service</a>.</p>
 
                 <p class="authModeRow"><span class="authModeLeadText">No account yet?</span> <button type="button" class="authModeToggleBtn">Sign up</button></p>
             </div>
