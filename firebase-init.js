@@ -97,6 +97,37 @@ async function ensureUserProfile(user) {
     return true;
 }
 
+// Accounts created before this shipped already went through onboarding
+// under the old (localStorage-only, or no) tour tracking - treat them as
+// already toured so this never surprise-replays a tutorial on an existing
+// user's next login. Only accounts created after this date are eligible
+// for the account-level auto-play checkAndMarkTourSeen implements below.
+const TOUR_TRACKING_LAUNCH = new Date('2026-08-30T00:00:00Z');
+
+// Should THIS app's (solo/group) tour auto-play for this account, right
+// now? Tracked per-app, not just per-account - someone might not open
+// Group until long after signing up, and it should still get its own
+// first-run tour then. Marks it seen the moment this returns true (not on
+// tour completion/skip), so an abandoned tour never re-triggers either -
+// and since this lives on the account (not localStorage), it holds across
+// every device, not just the one it first played on.
+async function checkAndMarkTourSeen(user, appKey) {
+    const userRef = doc(db, 'users', user.uid);
+    const snapshot = await getDoc(userRef);
+    const data = snapshot.exists() ? snapshot.data() : null;
+
+    const createdAt = (data && data.createdAt && data.createdAt.toDate) ? data.createdAt.toDate() : null;
+    if (!createdAt || createdAt < TOUR_TRACKING_LAUNCH) {
+        return false;
+    }
+    if (data.toursSeen && data.toursSeen[appKey]) {
+        return false;
+    }
+
+    await setDoc(userRef, { toursSeen: { [appKey]: true } }, { merge: true });
+    return true;
+}
+
 window.ToDoAuth = {
     auth,
     db,
@@ -114,6 +145,7 @@ window.ToDoAuth = {
     // 'auth/requires-recent-login' if the session is old; callers should
     // catch that and prompt a fresh sign-in before retrying.
     deleteAccountAuth: () => deleteUser(auth.currentUser),
+    checkAndMarkTourSeen,
     // callback(user, isFirstTimeEver) - the second argument is only ever
     // true the one time a brand-new account's profile doc gets created.
     onAuthChange: (callback) => onAuthStateChanged(auth, async (user) => {

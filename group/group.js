@@ -3421,6 +3421,7 @@ function resetGroupState() {
     // whatever the previous account already resolved this session.
     hasCheckedGroupWelcome = false;
     hasAutoStartedGroupTour = false;
+    shouldAutoPlayGroupTour = false;
     if (groupWelcomeOverlay) {
         groupWelcomeOverlay.classList.add('hidden');
         groupWelcomeOverlay.setAttribute('aria-hidden', 'true');
@@ -3520,13 +3521,14 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.inputContainer',
         title: 'Add a task',
-        text: 'Add your own tasks here, same as solo - matrix, difficulty, and deadline all carry over.'
+        text: 'Add your own tasks here, same as solo - matrix, difficulty, and deadline all carry over. Go ahead and add one now.',
+        waitFor: { event: 'click', selector: '.addBtn' }
     },
     {
         selector: '.detailsToggleBtn',
         title: 'Prioritize',
-        text: 'Set matrix, difficulty, deadline, and schedule for a new task.',
-        beforeShow: () => taskDetailsPanel?.classList.add('open')
+        text: 'Set matrix, difficulty, deadline, and schedule for a new task. Click it to see what\'s inside.',
+        waitFor: { event: 'click' }
     },
     {
         selector: '.groupMemberScopeTabs',
@@ -3607,6 +3609,13 @@ if (groupOnboardingStartTourBtn) {
 }
 
 let hasAutoStartedGroupTour = false;
+// Whether THIS app (group) has ever auto-played its tour on this account -
+// resolved once at sign-in via window.ToDoAuth.checkAndMarkTourSeen (see
+// AuthGate.init below), account-level rather than the old localStorage-only
+// groupTourController.hasBeenSeen() check, so it never replays on a new
+// device/browser either. Manual restarts (helpTourBtn, the onboarding
+// hint's "Start tutorial") are untouched by this - they always work.
+let shouldAutoPlayGroupTour = false;
 
 // Most of what the group tour points at (whose-tasks tabs, roster, etc.)
 // only exists once a real dashboard is showing - so this both fires right
@@ -3614,7 +3623,7 @@ let hasAutoStartedGroupTour = false;
 // re-checked on every render, so a first-time user with zero groups yet
 // still gets the tour the moment they create or join their first one.
 function maybeAutoStartGroupTour() {
-    if (hasAutoStartedGroupTour || groupTourController.hasBeenSeen() || groupTourController.isOpen()) {
+    if (hasAutoStartedGroupTour || !shouldAutoPlayGroupTour || groupTourController.isOpen()) {
         return;
     }
     if (groupWelcomeOverlay && !groupWelcomeOverlay.classList.contains('hidden')) {
@@ -3715,6 +3724,17 @@ AuthGate.init({
         groups = undefined;
         renderApp();
         startGroupRealtimeUpdates();
+        // First time THIS app has ever been opened on this account - see
+        // shouldAutoPlayGroupTour above. Fire-and-forget (not awaited) so
+        // this one extra Firestore read never delays the group list itself
+        // loading below - maybeAutoStartGroupTour() still gates on the
+        // dashboard actually being visible, so calling it here is just a
+        // safety net; the render calls elsewhere are what actually catch
+        // it once a group's data has loaded.
+        window.ToDoAuth.checkAndMarkTourSeen(user, 'group').then((shouldPlay) => {
+            shouldAutoPlayGroupTour = shouldPlay;
+            maybeAutoStartGroupTour();
+        });
         loadProfileName(user, (name) => {
             if (yourNameInput) {
                 yourNameInput.value = name;

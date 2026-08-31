@@ -3979,11 +3979,33 @@ body::after{
     color: #120a32;
 }
 
+.tourNextBtn:disabled{
+    background: rgba(198, 168, 255, 0.28);
+    color: rgba(18, 10, 50, 0.55);
+    cursor: not-allowed;
+}
+
 .tourTarget{
     position: relative;
     z-index: 1510;
     box-shadow: 0 0 0 3px rgba(214, 201, 255, 0.78), 0 0 0 8px rgba(133, 111, 224, 0.32) !important;
     border-radius: 12px;
+}
+
+/* Interactive tour steps (step.waitFor) - a pulsing ring instead of the
+   static one above, so "look here" reads visually different from "do this
+   yourself to continue". */
+@keyframes tourPulse{
+    0%, 100%{
+        box-shadow: 0 0 0 3px rgba(214, 201, 255, 0.86), 0 0 0 8px rgba(133, 111, 224, 0.4) !important;
+    }
+    50%{
+        box-shadow: 0 0 0 4px rgba(214, 201, 255, 0.96), 0 0 0 15px rgba(133, 111, 224, 0.18) !important;
+    }
+}
+
+.tourTargetWaiting{
+    animation: tourPulse 1.4s ease-in-out infinite;
 }
 
 .rewardOverlay{

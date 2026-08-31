@@ -134,13 +134,14 @@ const TOUR_STEPS = [
     {
         selector: '.inputContainer',
         title: 'Add a task quickly',
-        text: 'Type your task here, then press + or Enter to add it. Try typing a time too, like "tomorrow 3pm" - it\'s picked up automatically.'
+        text: 'Type your task here, then press + or Enter to add it. Try typing a time too, like "tomorrow 3pm" - it\'s picked up automatically. Go ahead and add one now.',
+        waitFor: { event: 'click', selector: '.addBtn' }
     },
     {
         selector: '.detailsToggleBtn',
         title: 'Open smart options',
-        text: 'Use Prioritize to set matrix, difficulty, estimate, and deadline.',
-        beforeShow: () => setDetailsPanelOpen(true)
+        text: 'Use Prioritize to set matrix, difficulty, estimate, and deadline. Click it to see what\'s inside.',
+        waitFor: { event: 'click' }
     },
     {
         selector: '.deadlineContainer',
@@ -380,11 +381,15 @@ function startApp() {
 // password, error mapping, the .userBadge/.authGateActive plumbing) now
 // lives in auth-gate.js, shared with the group app - see AuthGate.init below.
 AuthGate.init({
-    onSignedIn: (user, isFirstTime) => {
+    onSignedIn: async (user) => {
         startApp();
-        // Brand-new account, ever - launch the tour unprompted rather than
-        // leaving it to a passive hint card someone might not notice.
-        if (isFirstTime) {
+        // First time THIS app has ever been opened on this account (not
+        // just "brand-new account overall" - see checkAndMarkTourSeen) -
+        // launch the tour unprompted rather than leaving it to a passive
+        // hint card someone might not notice. Account-level, so it never
+        // replays again after this, on any device, whether finished or
+        // abandoned.
+        if (await window.ToDoAuth.checkAndMarkTourSeen(user, 'solo')) {
             setTimeout(() => tourController.start(), 400);
         }
     },

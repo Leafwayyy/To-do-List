@@ -646,9 +646,14 @@ function startRewardReelTicking(track, tileStepPx) {
 // its own controller with its own step list and its own localStorage key,
 // so solo's and group's tour progress are tracked independently.
 //
-// steps: [{ selector, title, text, beforeShow?() }]. beforeShow runs right
-// before that step's target is looked up (e.g. to open a collapsed panel
-// the target lives inside).
+// steps: [{ selector, title, text, beforeShow?(), isRelevant?(), waitFor? }].
+// beforeShow runs right before that step's target is looked up (e.g. to
+// open a collapsed panel the target lives inside). waitFor (optional):
+// { event, selector? } - makes the step interactive instead of a passive
+// Next-through: the Next button is disabled/relabeled, the target gets a
+// pulsing highlight instead of a static one, and the step only advances
+// once the user actually performs `event` on `selector` (defaults to the
+// step's own selector) - Skip still works normally throughout.
 function createTourController({ steps, storageKey, onEnd }) {
     const tourOverlay = document.querySelector('.tourOverlay');
     const tourCard = document.querySelector('.tourCard');
@@ -660,6 +665,23 @@ function createTourController({ steps, storageKey, onEnd }) {
 
     let activeStepIndex = -1;
     let highlightedElement = null;
+    // The still-pending listener for the current interactive step, if any -
+    // { element, eventName, handler, waitingElement }, so it can be torn
+    // down the moment it's no longer relevant (next step prepared, or the
+    // tour ends) instead of firing late or leaking.
+    let pendingInteraction = null;
+
+    function clearPendingInteraction() {
+        if (!pendingInteraction) {
+            return;
+        }
+        pendingInteraction.element.removeEventListener(pendingInteraction.eventName, pendingInteraction.handler);
+        pendingInteraction.waitingElement.classList.remove('tourTargetWaiting');
+        pendingInteraction = null;
+        if (tourNextBtn) {
+            tourNextBtn.disabled = false;
+        }
+    }
 
     function isOpen() {
         return Boolean(tourOverlay && !tourOverlay.classList.contains('hidden'));
@@ -691,6 +713,12 @@ function createTourController({ steps, storageKey, onEnd }) {
     }
 
     function prepareStep(stepIndex) {
+        // Whatever the previous step set up (interactive or not) is no
+        // longer relevant the moment a new one is being prepared - clear it
+        // first, unconditionally, so an isRelevant()/missing-target bail-out
+        // below can never leave a stale listener behind.
+        clearPendingInteraction();
+
         const step = steps[stepIndex];
         if (!step) {
             return false;
@@ -727,6 +755,18 @@ function createTourController({ steps, storageKey, onEnd }) {
         tourText.textContent = step.text;
         tourNextBtn.textContent = stepIndex === steps.length - 1 ? 'Finish' : 'Next';
 
+        if (step.waitFor) {
+            const waitTarget = step.waitFor.selector ? document.querySelector(step.waitFor.selector) : target;
+            if (waitTarget) {
+                const handler = () => goToNextStep();
+                waitTarget.addEventListener(step.waitFor.event, handler, { once: true });
+                pendingInteraction = { element: waitTarget, eventName: step.waitFor.event, handler, waitingElement: target };
+                target.classList.add('tourTargetWaiting');
+                tourNextBtn.disabled = true;
+                tourNextBtn.textContent = 'Try it →';
+            }
+        }
+
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         setTimeout(positionCard, 180);
         return true;
@@ -761,6 +801,8 @@ function createTourController({ steps, storageKey, onEnd }) {
         if (!tourOverlay || !tourCard) {
             return;
         }
+
+        clearPendingInteraction();
 
         if (highlightedElement) {
             highlightedElement.classList.remove('tourTarget');
