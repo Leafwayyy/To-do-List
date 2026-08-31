@@ -3353,6 +3353,12 @@ function addTaskFromInputs() {
         estimateMinutes
     }).catch((error) => console.error('Failed to add task:', error));
 
+    // A real, successful add (past the empty-input guard above) - the
+    // tour's "add a task" step listens for this exact event, not a raw
+    // click, which would otherwise fire (and falsely advance the tour)
+    // even from a click that silently did nothing.
+    document.dispatchEvent(new CustomEvent('todo:taskAdded'));
+
     taskInput.value = '';
     if (deadlineInput) {
         deadlineInput.value = '';
@@ -3422,6 +3428,7 @@ function resetGroupState() {
     hasCheckedGroupWelcome = false;
     hasAutoStartedGroupTour = false;
     shouldAutoPlayGroupTour = false;
+    isLegacyTourAccount = false;
     if (groupWelcomeOverlay) {
         groupWelcomeOverlay.classList.add('hidden');
         groupWelcomeOverlay.setAttribute('aria-hidden', 'true');
@@ -3522,7 +3529,11 @@ const GROUP_TOUR_STEPS = [
         selector: '.inputContainer',
         title: 'Add a task',
         text: 'Add your own tasks here, same as solo - matrix, difficulty, and deadline all carry over. Go ahead and add one now.',
-        waitFor: { event: 'click', selector: '.addBtn' }
+        // Waits for a task to actually exist, not a raw click on + - that
+        // click alone is a silent no-op with an empty input (see
+        // addTaskFromInputs' early return above), which would otherwise
+        // still fire this and falsely advance the tour.
+        waitFor: { event: 'todo:taskAdded', target: 'document' }
     },
     {
         selector: '.detailsToggleBtn',
@@ -3587,12 +3598,15 @@ function renderGroupOnboardingHint() {
     } catch {
         // localStorage unavailable - treat as not-yet-seen, same as solo.
     }
-    // Also hidden for the tour's whole run, not just once it's done - it
-    // sits right behind the modal, and during an interactive step the
-    // overlay lets clicks through everywhere (see .tourOverlay.interactive
-    // in style.css), which would otherwise let its own "Start tutorial"/
-    // "Dismiss" buttons be clicked by accident mid-tour.
-    const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed' || groupTourController.isOpen();
+    // Hidden for the tour's whole run, not just once it's done - it sits
+    // right behind the modal, and during an interactive step the overlay
+    // lets clicks through everywhere (see .tourOverlay.interactive in
+    // style.css), which would otherwise let its own "Start tutorial"/
+    // "Dismiss" buttons be clicked by accident mid-tour. Also hidden
+    // outright for a legacy account (see isLegacyTourAccount) - this
+    // prompt is part of the new-account onboarding flow, not something to
+    // push on an existing user just because this browser never dismissed it.
+    const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed' || groupTourController.isOpen() || isLegacyTourAccount;
     groupOnboardingHint.classList.toggle('hidden', shouldHide);
 }
 
@@ -3622,6 +3636,12 @@ let hasAutoStartedGroupTour = false;
 // device/browser either. Manual restarts (helpTourBtn, the onboarding
 // hint's "Start tutorial") are untouched by this - they always work.
 let shouldAutoPlayGroupTour = false;
+// Set once at sign-in alongside shouldAutoPlayGroupTour above - whether
+// THIS account predates account-level tour tracking, so
+// renderGroupOnboardingHint() can hide its "Start tutorial" prompt for it
+// entirely, not just via its usual per-browser dismiss state (which a
+// legacy account in a fresh browser would never have set).
+let isLegacyTourAccount = false;
 
 // Most of what the group tour points at (whose-tasks tabs, roster, etc.)
 // only exists once a real dashboard is showing - so this both fires right
@@ -3737,8 +3757,10 @@ AuthGate.init({
         // dashboard actually being visible, so calling it here is just a
         // safety net; the render calls elsewhere are what actually catch
         // it once a group's data has loaded.
-        window.ToDoAuth.checkAndMarkTourSeen(user, 'group').then((shouldPlay) => {
-            shouldAutoPlayGroupTour = shouldPlay;
+        window.ToDoAuth.checkAndMarkTourSeen(user, 'group').then(({ shouldAutoPlay, isLegacyAccount }) => {
+            shouldAutoPlayGroupTour = shouldAutoPlay;
+            isLegacyTourAccount = isLegacyAccount;
+            renderGroupOnboardingHint();
             maybeAutoStartGroupTour();
         });
         loadProfileName(user, (name) => {

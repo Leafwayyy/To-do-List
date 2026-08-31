@@ -649,19 +649,23 @@ function startRewardReelTicking(track, tileStepPx) {
 // steps: [{ selector, title, text, beforeShow?(), isRelevant?(), waitFor? }].
 // beforeShow runs right before that step's target is looked up (e.g. to
 // open a collapsed panel the target lives inside). waitFor (optional):
-// { event, selector? } - makes the step interactive instead of a passive
-// Next-through: the Next button stays visible but disabled/relabeled (so
-// the card doesn't look broken with only a Skip button), the target gets a
-// pulsing highlight instead of a static one, and the step only advances
-// once the user actually performs `event` on `selector` (defaults to the
-// step's own selector) - Skip still works normally throughout. The bug
-// that actually blocked the real target (.tourOverlay sitting on top of
-// it in the stacking order - see .tourOverlay.interactive in style.css)
-// was never about this button; it's fixed independently of whether the
-// button is shown, disabled, or hidden. onStart (optional): called right
-// as the tour opens, e.g. to hide a page's separate passive "quick start"
-// hint card so it doesn't sit underneath/behind the modal for the whole
-// tour.
+// { event, selector?, target? } - makes the step interactive instead of a
+// passive Next-through: the Next button stays visible but disabled/
+// relabeled (so the card doesn't look broken with only a Skip button), the
+// target gets a pulsing highlight instead of a static one, and the step
+// only advances once `event` fires on whichever of these it's listening to
+// (in priority order): target: 'document'/'window' (app-wide - for a real
+// outcome, like a custom 'todo:taskAdded' event, rather than any click on
+// a specific button, which can be a no-op or miss an alternate way of
+// doing the same thing entirely - see script.js's addTaskFromInputs), else
+// `selector` if given, else the step's own selector. Skip still works
+// normally throughout. The bug that actually blocked the real target
+// (.tourOverlay sitting on top of it in the stacking order - see
+// .tourOverlay.interactive in style.css) was never about the Next button;
+// it's fixed independently of whether that button is shown or hidden.
+// onStart (optional): called right as the tour opens, e.g. to hide a
+// page's separate passive "quick start" hint card so it doesn't sit
+// underneath/behind the modal for the whole tour.
 function createTourController({ steps, storageKey, onEnd, onStart }) {
     const tourOverlay = document.querySelector('.tourOverlay');
     const tourCard = document.querySelector('.tourCard');
@@ -765,7 +769,19 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
         tourNextBtn.textContent = stepIndex === steps.length - 1 ? 'Finish' : 'Next';
 
         if (step.waitFor) {
-            const waitTarget = step.waitFor.selector ? document.querySelector(step.waitFor.selector) : target;
+            // 'document' (or 'window') listens app-wide instead of on a
+            // specific element - for a step that should only advance once
+            // something REALLY happened (a task actually got added), not on
+            // any raw click, which can also fire from a blocked/no-op
+            // attempt (e.g. clicking Add with an empty input) or miss
+            // entirely if the same action was taken a different way (e.g.
+            // pressing Enter instead of clicking). Those cases dispatch
+            // their own custom event instead (see e.g. 'todo:taskAdded').
+            const waitTarget = step.waitFor.target === 'document'
+                ? document
+                : step.waitFor.target === 'window'
+                    ? window
+                    : (step.waitFor.selector ? document.querySelector(step.waitFor.selector) : target);
             if (waitTarget) {
                 const handler = () => goToNextStep();
                 waitTarget.addEventListener(step.waitFor.event, handler, { once: true });

@@ -74,6 +74,12 @@ const ACTIVITY_KEY = 'todoActivityV1';
 const ACTIVITY_HISTORY_KEY = 'todoActivityHistoryV1';
 const CELEBRATED_DAILY_CLEAR_KEY = 'todoCelebratedDailyClearDate';
 const COACH_KEY = 'todoCoachV1';
+// Set once at sign-in (see AuthGate.init below) - whether THIS account
+// predates account-level tour tracking, so renderOnboardingHint() can hide
+// its "Start tutorial" prompt for it entirely, not just via its usual
+// per-browser dismiss state (which a legacy account in a fresh browser
+// would never have set).
+let isLegacyTourAccount = false;
 
 // MATRIX_CONFIG and DIFFICULTY_CONFIG now live in task-shared.js (loaded
 // before this file - see index.html), shared with the group app.
@@ -135,7 +141,11 @@ const TOUR_STEPS = [
         selector: '.inputContainer',
         title: 'Add a task quickly',
         text: 'Type your task here, then press + or Enter to add it. Try typing a time too, like "tomorrow 3pm" - it\'s picked up automatically. Go ahead and add one now.',
-        waitFor: { event: 'click', selector: '.addBtn' }
+        // Waits for a task to actually exist, not a raw click on + - that
+        // click alone can be a no-op (empty input triggers a "Please enter
+        // a task!" alert instead) or never happen at all if Enter is used
+        // instead, exactly as the instructions above say is fine to do.
+        waitFor: { event: 'todo:taskAdded', target: 'document' }
     },
     {
         selector: '.detailsToggleBtn',
@@ -389,7 +399,10 @@ AuthGate.init({
         // hint card someone might not notice. Account-level, so it never
         // replays again after this, on any device, whether finished or
         // abandoned.
-        if (await window.ToDoAuth.checkAndMarkTourSeen(user, 'solo')) {
+        const { shouldAutoPlay, isLegacyAccount } = await window.ToDoAuth.checkAndMarkTourSeen(user, 'solo');
+        isLegacyTourAccount = isLegacyAccount;
+        renderOnboardingHint();
+        if (shouldAutoPlay) {
             setTimeout(() => tourController.start(), 400);
         }
     },
@@ -402,6 +415,7 @@ AuthGate.init({
         knownCloudTaskIds = new Set();
         hasLoadedCloudTasksOnce = false;
         tasks = [];
+        isLegacyTourAccount = false;
     }
 });
 
@@ -531,6 +545,13 @@ function addTaskFromInputs() {
     updateTaskSummary();
     updateUrgencyAlert();
     saveTasks();
+
+    // A real, successful add - not just a click on the + button, which can
+    // also fire from an empty input (see the early-return alert above) or
+    // never fire at all if the task was added via Enter instead. The tour's
+    // "add a task" step listens for this exact event, not a raw click, so
+    // it only advances once a task genuinely exists.
+    document.dispatchEvent(new CustomEvent('todo:taskAdded'));
 }
 
 function openCalendar() {
@@ -602,12 +623,15 @@ function renderOnboardingHint() {
     }
 
     const coachState = localStorage.getItem(COACH_KEY);
-    // Also hidden for the tour's whole run, not just once it's done - it
-    // sits right behind the modal, and during an interactive step the
-    // overlay lets clicks through everywhere (see .tourOverlay.interactive
-    // in style.css), which would otherwise let its own "Start tutorial"/
-    // "Dismiss" buttons be clicked by accident mid-tour.
-    const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed' || tourController.isOpen();
+    // Hidden for the tour's whole run, not just once it's done - it sits
+    // right behind the modal, and during an interactive step the overlay
+    // lets clicks through everywhere (see .tourOverlay.interactive in
+    // style.css), which would otherwise let its own "Start tutorial"/
+    // "Dismiss" buttons be clicked by accident mid-tour. Also hidden
+    // outright for a legacy account (see isLegacyTourAccount) - this
+    // prompt is part of the new-account onboarding flow, not something to
+    // push on an existing user just because this browser never dismissed it.
+    const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed' || tourController.isOpen() || isLegacyTourAccount;
     onboardingHint.classList.toggle('hidden', shouldHide);
 }
 
