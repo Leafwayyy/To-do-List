@@ -3587,13 +3587,19 @@ function renderGroupOnboardingHint() {
     } catch {
         // localStorage unavailable - treat as not-yet-seen, same as solo.
     }
-    const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed';
+    // Also hidden for the tour's whole run, not just once it's done - it
+    // sits right behind the modal, and during an interactive step the
+    // overlay lets clicks through everywhere (see .tourOverlay.interactive
+    // in style.css), which would otherwise let its own "Start tutorial"/
+    // "Dismiss" buttons be clicked by accident mid-tour.
+    const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed' || groupTourController.isOpen();
     groupOnboardingHint.classList.toggle('hidden', shouldHide);
 }
 
 const groupTourController = createTourController({
     steps: GROUP_TOUR_STEPS,
     storageKey: GROUP_COACH_KEY,
+    onStart: () => renderGroupOnboardingHint(),
     onEnd: () => renderGroupOnboardingHint()
 });
 

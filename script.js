@@ -602,7 +602,12 @@ function renderOnboardingHint() {
     }
 
     const coachState = localStorage.getItem(COACH_KEY);
-    const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed';
+    // Also hidden for the tour's whole run, not just once it's done - it
+    // sits right behind the modal, and during an interactive step the
+    // overlay lets clicks through everywhere (see .tourOverlay.interactive
+    // in style.css), which would otherwise let its own "Start tutorial"/
+    // "Dismiss" buttons be clicked by accident mid-tour.
+    const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed' || tourController.isOpen();
     onboardingHint.classList.toggle('hidden', shouldHide);
 }
 
@@ -612,6 +617,7 @@ function renderOnboardingHint() {
 const tourController = createTourController({
     steps: TOUR_STEPS,
     storageKey: COACH_KEY,
+    onStart: () => renderOnboardingHint(),
     onEnd: () => renderOnboardingHint()
 });
 
