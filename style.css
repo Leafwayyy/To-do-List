@@ -3920,23 +3920,6 @@ body::after{
     display: none;
 }
 
-/* Interactive (waitFor) steps: the real target the user needs to click
-   lives inside .container, which has its own position:relative + z-index
-   stacking context (see .container above) - that traps .tourTarget's
-   z-index no matter how high it's set, so it can never actually paint
-   above this overlay despite looking like it does through the dimming.
-   Rather than fight that, let clicks pass straight through the overlay
-   during an interactive step (the dimming is still purely visual - this
-   only affects hit-testing), keeping only the card itself clickable so
-   Skip/the disabled Next button still work. */
-.tourOverlay.interactive{
-    pointer-events: none;
-}
-
-.tourOverlay.interactive .tourCard{
-    pointer-events: auto;
-}
-
 .tourCard{
     position: fixed;
     left: 12px;
@@ -3996,33 +3979,11 @@ body::after{
     color: #120a32;
 }
 
-.tourNextBtn:disabled{
-    background: rgba(198, 168, 255, 0.28);
-    color: rgba(18, 10, 50, 0.55);
-    cursor: not-allowed;
-}
-
 .tourTarget{
     position: relative;
     z-index: 1510;
     box-shadow: 0 0 0 3px rgba(214, 201, 255, 0.78), 0 0 0 8px rgba(133, 111, 224, 0.32) !important;
     border-radius: 12px;
-}
-
-/* Interactive tour steps (step.waitFor) - a pulsing ring instead of the
-   static one above, so "look here" reads visually different from "do this
-   yourself to continue". */
-@keyframes tourPulse{
-    0%, 100%{
-        box-shadow: 0 0 0 3px rgba(214, 201, 255, 0.86), 0 0 0 8px rgba(133, 111, 224, 0.4) !important;
-    }
-    50%{
-        box-shadow: 0 0 0 4px rgba(214, 201, 255, 0.96), 0 0 0 15px rgba(133, 111, 224, 0.18) !important;
-    }
-}
-
-.tourTargetWaiting{
-    animation: tourPulse 1.4s ease-in-out infinite;
 }
 
 .rewardOverlay{
@@ -4938,6 +4899,14 @@ body.authGateActive .authOverlay{
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+
+/* Group page only (see group.js's renderApp) - there's no group tour to
+   restart before a group dashboard is actually showing, so this hides
+   rather than sitting there doing nothing/pointing at elements that don't
+   exist yet. Solo never applies this class - its tour is always available. */
+.helpTourBtn.hidden{
+    display: none;
 }
 
 .helpTourBtn:hover{

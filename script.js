@@ -140,18 +140,13 @@ const TOUR_STEPS = [
     {
         selector: '.inputContainer',
         title: 'Add a task quickly',
-        text: 'Type your task here, then press + or Enter to add it. Try typing a time too, like "tomorrow 3pm" - it\'s picked up automatically. Go ahead and add one now.',
-        // Waits for a task to actually exist, not a raw click on + - that
-        // click alone can be a no-op (empty input triggers a "Please enter
-        // a task!" alert instead) or never happen at all if Enter is used
-        // instead, exactly as the instructions above say is fine to do.
-        waitFor: { event: 'todo:taskAdded', target: 'document' }
+        text: 'Type your task here, then press + or Enter to add it. Try typing a time too, like "tomorrow 3pm" - it\'s picked up automatically.'
     },
     {
         selector: '.detailsToggleBtn',
         title: 'Open smart options',
-        text: 'Use Prioritize to set matrix, difficulty, estimate, and deadline. Click it to see what\'s inside.',
-        waitFor: { event: 'click' }
+        text: 'Use Prioritize to set matrix, difficulty, estimate, and deadline.',
+        beforeShow: () => setDetailsPanelOpen(true)
     },
     {
         selector: '.deadlineContainer',
@@ -545,13 +540,6 @@ function addTaskFromInputs() {
     updateTaskSummary();
     updateUrgencyAlert();
     saveTasks();
-
-    // A real, successful add - not just a click on the + button, which can
-    // also fire from an empty input (see the early-return alert above) or
-    // never fire at all if the task was added via Enter instead. The tour's
-    // "add a task" step listens for this exact event, not a raw click, so
-    // it only advances once a task genuinely exists.
-    document.dispatchEvent(new CustomEvent('todo:taskAdded'));
 }
 
 function openCalendar() {
@@ -624,11 +612,8 @@ function renderOnboardingHint() {
 
     const coachState = localStorage.getItem(COACH_KEY);
     // Hidden for the tour's whole run, not just once it's done - it sits
-    // right behind the modal, and during an interactive step the overlay
-    // lets clicks through everywhere (see .tourOverlay.interactive in
-    // style.css), which would otherwise let its own "Start tutorial"/
-    // "Dismiss" buttons be clicked by accident mid-tour. Also hidden
-    // outright for a legacy account (see isLegacyTourAccount) - this
+    // right behind the modal and is redundant with it while open. Also
+    // hidden outright for a legacy account (see isLegacyTourAccount) - this
     // prompt is part of the new-account onboarding flow, not something to
     // push on an existing user just because this browser never dismissed it.
     const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed' || tourController.isOpen() || isLegacyTourAccount;

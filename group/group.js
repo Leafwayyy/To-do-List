@@ -2831,6 +2831,11 @@ function renderApp() {
     const group = getSelectedGroup();
     const shouldShowDashboard = !shouldShowSetup && Boolean(group);
     groupDashboard?.classList.toggle('hidden', !shouldShowDashboard);
+    // Nothing for the group tour to point at (roster, whose-tasks tabs,
+    // etc. all live inside the dashboard) until a group is actually
+    // selected - hide the restart button rather than leaving it to open a
+    // tour with no valid targets.
+    helpTourBtn?.classList.toggle('hidden', !shouldShowDashboard);
 
     // The big page title shows the selected group's name once you're
     // looking at one, and falls back to "Group" anywhere else (switcher,
@@ -3353,12 +3358,6 @@ function addTaskFromInputs() {
         estimateMinutes
     }).catch((error) => console.error('Failed to add task:', error));
 
-    // A real, successful add (past the empty-input guard above) - the
-    // tour's "add a task" step listens for this exact event, not a raw
-    // click, which would otherwise fire (and falsely advance the tour)
-    // even from a click that silently did nothing.
-    document.dispatchEvent(new CustomEvent('todo:taskAdded'));
-
     taskInput.value = '';
     if (deadlineInput) {
         deadlineInput.value = '';
@@ -3528,18 +3527,13 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.inputContainer',
         title: 'Add a task',
-        text: 'Add your own tasks here, same as solo - matrix, difficulty, and deadline all carry over. Go ahead and add one now.',
-        // Waits for a task to actually exist, not a raw click on + - that
-        // click alone is a silent no-op with an empty input (see
-        // addTaskFromInputs' early return above), which would otherwise
-        // still fire this and falsely advance the tour.
-        waitFor: { event: 'todo:taskAdded', target: 'document' }
+        text: 'Add your own tasks here, same as solo - matrix, difficulty, and deadline all carry over.'
     },
     {
         selector: '.detailsToggleBtn',
         title: 'Prioritize',
-        text: 'Set matrix, difficulty, deadline, and schedule for a new task. Click it to see what\'s inside.',
-        waitFor: { event: 'click' }
+        text: 'Set matrix, difficulty, deadline, and schedule for a new task.',
+        beforeShow: () => taskDetailsPanel?.classList.add('open')
     },
     {
         selector: '.groupMemberScopeTabs',
@@ -3599,11 +3593,8 @@ function renderGroupOnboardingHint() {
         // localStorage unavailable - treat as not-yet-seen, same as solo.
     }
     // Hidden for the tour's whole run, not just once it's done - it sits
-    // right behind the modal, and during an interactive step the overlay
-    // lets clicks through everywhere (see .tourOverlay.interactive in
-    // style.css), which would otherwise let its own "Start tutorial"/
-    // "Dismiss" buttons be clicked by accident mid-tour. Also hidden
-    // outright for a legacy account (see isLegacyTourAccount) - this
+    // right behind the modal and is redundant with it while open. Also
+    // hidden outright for a legacy account (see isLegacyTourAccount) - this
     // prompt is part of the new-account onboarding flow, not something to
     // push on an existing user just because this browser never dismissed it.
     const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed' || groupTourController.isOpen() || isLegacyTourAccount;
