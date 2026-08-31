@@ -1,6 +1,34 @@
 rules_version = '2';
 
 service cloud.firestore {
+  // Feature 9: group roles. adminIds is a plain array (not a {uid: role}
+  // map) - there's only one delegated tier below owner, so an array lets
+  // every admin-aware rule below reuse the same size-delta/hasAll idiom the
+  // membership rules already use, instead of introducing map-diff syntax
+  // nowhere else in this file. Missing adminIds (any group created before
+  // this feature shipped) reads as "no admins" - never a crash, never
+  // treated as "everyone's an admin".
+  function adminIdsOf(groupData) {
+    return ('adminIds' in groupData) ? groupData.adminIds : [];
+  }
+  function isAdmin(groupData) {
+    return request.auth.uid in adminIdsOf(groupData);
+  }
+  function isOwnerOrAdmin(groupData) {
+    return request.auth.uid == groupData.ownerId || isAdmin(groupData);
+  }
+  // The single uid that arrayUnion just appended, for the "approve a join
+  // request" branch below - relies on approveJoinRequest() always using
+  // arrayUnion (which lands a not-already-present value at the end of the
+  // array), never inserting anywhere else.
+  function newlyAddedMemberId(newMemberIds) {
+    return newMemberIds[newMemberIds.size() - 1];
+  }
+  function isPendingJoinRequest(db, groupId, uid) {
+    return exists(/databases/$(db)/documents/groups/$(groupId)/joinRequests/$(uid))
+      && get(/databases/$(db)/documents/groups/$(groupId)/joinRequests/$(uid)).data.status == 'pending';
+  }
+
   match /databases/{database}/documents {
 
     // Feature 2: each signed-in user can only read/write their own profile doc.
@@ -44,48 +72,202 @@ service cloud.firestore {
       // display name, in lockstep) to the member lists, one at a time, and
       // change nothing else about the group. This is what lets someone who
       // isn't a member yet join at all, since Firestore evaluates write
-      // rules independently of read rules.
+      // rules independently of read rules. Only when the group is 'open' -
+      // an 'invite-only' group instead routes through the joinRequests
+      // subcollection below, and 'closed' blocks new members entirely.
+      // Missing privacy (any group created before this feature shipped)
+      // reads as 'open', so existing groups keep today's exact behavior.
       //
       // Leaving is the mirror image: the write may ONLY remove your own uid
-      // (and name) from the lists, one at a time. Requiring the member
-      // count to shrink by exactly one, plus "you're gone from the new
-      // list", together force the removed entry to be your own - removing
-      // a different single member would leave you still present and fail
-      // the second check, and removing more than one would fail the count
-      // check. The owner can't use this path (they delete the group
-      // instead, so it's never left without an owner).
+      // (and name) from the lists, one at a time - plus your own uid from
+      // adminIds, in the same write, if you happened to be an admin (an
+      // admin who leaves without this would keep a stale, still-privileged
+      // entry in adminIds forever). Requiring the member count to shrink by
+      // exactly one, plus "you're gone from the new list", together force
+      // the removed entry to be your own - removing a different single
+      // member would leave you still present and fail the second check,
+      // and removing more than one would fail the count check. The owner
+      // can't use this path (see the separate owner-leaves branch below,
+      // which also hands ownership to someone else in the same write - a
+      // group is never left without an owner).
       allow update: if request.auth != null
         && (
           (
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames'])
+            (resource.data.privacy == 'open' || !('privacy' in resource.data))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames'])
             && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
             && request.resource.data.memberNames.size() == request.resource.data.memberIds.size()
             && request.auth.uid in request.resource.data.memberIds
             && !(request.auth.uid in resource.data.memberIds)
           )
           || (
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames'])
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames', 'adminIds'])
             && request.resource.data.memberIds.size() == resource.data.memberIds.size() - 1
             && request.resource.data.memberNames.size() == request.resource.data.memberIds.size()
             && request.auth.uid in resource.data.memberIds
             && !(request.auth.uid in request.resource.data.memberIds)
             && request.auth.uid != resource.data.ownerId
+            && request.resource.data.memberIds.hasAll(adminIdsOf(request.resource.data))
+          )
+          // The owner leaving: same shape as the plain self-leave branch
+          // above (exactly your own uid removed from the lists), except
+          // it's the owner leaving, and ownership must be handed to
+          // someone still left in the group in the same write - never
+          // yourself, always a real remaining member, and never left
+          // stuck also listed as their own admin (mirrors the "owner never
+          // doubles up as their own admin" invariant the promote/demote
+          // branch enforces below). Which specific remaining member becomes
+          // owner isn't this rule's business - the client picks (currently
+          // at random) and this just validates the result. Only fires when
+          // at least one other member remains; the lone-owner case has
+          // nobody to hand off to, so the client blocks it and points at
+          // deleting the group instead.
+          || (
+            request.auth.uid == resource.data.ownerId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames', 'ownerId', 'adminIds'])
+            && request.resource.data.memberIds.size() == resource.data.memberIds.size() - 1
+            && request.resource.data.memberNames.size() == request.resource.data.memberIds.size()
+            && resource.data.memberIds.hasAll(request.resource.data.memberIds)
+            && !(request.auth.uid in request.resource.data.memberIds)
+            && request.resource.data.ownerId != request.auth.uid
+            && request.resource.data.ownerId in request.resource.data.memberIds
+            && !(request.resource.data.ownerId in adminIdsOf(request.resource.data))
+            && request.resource.data.memberIds.hasAll(adminIdsOf(request.resource.data))
           )
           // Renaming: owner-only, and only the name field changes.
           || (
             request.auth.uid == resource.data.ownerId
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
           )
+          // Approving a pending join request: the owner or an admin appends
+          // someone ELSE's uid - distinct from the self-join branch above,
+          // which requires the actor's own uid to be the one added. Requires
+          // a matching joinRequests/{newUid} doc that's still 'pending', so
+          // this can't be used to add an arbitrary uid out of nowhere.
+          || (
+            isOwnerOrAdmin(resource.data)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames'])
+            && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
+            && request.resource.data.memberNames.size() == request.resource.data.memberIds.size()
+            && request.resource.data.memberIds.hasAll(resource.data.memberIds)
+            && !(newlyAddedMemberId(request.resource.data.memberIds) in resource.data.memberIds)
+            && isPendingJoinRequest(database, groupId, newlyAddedMemberId(request.resource.data.memberIds))
+          )
+          // Kicking: the owner may remove anyone but themselves; an admin
+          // may only remove a plain member (never another admin, never the
+          // owner - enforced by requiring a plain-admin actor to leave
+          // adminIds completely untouched, which is impossible if the
+          // removed uid was already in it). If the removed member happened
+          // to be an admin, the SAME write must also drop them from
+          // adminIds (mirrors the leave branch's own-admin cleanup above).
+          || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames', 'adminIds'])
+            && request.resource.data.memberIds.size() == resource.data.memberIds.size() - 1
+            && request.resource.data.memberNames.size() == request.resource.data.memberIds.size()
+            && resource.data.memberIds.hasAll(request.resource.data.memberIds)
+            && request.resource.data.memberIds.hasAll(adminIdsOf(request.resource.data))
+            && resource.data.ownerId in request.resource.data.memberIds
+            && request.auth.uid in request.resource.data.memberIds
+            && (
+              request.auth.uid == resource.data.ownerId
+              || (isAdmin(resource.data) && adminIdsOf(resource.data) == adminIdsOf(request.resource.data))
+            )
+          )
+          // Promoting/demoting an admin: owner-only, exactly one uid added
+          // or removed from adminIds, every admin (old and new) still a
+          // real member, and the owner never doubles up as their own admin.
+          || (
+            request.auth.uid == resource.data.ownerId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['adminIds'])
+            && resource.data.memberIds.hasAll(adminIdsOf(request.resource.data))
+            && !(resource.data.ownerId in adminIdsOf(request.resource.data))
+            && (
+              (
+                adminIdsOf(request.resource.data).size() == adminIdsOf(resource.data).size() + 1
+                && adminIdsOf(request.resource.data).hasAll(adminIdsOf(resource.data))
+              )
+              || (
+                adminIdsOf(request.resource.data).size() == adminIdsOf(resource.data).size() - 1
+                && adminIdsOf(resource.data).hasAll(adminIdsOf(request.resource.data))
+              )
+            )
+          )
+          // Changing who can join: owner-only, and only the privacy field
+          // changes, to one of the three known values.
+          || (
+            request.auth.uid == resource.data.ownerId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['privacy'])
+            && request.resource.data.privacy in ['open', 'invite-only', 'closed']
+          )
         );
 
       allow delete: if request.auth != null && request.auth.uid == resource.data.ownerId;
 
+      // Feature 9 (join requests): how someone joins an 'invite-only' group.
+      // The doc ID is the requester's own uid (same "ID is the identity"
+      // convention as groups/{inviteCode} and users/{uid} above) - every
+      // rule below reduces to a one-line uid check, and it naturally caps
+      // each person to one outstanding request per group instead of piling
+      // up duplicates. Approving deletes this doc as part of the same
+      // client-side write batch that adds the member (see approveJoinRequest
+      // in group/groups-data.js); denying flips status to 'denied' and
+      // keeps the doc so the requester gets durable feedback instead of
+      // Firestore silently losing the "no".
+      match /joinRequests/{requestId} {
+        allow read: if request.auth != null
+          && (request.auth.uid == requestId || isOwnerOrAdmin(get(/databases/$(database)/documents/groups/$(groupId)).data));
+
+        // Requesting to join: only for yourself, only while you're not
+        // already a member, and only when the group is actually
+        // invite-only (an 'open' group uses the direct join branch above
+        // instead of ever creating a request doc; a 'closed' group blocks
+        // this path entirely, same as it blocks direct joins).
+        allow create: if request.auth != null
+          && request.auth.uid == requestId
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 80
+          && !(request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds)
+          && get(/databases/$(database)/documents/groups/$(groupId)).data.privacy == 'invite-only';
+
+        allow update: if request.auth != null
+          && (
+            // Re-requesting after a denial: flip your own denied doc back
+            // to pending, nothing else about it changes.
+            (
+              request.auth.uid == requestId
+              && resource.data.status == 'denied'
+              && request.resource.data.status == 'pending'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'requestedAt', 'respondedAt'])
+              && !(request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds)
+              && get(/databases/$(database)/documents/groups/$(groupId)).data.privacy == 'invite-only'
+            )
+            // Denying: the owner or an admin flips pending -> denied.
+            || (
+              isOwnerOrAdmin(get(/databases/$(database)/documents/groups/$(groupId)).data)
+              && resource.data.status == 'pending'
+              && request.resource.data.status == 'denied'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
+            )
+          );
+
+        // Retracting your own request, or the owner/admin clearing any
+        // request - the latter also covers the second half of approval
+        // (deleting the request once the member has been added).
+        allow delete: if request.auth != null
+          && (request.auth.uid == requestId || isOwnerOrAdmin(get(/databases/$(database)/documents/groups/$(groupId)).data));
+      }
+
       // Feature 5: each member's tasks within the group. Any member can
       // read the whole group's tasks (that's the point - visible progress);
-      // only the task's own owner can edit it. Deleting is also allowed for
-      // the group's owner (not just the task's own owner), so deleting a
-      // group can clean up every member's tasks in it, not just the
-      // owner's own.
+      // only the task's own owner can ever edit or delete it - deliberately
+      // not the group's owner too, even to clean up when the group itself
+      // is deleted (see deleteGroupCompletely in group/groups-data.js,
+      // which only deletes the deleting owner's own tasks and accepts that
+      // everyone else's task docs are left behind, orphaned, rather than
+      // giving the group owner standing "delete anyone's task" power).
       match /tasks/{taskId} {
         allow read: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
@@ -119,11 +301,7 @@ service cloud.firestore {
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount', 'lastCommentAt'])
             )
           );
-        allow delete: if request.auth != null
-          && (
-            request.auth.uid == resource.data.ownerId
-            || request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId
-          );
+        allow delete: if request.auth != null && request.auth.uid == resource.data.ownerId;
 
         // Feature 7: a discussion thread under each task. Any member can
         // read/post; only the comment's own author can delete it. No

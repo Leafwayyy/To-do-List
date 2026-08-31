@@ -2987,7 +2987,9 @@ body::after{
 .difficultySelect,
 .editorMatrixSelect,
 .editorTaskTypeSelect,
-.editorDifficultySelect{
+.editorDifficultySelect,
+.groupCreatePrivacySelect,
+.groupSettingsPrivacySelect{
     color-scheme: dark;
 }
 
@@ -2995,7 +2997,9 @@ body::after{
 .difficultySelect option,
 .editorMatrixSelect option,
 .editorTaskTypeSelect option,
-.editorDifficultySelect option{
+.editorDifficultySelect option,
+.groupCreatePrivacySelect option,
+.groupSettingsPrivacySelect option{
     background: #1a1143;
     color: #f7f3ff;
     font-weight: 600;
@@ -4897,9 +4901,395 @@ body.authGateActive .authOverlay{
     justify-content: center;
 }
 
+/* Group page only (see group.js's renderApp) - there's no group tour to
+   restart before a group dashboard is actually showing, so this hides
+   rather than sitting there doing nothing/pointing at elements that don't
+   exist yet. Solo never applies this class - its tour is always available. */
+.helpTourBtn.hidden{
+    display: none;
+}
+
 .helpTourBtn:hover{
     background: rgba(35, 40, 49, 0.96);
     border-color: var(--violet-accent, #d7b778);
+}
+
+.brainDumpToggleBtn{
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid rgba(142, 197, 255, 0.34);
+    background: rgba(20, 30, 45, 0.95);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #dce8fb;
+    cursor: pointer;
+}
+
+.brainDumpToggleBtn:hover{
+    background: rgba(35, 40, 49, 0.96);
+    border-color: var(--violet-accent, #d7b778);
+}
+
+/* Group page only (see group.js's renderApp) - same reasoning as
+   .helpTourBtn.hidden above: nothing to add tasks to without a selected
+   group. Solo never applies this class - always available there. */
+.brainDumpToggleBtn.hidden{
+    display: none;
+}
+
+/* Brain Dump chat - built dynamically by brain-dump.js, same overlay/.open
+   convention as .taskEditorOverlay, sized for a scrolling chat thread
+   instead of a short form. */
+.brainDumpOverlay{
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    padding: 16px;
+    background: rgba(6, 4, 24, 0.68);
+    backdrop-filter: blur(4px);
+}
+
+.brainDumpOverlay.open{
+    display: flex;
+}
+
+.brainDumpCard{
+    width: min(480px, 100%);
+    height: min(680px, 92vh);
+    display: flex;
+    flex-direction: column;
+    border-radius: 16px;
+    border: 2px solid rgba(178, 161, 255, 0.52);
+    background: linear-gradient(160deg, rgba(33, 22, 86, 0.96) 0%, rgba(24, 16, 67, 0.96) 52%, rgba(16, 11, 52, 0.97) 100%);
+    box-shadow: 0 22px 52px rgba(8, 4, 30, 0.62), inset 0 1px 0 rgba(235, 229, 255, 0.09);
+    padding: 16px;
+    overflow: hidden;
+}
+
+.brainDumpHeader{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 0 0 auto;
+}
+
+.brainDumpHeader h2{
+    margin: 0;
+    font-size: 18px;
+    color: #f4efff;
+}
+
+.brainDumpCloseBtn{
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.08);
+    color: #e5dcff;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.brainDumpCloseBtn:hover{
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.brainDumpIntro{
+    flex: 0 0 auto;
+    margin: 6px 0 10px;
+    font-size: 12px;
+    color: rgba(217, 206, 255, 0.72);
+}
+
+.brainDumpMessages{
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-right: 2px;
+}
+
+.brainDumpMsg{
+    max-width: 88%;
+    padding: 8px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.brainDumpMsg p{
+    margin: 0;
+}
+
+.brainDumpMsgUser{
+    align-self: flex-end;
+    background: linear-gradient(120deg, rgba(198, 168, 255, 0.98), rgba(145, 154, 255, 0.98));
+    color: #120a32;
+}
+
+.brainDumpMsgAttachments{
+    margin-top: 4px !important;
+    font-size: 11px;
+    opacity: 0.8;
+}
+
+.brainDumpMsgAssistant{
+    align-self: flex-start;
+    background: rgba(255, 255, 255, 0.08);
+    color: #f4efff;
+}
+
+.brainDumpTyping{
+    color: rgba(217, 206, 255, 0.72);
+    font-style: italic;
+}
+
+.brainDumpMsgError{
+    align-self: center;
+    background: rgba(255, 90, 90, 0.14);
+    border: 1px solid rgba(255, 120, 120, 0.4);
+    color: #ffb3b3;
+    font-size: 12px;
+}
+
+.brainDumpTaskReview{
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(178, 161, 255, 0.4);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.brainDumpTaskCard{
+    display: flex;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.brainDumpTaskCardCheck{
+    flex: 0 0 auto;
+    padding-top: 4px;
+}
+
+.brainDumpTaskCardFields{
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.brainDumpTaskCardText{
+    width: 100%;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid rgba(185, 167, 255, 0.4);
+    border-radius: 8px;
+    background: linear-gradient(145deg, rgba(53, 39, 120, 0.95), rgba(35, 24, 92, 0.96));
+    color: #f7f3ff;
+    font-size: 12px;
+}
+
+.brainDumpTaskCardRow{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.brainDumpTaskCardMatrix,
+.brainDumpTaskCardDifficulty,
+.brainDumpTaskCardDeadline{
+    flex: 1 1 100px;
+    height: 30px;
+    padding: 0 6px;
+    border: 1px solid rgba(185, 167, 255, 0.4);
+    border-radius: 8px;
+    background: linear-gradient(145deg, rgba(53, 39, 120, 0.95), rgba(35, 24, 92, 0.96));
+    color: #f7f3ff;
+    font-size: 11px;
+    color-scheme: dark;
+}
+
+.brainDumpTaskReviewFooter{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.brainDumpTaskReviewStatus{
+    margin: 0;
+    font-size: 11px;
+    color: #ffb3b3;
+}
+
+.brainDumpAddBtn{
+    height: 32px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 999px;
+    background: linear-gradient(120deg, rgba(198, 168, 255, 0.98), rgba(145, 154, 255, 0.98));
+    color: #120a32;
+    font-weight: 800;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.brainDumpAddBtn:disabled{
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.brainDumpTaskReviewDone{
+    margin: 0;
+    font-size: 12px;
+    color: #7fe0a3;
+    font-weight: 700;
+}
+
+.brainDumpAttachmentsRow{
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.brainDumpAttachmentsRow.hidden{
+    display: none;
+}
+
+.brainDumpAttachmentChip{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #dce8fb;
+    font-size: 11px;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.brainDumpAttachmentChip button{
+    flex: 0 0 auto;
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 10px;
+}
+
+.brainDumpComposer{
+    flex: 0 0 auto;
+    margin-top: 10px;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+.brainDumpAttachBtn,
+.brainDumpSendBtn{
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid rgba(185, 167, 255, 0.4);
+    background: rgba(255, 255, 255, 0.06);
+    color: #e5dcff;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.brainDumpSendBtn{
+    background: linear-gradient(120deg, rgba(198, 168, 255, 0.98), rgba(145, 154, 255, 0.98));
+    color: #120a32;
+    border-color: transparent;
+}
+
+.brainDumpAttachBtn:hover,
+.brainDumpSendBtn:hover{
+    filter: brightness(1.1);
+}
+
+.brainDumpSendBtn:disabled{
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.brainDumpTextInput{
+    flex: 1 1 auto;
+    min-height: 34px;
+    max-height: 160px;
+    padding: 8px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(185, 167, 255, 0.4);
+    background: linear-gradient(145deg, rgba(53, 39, 120, 0.95), rgba(35, 24, 92, 0.96));
+    color: #f7f3ff;
+    font-family: inherit;
+    font-size: 13px;
+    resize: none;
+    overflow-y: auto;
+}
+
+.brainDumpTextInput::placeholder{
+    color: rgba(217, 206, 255, 0.6);
+}
+
+.brainDumpTextInput:focus{
+    outline: none;
+    border-color: rgba(223, 213, 255, 0.74);
+    box-shadow: 0 0 0 3px rgba(170, 143, 255, 0.3);
+}
+
+/* Aggregate "needs attention" indicator - see computeAttentionSummary/
+   updateNavAttentionBadge. Passive (no click action), title attribute
+   carries the breakdown. Hidden entirely at 0. */
+.navAttentionBadge{
+    display: none;
+    align-items: center;
+    gap: 3px;
+    font-size: 12px;
+    color: var(--violet-muted, #b5a8d9);
+}
+
+.navAttentionBadge.visible{
+    display: inline-flex;
+}
+
+.navAttentionCount{
+    min-width: 14px;
+    height: 14px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: #ff5a5a;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .authModeRow,
@@ -4913,6 +5303,78 @@ body.authGateActive .authOverlay{
 
 .authForgotPasswordBtn{
     color: var(--violet-accent, #d7b778);
+}
+
+.authPasswordWrap{
+    position: relative;
+}
+
+.authPasswordWrap .authPasswordInput{
+    width: 100%;
+    padding-right: 42px;
+}
+
+.authPasswordToggleBtn{
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 30px;
+    height: 30px;
+    border: none;
+    background: transparent;
+    color: rgba(215, 208, 255, 0.65);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    border-radius: 8px;
+}
+
+.authPasswordToggleBtn:hover{
+    color: #f6f4ff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.authPasswordStrength{
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: -4px;
+}
+
+.authPasswordStrength.hidden{
+    display: none;
+}
+
+.authPasswordStrengthBar{
+    height: 5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+}
+
+.authPasswordStrengthFill{
+    display: block;
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    transition: width 0.2s ease, background 0.2s ease;
+    background: #ff5c5c;
+}
+
+.authPasswordStrengthFill.strength-1{ background: #ff5c5c; }
+.authPasswordStrengthFill.strength-2{ background: #ffa64d; }
+.authPasswordStrengthFill.strength-3{ background: #d7c74d; }
+.authPasswordStrengthFill.strength-4{ background: #57d17b; }
+
+.authPasswordStrengthLabel{
+    font-size: 11px;
+    font-weight: 700;
+    text-align: left;
+    color: rgba(215, 208, 255, 0.75);
+    margin: 0;
 }
 
 /* ===================================================================
@@ -4971,6 +5433,21 @@ body.authGateActive .authOverlay{
 
 .taskViewsLabel:first-of-type{
     margin-top: 10px;
+}
+
+/* Condensed until there are enough tasks to actually filter through - see
+   the groupTasks.length check in renderApp(). All/Overdue stay put (not
+   in this :not() list) since Overdue is meaningful even at 1 task. */
+.deadlineViewTabs.condensed .taskViewBtn:not([data-view="all"]):not([data-view="overdue"]){
+    display: none;
+}
+
+/* Solo (1-member) group: "Whose tasks" is just Everyone/Me, which is
+   redundant - hidden until a 2nd member makes it meaningful. See
+   renderGroupMemberScopeTabs(). */
+.whoseTasksLabel.hidden,
+.groupMemberScopeTabs.hidden{
+    display: none;
 }
 
 .yourNameRow{
@@ -5051,61 +5528,33 @@ body.authGateActive .authOverlay{
     display: none;
 }
 
-.groupSwitcherRow{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
-.groupSwitcherRow.hidden{
-    display: none;
-}
-
+/* The sole way to switch/browse groups now (see group.js's removed
+   renderGroupSwitcher() - a full pills-per-group row didn't scale once
+   someone's in more than a handful of groups). Styled as a small pill
+   button rather than a bare text link, since it's carrying that whole job
+   alone now. */
 .groupBrowseAllLink{
     align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface-soft);
     font-size: 12px;
     font-weight: 700;
     color: var(--violet-accent);
     text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
 }
 
 .groupBrowseAllLink:hover{
-    text-decoration: underline;
+    border-color: var(--violet-accent);
+    background: var(--violet-surface);
 }
 
 .groupBrowseAllLink.hidden{
     display: none;
-}
-
-.groupSwitcherCard{
-    padding: 10px 16px;
-    border-radius: 999px;
-    border: 1px solid var(--violet-border-soft);
-    background: var(--violet-surface-soft);
-    color: var(--violet-text);
-    font-weight: 600;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.groupSwitcherCard:hover{
-    border-color: var(--violet-border);
-}
-
-.groupSwitcherCard.active{
-    border-color: var(--violet-accent);
-    background: var(--violet-surface);
-    box-shadow: 0 0 0 1px var(--violet-accent) inset;
-}
-
-.groupSwitcherNewCard{
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--violet-accent);
 }
 
 .groupSetupSection{
@@ -5191,6 +5640,199 @@ body.authGateActive .authOverlay{
     display: none;
 }
 
+.groupFormInfo{
+    color: #7fe0a3;
+    font-size: 13px;
+    margin: 0;
+}
+
+.groupFormInfo.hidden{
+    display: none;
+}
+
+.groupCreatePrivacyLabel{
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--violet-muted);
+}
+
+.groupCreatePrivacySelect{
+    height: 42px;
+    padding: 0 12px;
+    border: none;
+    outline: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--violet-text);
+    font-size: 13px;
+    font-weight: 400;
+}
+
+.groupSettingsBtn{
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid var(--violet-border-soft);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--violet-muted);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.groupSettingsBtn:hover{
+    color: var(--violet-accent);
+    border-color: var(--violet-accent);
+}
+
+.groupSettingsBtn.hidden{
+    display: none;
+}
+
+/* Pending-join-request count, following .overdueCountBadge's convention
+   (a numeric pill, not a plain dot) - see ensureJoinRequestsSubscription/
+   updateGroupSettingsBadge. Same red as the unread dots for "needs a
+   look," just numeric since more than one request can be pending. */
+.groupSettingsCountBadge{
+    display: none;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 5px;
+    border-radius: 999px;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+    color: #fff;
+    background: #ff5a5a;
+}
+
+.groupSettingsCountBadge.visible{
+    display: inline-flex;
+}
+
+/* Group settings modal - built on the shared .taskEditorOverlay/.taskEditorCard
+   base (layout, "Close" button via .editorCancelBtn) with its own internals
+   for the privacy select and the pending-join-requests list. */
+.groupSettingsPrivacyLabel{
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #f4efff;
+}
+
+.groupSettingsPrivacySelect{
+    width: 100%;
+    height: 44px;
+    padding: 0 10px;
+    border: 2px solid rgba(185, 167, 255, 0.48);
+    border-radius: 10px;
+    outline: none;
+    background: linear-gradient(145deg, rgba(53, 39, 120, 0.95), rgba(35, 24, 92, 0.96));
+    color: #f7f3ff;
+    font-weight: 500;
+}
+
+.groupSettingsPrivacySelect:disabled{
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.groupSettingsPrivacyNote{
+    margin: -4px 0 0;
+    font-size: 11px;
+    color: rgba(217, 206, 255, 0.72);
+}
+
+.groupSettingsPrivacyNote.hidden{
+    display: none;
+}
+
+.groupSettingsRequestsTitle{
+    margin: 4px 0 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: rgba(217, 206, 255, 0.72);
+}
+
+.groupSettingsRequestsList{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.groupSettingsRequestsEmpty{
+    margin: 0;
+    font-size: 12px;
+    color: rgba(217, 206, 255, 0.72);
+}
+
+.groupSettingsRequestRow{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.groupSettingsRequestName{
+    font-size: 13px;
+    color: #f4efff;
+    overflow-wrap: anywhere;
+}
+
+.groupSettingsRequestActions{
+    display: flex;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.groupSettingsApproveBtn,
+.groupSettingsDenyBtn{
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.groupSettingsApproveBtn{
+    border: none;
+    background: linear-gradient(120deg, rgba(202, 167, 255, 0.97), rgba(143, 150, 255, 0.98));
+    color: #120b30;
+}
+
+.groupSettingsApproveBtn:hover{
+    filter: brightness(1.08);
+}
+
+.groupSettingsDenyBtn{
+    border: 1px solid rgba(255, 120, 120, 0.4);
+    background: rgba(255, 90, 90, 0.12);
+    color: #ffb3b3;
+}
+
+.groupSettingsDenyBtn:hover{
+    background: rgba(255, 90, 90, 0.22);
+}
+
 .groupDashboard{
     width: 100%;
     display: flex;
@@ -5208,6 +5850,18 @@ body.authGateActive .authOverlay{
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 10px;
+}
+
+/* Settings/leave/delete clustered together on the right, in that order
+   (settings first, delete last) - rather than each spreading out to its
+   own evenly-spaced slot next to the invite-code row under the header's
+   own space-between, which left "Group settings" drifting away from
+   "Delete group" instead of sitting immediately to its left. */
+.groupDashboardHeaderActions{
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .pageTitleRow{
@@ -5311,6 +5965,19 @@ body.authGateActive .authOverlay{
     gap: 12px;
 }
 
+/* Shown only for a solo (1-member) group - see renderMemberRoster. Same
+   family as .leaderboardEmpty/.leaderboardTeaser: small, muted, one line. */
+.memberRosterInviteHint{
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--violet-muted);
+}
+
+.memberRosterInviteHint.hidden{
+    display: none;
+}
+
 .memberCard{
     display: block;
     width: 100%;
@@ -5356,6 +6023,78 @@ body.authGateActive .authOverlay{
 .memberCardSuggestBtn:hover{
     color: var(--violet-accent);
     border-color: var(--violet-accent);
+}
+
+.memberCardRoleBadge{
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    vertical-align: middle;
+}
+
+.memberCardRoleBadge.role-owner{
+    background: linear-gradient(140deg, #ffe08a, #d7a83a);
+    color: #3a2a05;
+}
+
+.memberCardRoleBadge.role-admin{
+    background: rgba(181, 139, 255, 0.28);
+    color: #e5d9ff;
+}
+
+/* Informational awareness about a teammate's overdue work - amber, not the
+   red used for "unread" elsewhere, since this isn't your own inbox. */
+.memberCardOverdueFlag{
+    margin-left: 6px;
+    font-size: 10px;
+    color: #e0a63e;
+    opacity: 0.85;
+    vertical-align: middle;
+}
+
+.memberCardModActions{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.memberCardRoleBtn,
+.memberCardKickBtn{
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.memberCardRoleBtn{
+    border: 1px solid var(--violet-border-soft);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--violet-muted);
+}
+
+.memberCardRoleBtn:hover{
+    color: var(--violet-accent);
+    border-color: var(--violet-accent);
+}
+
+.memberCardKickBtn{
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid rgba(255, 120, 120, 0.4);
+    background: rgba(255, 90, 90, 0.12);
+    color: #ffb3b3;
+}
+
+.memberCardKickBtn:hover{
+    background: rgba(255, 90, 90, 0.22);
 }
 
 .suggestionsForYouPanel{
@@ -5577,47 +6316,127 @@ body.authGateActive .authOverlay{
     font-size: 20px;
 }
 
-.groupHistoryPanel{
-    margin-top: 16px;
-    padding: 14px;
+/* A small clickable trigger in the sidebar (not a permanently-open panel) -
+   opens the .groupHistoryOverlay modal below. Keeps the sidebar compact
+   regardless of how much history a group has racked up, since the list
+   itself only ever renders while the modal is open. */
+.groupHistoryOpenBtn{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 12px 14px;
     border-radius: 12px;
     border: 1px solid var(--violet-border-soft);
     background: var(--violet-surface-soft);
-}
-
-.groupHistoryTitle{
-    margin: 0 0 10px;
-    font-size: 12px;
+    color: var(--violet-text);
+    font-size: 13px;
     font-weight: 700;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
-    color: var(--violet-muted);
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.groupHistoryList{
+.groupHistoryOpenBtn:hover{
+    background: var(--violet-surface);
+    border-color: var(--violet-accent);
+}
+
+.groupHistoryOpenBtn i:last-child{
+    color: var(--violet-muted);
+    font-size: 12px;
+}
+
+.groupHistoryOpenLabel{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.groupHistoryOverlay{
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(7, 4, 30, 0.62);
+    backdrop-filter: blur(3px);
+}
+
+.groupHistoryOverlay.hidden{
+    display: none;
+}
+
+.groupHistoryModalCard{
+    width: min(640px, 96vw);
+    max-height: min(80vh, 640px);
     display: flex;
     flex-direction: column;
+    border-radius: 16px;
+    border: 1px solid rgba(205, 194, 255, 0.56);
+    background: linear-gradient(165deg, rgba(43, 30, 105, 0.97), rgba(24, 16, 72, 0.98));
+    box-shadow: 0 20px 52px rgba(8, 4, 31, 0.58);
+    padding: 16px;
+}
+
+.groupHistoryModalHeader{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 10px;
-    max-height: 320px;
+    margin-bottom: 12px;
+}
+
+.groupHistoryModalTitle{
+    margin: 0;
+    font-size: 16px;
+    font-weight: 800;
+    color: #f6f2ff;
+}
+
+.groupHistoryCloseBtn{
+    border: 1px solid rgba(205, 194, 255, 0.64);
+    border-radius: 999px;
+    height: 30px;
+    padding: 0 12px;
+    background: rgba(91, 72, 170, 0.5);
+    color: #f2edff;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+/* The modal card itself is height-capped above, and this list scrolls
+   internally within it - so even a group with a long completion history
+   never grows the card past the viewport. */
+.groupHistoryList{
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    align-content: start;
+    gap: 10px;
     overflow-y: auto;
+    padding-right: 4px;
 }
 
 .groupHistoryEmpty{
+    grid-column: 1 / -1;
     font-size: 12px;
     color: var(--violet-muted);
+}
+
+.groupHistoryError{
+    color: #ffb3b3;
 }
 
 .groupHistoryItem{
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.groupHistoryItem:last-child{
-    border-bottom: none;
-    padding-bottom: 0;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface);
 }
 
 .groupHistoryItemText{
@@ -5629,6 +6448,279 @@ body.authGateActive .authOverlay{
 .groupHistoryItemMeta{
     font-size: 11px;
     color: var(--violet-muted);
+}
+
+/* Leaderboard member modal - opened by clicking a row in the leaderboard,
+   same overlay/card visual language as .groupHistoryOverlay above, just a
+   single-person, single-column list instead of a grid. */
+.leaderboardMemberOverlay{
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(7, 4, 30, 0.62);
+    backdrop-filter: blur(3px);
+}
+
+.leaderboardMemberOverlay.hidden{
+    display: none;
+}
+
+.leaderboardMemberModalCard{
+    width: min(440px, 96vw);
+    max-height: min(80vh, 560px);
+    display: flex;
+    flex-direction: column;
+    border-radius: 16px;
+    border: 1px solid rgba(205, 194, 255, 0.56);
+    background: linear-gradient(165deg, rgba(43, 30, 105, 0.97), rgba(24, 16, 72, 0.98));
+    box-shadow: 0 20px 52px rgba(8, 4, 31, 0.58);
+    padding: 16px;
+}
+
+.leaderboardMemberModalHeader{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.leaderboardMemberModalTitle{
+    margin: 0;
+    font-size: 15px;
+    font-weight: 800;
+    color: #f6f2ff;
+    overflow-wrap: anywhere;
+}
+
+.leaderboardMemberCloseBtn{
+    flex: 0 0 auto;
+    border: 1px solid rgba(205, 194, 255, 0.64);
+    border-radius: 999px;
+    height: 30px;
+    padding: 0 12px;
+    background: rgba(91, 72, 170, 0.5);
+    color: #f2edff;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.leaderboardMemberList{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.leaderboardMemberEmpty{
+    font-size: 12px;
+    color: var(--violet-muted);
+}
+
+.leaderboardMemberItem{
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface);
+}
+
+.leaderboardMemberItemText{
+    font-size: 12px;
+    color: var(--violet-text);
+    overflow-wrap: anywhere;
+}
+
+.leaderboardMemberItemMeta{
+    font-size: 11px;
+    color: var(--violet-muted);
+}
+
+.groupLeaderboardPanel{
+    margin-top: 16px;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface-soft);
+}
+
+.groupLeaderboardHeader{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.groupLeaderboardTitle{
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--violet-muted);
+}
+
+.leaderboardTabs{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.leaderboardTabBtn{
+    border: 1px solid var(--violet-border-soft);
+    background: transparent;
+    color: var(--violet-muted);
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.leaderboardTabBtn:hover{
+    color: var(--violet-text);
+    border-color: var(--violet-border);
+}
+
+.leaderboardTabBtn.active{
+    border-color: var(--violet-accent);
+    background: var(--violet-accent);
+    color: #1a1330;
+}
+
+.leaderboardList{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.leaderboardEmpty{
+    font-size: 12px;
+    color: var(--violet-muted);
+}
+
+/* Solo-group-with-no-history teaser, shown instead of the tabs/list (see
+   the soloNoHistory branch in renderGroupLeaderboard) - same tokens as
+   .leaderboardEmpty so it reads as part of the same family, not a
+   different component. */
+.leaderboardTeaser{
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--violet-muted);
+}
+
+.leaderboardTeaser.hidden,
+.leaderboardTabs.hidden,
+.leaderboardList.hidden{
+    display: none;
+}
+
+.leaderboardRow{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.leaderboardRow:hover,
+.leaderboardRow:focus-visible{
+    background: rgba(255, 255, 255, 0.09);
+}
+
+.leaderboardRow:focus-visible{
+    outline: 2px solid var(--violet-accent);
+    outline-offset: 1px;
+}
+
+.leaderboardRow.isYou{
+    border: 1px solid var(--violet-accent);
+    background: rgba(181, 139, 255, 0.1);
+}
+
+.leaderboardRow.isYou:hover,
+.leaderboardRow.isYou:focus-visible{
+    background: rgba(181, 139, 255, 0.16);
+}
+
+.leaderboardRank{
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--violet-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* Top 3 carry an icon plus the ordinal itself ("1st"/"2nd"/"3rd") rather
+   than just a numberless icon, so a pill (auto width) instead of the fixed
+   22px circle the plain-numbered ranks (4th on) use. */
+.leaderboardRank.rank-1,
+.leaderboardRank.rank-2,
+.leaderboardRank.rank-3{
+    width: auto;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: 999px;
+    gap: 4px;
+    font-size: 10px;
+    letter-spacing: 0.2px;
+}
+
+.leaderboardRank.rank-1{
+    background: linear-gradient(140deg, #ffe08a, #d7a83a);
+    color: #3a2a05;
+}
+
+.leaderboardRank.rank-2{
+    background: linear-gradient(140deg, #e6e6ef, #b6b8c7);
+    color: #2a2a33;
+}
+
+.leaderboardRank.rank-3{
+    background: linear-gradient(140deg, #e3ab7b, #a9713f);
+    color: #2f1c0a;
+}
+
+.leaderboardName{
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--violet-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.leaderboardCount{
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--violet-accent);
 }
 
 .commentsSection{
@@ -5659,6 +6751,21 @@ body.authGateActive .authOverlay{
     border-radius: 50%;
     background: #ff5a5a;
     box-shadow: 0 0 0 2px rgba(255, 90, 90, 0.25);
+}
+
+/* Same look as .commentsUnreadDot above, for a completion logged since you
+   last opened "Recently finished" - see hasUnreadHistory(). */
+.historyUnreadDot{
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ff5a5a;
+    box-shadow: 0 0 0 2px rgba(255, 90, 90, 0.25);
+    flex: 0 0 auto;
+}
+
+.historyUnreadDot.hidden{
+    display: none;
 }
 
 .commentsBody{

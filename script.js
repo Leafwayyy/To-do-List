@@ -74,6 +74,12 @@ const ACTIVITY_KEY = 'todoActivityV1';
 const ACTIVITY_HISTORY_KEY = 'todoActivityHistoryV1';
 const CELEBRATED_DAILY_CLEAR_KEY = 'todoCelebratedDailyClearDate';
 const COACH_KEY = 'todoCoachV1';
+// Set once at sign-in (see AuthGate.init below) - whether THIS account
+// predates account-level tour tracking, so renderOnboardingHint() can hide
+// its "Start tutorial" prompt for it entirely, not just via its usual
+// per-browser dismiss state (which a legacy account in a fresh browser
+// would never have set).
+let isLegacyTourAccount = false;
 
 // MATRIX_CONFIG and DIFFICULTY_CONFIG now live in task-shared.js (loaded
 // before this file - see index.html), shared with the group app.
@@ -380,11 +386,18 @@ function startApp() {
 // password, error mapping, the .userBadge/.authGateActive plumbing) now
 // lives in auth-gate.js, shared with the group app - see AuthGate.init below.
 AuthGate.init({
-    onSignedIn: (user, isFirstTime) => {
+    onSignedIn: async (user) => {
         startApp();
-        // Brand-new account, ever - launch the tour unprompted rather than
-        // leaving it to a passive hint card someone might not notice.
-        if (isFirstTime) {
+        // First time THIS app has ever been opened on this account (not
+        // just "brand-new account overall" - see checkAndMarkTourSeen) -
+        // launch the tour unprompted rather than leaving it to a passive
+        // hint card someone might not notice. Account-level, so it never
+        // replays again after this, on any device, whether finished or
+        // abandoned.
+        const { shouldAutoPlay, isLegacyAccount } = await window.ToDoAuth.checkAndMarkTourSeen(user, 'solo');
+        isLegacyTourAccount = isLegacyAccount;
+        renderOnboardingHint();
+        if (shouldAutoPlay) {
             setTimeout(() => tourController.start(), 400);
         }
     },
@@ -397,6 +410,7 @@ AuthGate.init({
         knownCloudTaskIds = new Set();
         hasLoadedCloudTasksOnce = false;
         tasks = [];
+        isLegacyTourAccount = false;
     }
 });
 
@@ -528,6 +542,57 @@ function addTaskFromInputs() {
     saveTasks();
 }
 
+// Brain Dump's commitTasks callback (see brain-dump.js). draftTasks come
+// from the AI (or the user's own edit of its proposal) and are NOT
+// trusted - every field is sanitized through the same validators manual
+// entry relies on before becoming a real task. saveTasks() is already a
+// whole-array diff+batch (see syncTasksToCloud), so pushing N tasks then
+// calling it once covers however many were confirmed in a single write.
+function commitAiTasksSolo(draftTasks) {
+    const timestamp = new Date().toISOString();
+    let nextManualOrder = tasks.length === 0
+        ? 1
+        : Math.max(...tasks.map((task) => task.manualOrder || 0)) + 1;
+
+    draftTasks.forEach((draft) => {
+        const trimmedText = (draft.text || '').trim();
+        if (!trimmedText) {
+            return;
+        }
+
+        const matrix = getValidMatrixValue(draft.matrix);
+        const taskType = getValidTaskType(draft.taskType);
+        const difficulty = getValidDifficultyLevel(draft.difficulty);
+        const estimateMinutes = taskType === 'timeboxed' ? parseDurationMinutes(draft.estimateMinutes) : null;
+        const dueAt = isValidDateValue(draft.dueAt) ? new Date(draft.dueAt).toISOString() : null;
+        const scheduledAt = isValidDateValue(draft.scheduledAt) ? new Date(draft.scheduledAt).toISOString() : null;
+
+        tasks.push({
+            id: generateTaskId(),
+            text: trimmedText.slice(0, 2000),
+            completed: false,
+            matrix,
+            difficulty,
+            taskType,
+            estimateMinutes,
+            dueAt,
+            scheduledAt,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            manualOrder: nextManualOrder,
+            subtasks: [],
+            subtasksExpanded: false
+        });
+        nextManualOrder += 1;
+    });
+
+    applyOrdering();
+    renderTasks();
+    updateTaskSummary();
+    updateUrgencyAlert();
+    saveTasks();
+}
+
 function openCalendar() {
     playClickSound();
     setDetailsPanelOpen(true);
@@ -597,7 +662,12 @@ function renderOnboardingHint() {
     }
 
     const coachState = localStorage.getItem(COACH_KEY);
-    const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed';
+    // Hidden for the tour's whole run, not just once it's done - it sits
+    // right behind the modal and is redundant with it while open. Also
+    // hidden outright for a legacy account (see isLegacyTourAccount) - this
+    // prompt is part of the new-account onboarding flow, not something to
+    // push on an existing user just because this browser never dismissed it.
+    const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed' || tourController.isOpen() || isLegacyTourAccount;
     onboardingHint.classList.toggle('hidden', shouldHide);
 }
 
@@ -607,8 +677,23 @@ function renderOnboardingHint() {
 const tourController = createTourController({
     steps: TOUR_STEPS,
     storageKey: COACH_KEY,
+    onStart: () => renderOnboardingHint(),
     onEnd: () => renderOnboardingHint()
 });
+
+// Brain Dump - always available in solo (no "nothing to add to" gate the
+// way the group page needs, since your own task list always exists).
+const brainDumpController = createBrainDumpController({
+    context: 'solo',
+    commitTasks: commitAiTasksSolo
+});
+const brainDumpToggleBtn = document.querySelector('.brainDumpToggleBtn');
+if (brainDumpToggleBtn) {
+    brainDumpToggleBtn.addEventListener('click', () => {
+        playClickSound();
+        brainDumpController.open();
+    });
+}
 
 function startOnboardingTutorial() {
     playClickSound();

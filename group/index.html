@@ -11,7 +11,7 @@
     <!-- Same stylesheet as the solo app, loaded once, the normal way - no
          second build/bundle for this page, so there's nothing for its rules
          to collide with. -->
-    <link rel="stylesheet" href="../style.css?v=20260830c">
+    <link rel="stylesheet" href="../style.css?v=20260831c">
 </head>
 <body class="authChecking">
 
@@ -22,7 +22,9 @@
 
     <div class="userBadge hidden">
         <a class="groupNavLink" href="../">My Tasks</a>
+        <button class="brainDumpToggleBtn hidden" type="button" title="Brain dump - let AI turn what you type into tasks"><i class="fa-solid fa-comment-dots"></i> Brain Dump</button>
         <button class="helpTourBtn" type="button" title="Restart the group tutorial"><i class="fa-solid fa-question"></i></button>
+        <span class="navAttentionBadge" title=""><i class="fa-regular fa-bell"></i><span class="navAttentionCount"></span></span>
         <img class="userBadgeAvatar hidden" alt="">
         <span class="userBadgeName"></span>
         <button class="userSignOutBtn" type="button" title="Sign out">Sign out</button>
@@ -40,7 +42,16 @@
             <div class="authCard" role="dialog" aria-modal="true" aria-label="Sign in">
                 <form class="authEmailForm">
                     <input type="email" class="authEmailInput" placeholder="Email" autocomplete="email" required>
-                    <input type="password" class="authPasswordInput" placeholder="Password" autocomplete="current-password" required>
+                    <div class="authPasswordWrap">
+                        <input type="password" class="authPasswordInput" placeholder="Password" autocomplete="current-password" required>
+                        <button type="button" class="authPasswordToggleBtn" aria-label="Show password" title="Show password">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="authPasswordStrength hidden" aria-live="polite">
+                        <div class="authPasswordStrengthBar"><span class="authPasswordStrengthFill"></span></div>
+                        <p class="authPasswordStrengthLabel"></p>
+                    </div>
                     <button type="button" class="authForgotPasswordBtn">Forgot password?</button>
                     <p class="authErrorText hidden"></p>
                     <p class="authInfoText hidden"></p>
@@ -76,7 +87,6 @@
                 </div>
             </div>
 
-            <div class="groupSwitcherRow"></div>
             <a class="groupBrowseAllLink hidden" href="browse.html">See all my groups <i class="fa-solid fa-arrow-right"></i></a>
 
             <div class="groupSetupSection hidden">
@@ -85,6 +95,13 @@
                     <form class="groupCreateForm">
                         <h2>Create a group</h2>
                         <input type="text" class="groupCreateNameInput" placeholder="Group name" required>
+                        <label class="groupCreatePrivacyLabel">Who can join?
+                            <select class="groupCreatePrivacySelect">
+                                <option value="open" selected>Open - anyone with the code joins instantly</option>
+                                <option value="invite-only">Invite-only - code holders must be approved</option>
+                                <option value="closed">Closed - no new members for now</option>
+                            </select>
+                        </label>
                         <button type="submit" class="groupCreateBtn">Create group</button>
                         <p class="groupFormError groupCreateError hidden"></p>
                     </form>
@@ -93,6 +110,7 @@
                         <input type="text" class="groupJoinCodeInput" placeholder="Invite code" autocapitalize="characters" required>
                         <button type="submit" class="groupJoinBtn">Join group</button>
                         <p class="groupFormError groupJoinError hidden"></p>
+                        <p class="groupFormInfo groupJoinInfo hidden"></p>
                     </form>
                 </div>
             </div>
@@ -104,8 +122,11 @@
                             <p class="groupInviteRow">Invite code: <span class="groupInviteCode"></span>
                                 <button type="button" class="groupCopyInviteBtn" title="Copy invite code"><i class="fa-solid fa-copy"></i></button>
                             </p>
-                            <button type="button" class="groupLeaveBtn hidden">Leave group</button>
-                            <button type="button" class="groupDeleteBtn hidden">Delete group</button>
+                            <div class="groupDashboardHeaderActions">
+                                <button type="button" class="groupSettingsBtn hidden"><i class="fa-solid fa-gear"></i> Group settings<span class="groupSettingsCountBadge"></span></button>
+                                <button type="button" class="groupLeaveBtn hidden">Leave group</button>
+                                <button type="button" class="groupDeleteBtn hidden">Delete group</button>
+                            </div>
                         </div>
 
                         <div class="motivatorContainer">
@@ -135,6 +156,14 @@
                         </div>
 
                         <p class="quickAddHint hidden" aria-live="polite"></p>
+
+                        <div class="onboardingHint groupOnboardingHint hidden" role="note" aria-live="polite">
+                            <p class="onboardingHintText"><strong>Quick start:</strong> Add a task, share the invite code above with your team, then use <strong>Prioritize</strong> and <strong>Filter by deadline</strong> once things pick up.</p>
+                            <div class="onboardingActions">
+                                <button class="onboardingStartTourBtn groupOnboardingStartTourBtn" type="button">Start tutorial</button>
+                                <button class="onboardingDismissBtn groupOnboardingDismissBtn" type="button">Dismiss</button>
+                            </div>
+                        </div>
 
                         <div class="taskDetailsPanel" id="groupTaskDetailsPanel">
                             <p class="detailsHelp">Priority and difficulty help the app decide what should be done first - the list below always sorts by priority automatically.</p>
@@ -182,7 +211,7 @@
                             </div>
                         </div>
 
-                        <p class="taskViewsLabel">Whose tasks</p>
+                        <p class="taskViewsLabel whoseTasksLabel">Whose tasks</p>
                         <div class="taskViews groupMemberScopeTabs" aria-label="Whose tasks"></div>
 
                         <p class="taskViewsLabel">Filter by deadline</p>
@@ -203,14 +232,51 @@
 
                     <aside class="sideColumn">
                         <div class="memberRoster"></div>
+                        <p class="memberRosterInviteHint hidden">Working alone for now - share the invite code above to add teammates.</p>
 
-                        <div class="groupHistoryPanel">
-                            <p class="groupHistoryTitle">Recently finished</p>
-                            <div class="groupHistoryList"></div>
+                        <div class="groupLeaderboardPanel">
+                            <div class="groupLeaderboardHeader">
+                                <p class="groupLeaderboardTitle">Leaderboard</p>
+                                <div class="leaderboardTabs" aria-label="Leaderboard range">
+                                    <button type="button" class="leaderboardTabBtn active" data-range="week">This week</button>
+                                    <button type="button" class="leaderboardTabBtn" data-range="month">This month</button>
+                                    <button type="button" class="leaderboardTabBtn" data-range="all">All time</button>
+                                </div>
+                            </div>
+                            <p class="leaderboardTeaser hidden">Leaderboard fills in once a teammate joins and you've both finished a task or two.</p>
+                            <ol class="leaderboardList"></ol>
                         </div>
+
+                        <button type="button" class="groupHistoryOpenBtn" aria-haspopup="dialog">
+                            <span class="groupHistoryOpenLabel"><i class="fa-solid fa-clock-rotate-left"></i> Recently finished<span class="historyUnreadDot hidden" aria-label="Unread"></span></span>
+                            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                        </button>
                     </aside>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div class="groupHistoryOverlay hidden" aria-hidden="true">
+        <div class="groupHistoryModalCard" role="dialog" aria-modal="true" aria-label="Recently finished">
+            <div class="groupHistoryModalHeader">
+                <p class="groupHistoryModalTitle">Recently finished</p>
+                <button type="button" class="groupHistoryCloseBtn" aria-label="Close">Close</button>
+            </div>
+            <!-- Its own scrollable grid, capped in height (style.css) so even a
+                 full 50-entry history log stays contained inside the modal
+                 instead of growing the card past the viewport. -->
+            <div class="groupHistoryList"></div>
+        </div>
+    </div>
+
+    <div class="leaderboardMemberOverlay hidden" aria-hidden="true">
+        <div class="leaderboardMemberModalCard" role="dialog" aria-modal="true" aria-label="Completed tasks">
+            <div class="leaderboardMemberModalHeader">
+                <p class="leaderboardMemberModalTitle">Completed tasks</p>
+                <button type="button" class="leaderboardMemberCloseBtn" aria-label="Close">Close</button>
+            </div>
+            <div class="leaderboardMemberList"></div>
         </div>
     </div>
 
@@ -260,11 +326,12 @@
         </div>
     </div>
 
-    <script src="../task-shared.js?v=20260830c"></script>
-    <script src="../auth-gate.js?v=20260829a"></script>
-    <script src="groups-data.js?v=20260830a"></script>
-    <script src="group.js?v=20260830e"></script>
-    <script type="module" src="../firebase-init.js?v=20260830c"></script>
+    <script src="../task-shared.js?v=20260831e"></script>
+    <script src="../brain-dump.js?v=20260831b"></script>
+    <script src="../auth-gate.js?v=20260830a"></script>
+    <script src="groups-data.js?v=20260830c"></script>
+    <script src="group.js?v=20260831d"></script>
+    <script type="module" src="../firebase-init.js?v=20260831a"></script>
     <script src="../settings.js?v=20260830c"></script>
 </body>
 </html>

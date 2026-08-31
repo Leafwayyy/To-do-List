@@ -29,6 +29,7 @@ import {
     updateDoc,
     deleteDoc,
     arrayUnion,
+    arrayRemove,
     collection,
     query,
     where,
@@ -96,11 +97,49 @@ async function ensureUserProfile(user) {
     return true;
 }
 
+// Accounts created before this shipped already went through onboarding
+// under the old (localStorage-only, or no) tour tracking - treat them as
+// already toured so this never surprise-replays a tutorial on an existing
+// user's next login. Only accounts created after this date are eligible
+// for the account-level auto-play checkAndMarkTourSeen implements below.
+const TOUR_TRACKING_LAUNCH = new Date('2026-08-30T00:00:00Z');
+
+// Should THIS app's (solo/group) tour auto-play for this account, right
+// now? Tracked per-app, not just per-account - someone might not open
+// Group until long after signing up, and it should still get its own
+// first-run tour then. Marks it seen the moment shouldAutoPlay is true (not
+// on tour completion/skip), so an abandoned tour never re-triggers either -
+// and since this lives on the account (not localStorage), it holds across
+// every device, not just the one it first played on.
+//
+// Also returns isLegacyAccount, so callers can hide the passive "quick
+// start" hint card's own "Start tutorial" prompt entirely for accounts
+// that predate this feature - not just its usual per-browser dismiss
+// state, which a legacy account signing in from a fresh browser would
+// never have set, and would otherwise still see the prompt.
+async function checkAndMarkTourSeen(user, appKey) {
+    const userRef = doc(db, 'users', user.uid);
+    const snapshot = await getDoc(userRef);
+    const data = snapshot.exists() ? snapshot.data() : null;
+
+    const createdAt = (data && data.createdAt && data.createdAt.toDate) ? data.createdAt.toDate() : null;
+    const isLegacyAccount = !createdAt || createdAt < TOUR_TRACKING_LAUNCH;
+    if (isLegacyAccount) {
+        return { shouldAutoPlay: false, isLegacyAccount: true };
+    }
+    if (data.toursSeen && data.toursSeen[appKey]) {
+        return { shouldAutoPlay: false, isLegacyAccount: false };
+    }
+
+    await setDoc(userRef, { toursSeen: { [appKey]: true } }, { merge: true });
+    return { shouldAutoPlay: true, isLegacyAccount: false };
+}
+
 window.ToDoAuth = {
     auth,
     db,
     firestore: {
-        doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, arrayUnion,
+        doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove,
         collection, query, where, orderBy, limit, onSnapshot, writeBatch, serverTimestamp, increment
     },
     signInWithGoogle: () => signInWithPopup(auth, googleProvider),
@@ -113,6 +152,7 @@ window.ToDoAuth = {
     // 'auth/requires-recent-login' if the session is old; callers should
     // catch that and prompt a fresh sign-in before retrying.
     deleteAccountAuth: () => deleteUser(auth.currentUser),
+    checkAndMarkTourSeen,
     // callback(user, isFirstTimeEver) - the second argument is only ever
     // true the one time a brand-new account's profile doc gets created.
     onAuthChange: (callback) => onAuthStateChanged(auth, async (user) => {

@@ -1,0 +1,12 @@
+name = "todo-brain-dump"
+main = "brain-dump-worker.js"
+compatibility_date = "2026-08-31"
+
+[vars]
+FIREBASE_PROJECT_ID = "todo-list-507018"
+# Comma-separated - includes localhost so `python -m http.server` during
+# local dev works too, not just the deployed GitHub Pages origin.
+ALLOWED_ORIGINS = "https://leafwayyy.github.io,http://localhost:8000"
+
+# Secret - NEVER put this here. Set it once with:
+#   wrangler secret put GEMINI_API_KEY
