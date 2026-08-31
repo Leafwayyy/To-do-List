@@ -672,6 +672,7 @@ function createTourController({ steps, storageKey, onEnd }) {
     let pendingInteraction = null;
 
     function clearPendingInteraction() {
+        tourOverlay?.classList.remove('interactive');
         if (!pendingInteraction) {
             return;
         }
@@ -762,6 +763,7 @@ function createTourController({ steps, storageKey, onEnd }) {
                 waitTarget.addEventListener(step.waitFor.event, handler, { once: true });
                 pendingInteraction = { element: waitTarget, eventName: step.waitFor.event, handler, waitingElement: target };
                 target.classList.add('tourTargetWaiting');
+                tourOverlay?.classList.add('interactive');
                 tourNextBtn.disabled = true;
                 tourNextBtn.textContent = 'Try it →';
             }

@@ -3920,6 +3920,23 @@ body::after{
     display: none;
 }
 
+/* Interactive (waitFor) steps: the real target the user needs to click
+   lives inside .container, which has its own position:relative + z-index
+   stacking context (see .container above) - that traps .tourTarget's
+   z-index no matter how high it's set, so it can never actually paint
+   above this overlay despite looking like it does through the dimming.
+   Rather than fight that, let clicks pass straight through the overlay
+   during an interactive step (the dimming is still purely visual - this
+   only affects hit-testing), keeping only the card itself clickable so
+   Skip/the disabled Next button still work. */
+.tourOverlay.interactive{
+    pointer-events: none;
+}
+
+.tourOverlay.interactive .tourCard{
+    pointer-events: auto;
+}
+
 .tourCard{
     position: fixed;
     left: 12px;
