@@ -106,14 +106,22 @@ function createGroupBrowseCard(group) {
             }
         });
         actions.appendChild(deleteBtn);
-    } else {
+    }
+
+    // The owner can leave too (ownership transfers to a random remaining
+    // member - see leaveGroup) alongside Delete above, not instead of it -
+    // only actually blocked when they're the group's only member.
+    if (!isOwner || (group.memberIds || []).length > 1) {
         const leaveBtn = document.createElement('button');
         leaveBtn.type = 'button';
         leaveBtn.classList.add('groupLeaveBtn');
         leaveBtn.textContent = 'Leave';
         leaveBtn.addEventListener('click', async () => {
             playClickSound();
-            if (!confirm(`Leave "${group.name}"? You'll need the invite code to rejoin.`)) {
+            const confirmText = isOwner
+                ? `Leave "${group.name}"? Ownership will be handed to a random remaining member. You'll need the invite code to rejoin.`
+                : `Leave "${group.name}"? You'll need the invite code to rejoin.`;
+            if (!confirm(confirmText)) {
                 return;
             }
             try {

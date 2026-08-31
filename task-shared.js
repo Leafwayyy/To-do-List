@@ -105,7 +105,13 @@ function getDeadlineStatus(dueAt) {
     const days = Math.floor(absoluteDistance / 86400000);
     const hours = Math.floor((absoluteDistance % 86400000) / 3600000);
     const minutes = Math.floor((absoluteDistance % 3600000) / 60000);
-    const compactTime = `${days}d ${hours}h ${minutes}m`;
+    const seconds = Math.floor((absoluteDistance % 60000) / 1000);
+    // Under an hour, seconds matter more than the d/h/m breakdown - shows
+    // "12m 34s" (and keeps ticking down second by second) instead of being
+    // stuck on "0d 0h 12m" for up to 59 seconds at a time.
+    const compactTime = (days > 0 || hours > 0)
+        ? `${days}d ${hours}h ${minutes}m`
+        : `${minutes}m ${seconds}s`;
 
     const deadlineLabel = `Due ${deadlineDate.toLocaleString([], {
         month: 'short',
@@ -687,6 +693,17 @@ function createTourController({ steps, storageKey, onEnd }) {
     function prepareStep(stepIndex) {
         const step = steps[stepIndex];
         if (!step) {
+            return false;
+        }
+
+        // A step's target can be legitimately present-but-hidden (e.g.
+        // group's "Whose tasks" tabs, hidden for a solo group) rather than
+        // absent from the DOM entirely - querySelector alone can't tell the
+        // difference, so a step that only matters sometimes declares that
+        // itself via isRelevant() and gets skipped here instead of getting
+        // highlighted/scrolled-to while invisible. Steps that don't set it
+        // (every existing solo/group step) are always relevant, unchanged.
+        if (step.isRelevant && !step.isRelevant()) {
             return false;
         }
 

@@ -12,6 +12,10 @@
     const authEmailForm = document.querySelector('.authEmailForm');
     const authEmailInput = document.querySelector('.authEmailInput');
     const authPasswordInput = document.querySelector('.authPasswordInput');
+    const authPasswordToggleBtn = document.querySelector('.authPasswordToggleBtn');
+    const authPasswordStrength = document.querySelector('.authPasswordStrength');
+    const authPasswordStrengthFill = document.querySelector('.authPasswordStrengthFill');
+    const authPasswordStrengthLabel = document.querySelector('.authPasswordStrengthLabel');
     const authErrorText = document.querySelector('.authErrorText');
     const authInfoText = document.querySelector('.authInfoText');
     const authForgotPasswordBtn = document.querySelector('.authForgotPasswordBtn');
@@ -41,6 +45,59 @@
         if (authConsentRow) {
             authConsentRow.classList.toggle('hidden', authMode !== 'signup');
         }
+        if (authPasswordStrength) {
+            authPasswordStrength.classList.toggle('hidden', authMode !== 'signup');
+            if (authMode === 'signup') {
+                updatePasswordStrength();
+            }
+        }
+    }
+
+    // Rough client-side strength estimate - not a security boundary (Firebase
+    // still enforces its own minimum server-side), just feedback to nudge
+    // people away from "123456" before they hit submit.
+    function evaluatePasswordStrength(password) {
+        let score = 0;
+        if (password.length >= 6) score += 1;
+        if (password.length >= 10) score += 1;
+        if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
+        if (/\d/.test(password)) score += 1;
+        if (/[^A-Za-z0-9]/.test(password)) score += 1;
+
+        // Very short passwords stay capped at "weak" no matter how many
+        // character classes they mix.
+        if (password.length < 6) {
+            score = Math.min(score, 1);
+        }
+
+        const levels = [
+            { label: 'Very weak', level: 1 },
+            { label: 'Weak', level: 1 },
+            { label: 'Fair', level: 2 },
+            { label: 'Good', level: 3 },
+            { label: 'Strong', level: 4 }
+        ];
+        return levels[Math.min(score, levels.length - 1)];
+    }
+
+    function updatePasswordStrength() {
+        if (!authPasswordStrengthFill || !authPasswordStrengthLabel) {
+            return;
+        }
+
+        const password = authPasswordInput?.value || '';
+        authPasswordStrengthFill.classList.remove('strength-1', 'strength-2', 'strength-3', 'strength-4');
+
+        if (!password) {
+            authPasswordStrengthFill.style.width = '0%';
+            authPasswordStrengthLabel.textContent = '';
+            return;
+        }
+
+        const { label, level } = evaluatePasswordStrength(password);
+        authPasswordStrengthFill.classList.add(`strength-${level}`);
+        authPasswordStrengthFill.style.width = `${(level / 4) * 100}%`;
+        authPasswordStrengthLabel.textContent = label;
     }
 
     function clearAuthError() {
@@ -129,6 +186,23 @@
                 showAuthError(getAuthErrorMessage(error));
             }
         });
+    }
+
+    if (authPasswordToggleBtn && authPasswordInput) {
+        authPasswordToggleBtn.addEventListener('click', () => {
+            const nowShowing = authPasswordInput.type === 'password';
+            authPasswordInput.type = nowShowing ? 'text' : 'password';
+            authPasswordToggleBtn.innerHTML = nowShowing
+                ? '<i class="fa-solid fa-eye-slash"></i>'
+                : '<i class="fa-solid fa-eye"></i>';
+            authPasswordToggleBtn.setAttribute('aria-label', nowShowing ? 'Hide password' : 'Show password');
+            authPasswordToggleBtn.setAttribute('title', nowShowing ? 'Hide password' : 'Show password');
+            authPasswordInput.focus({ preventScroll: true });
+        });
+    }
+
+    if (authPasswordInput) {
+        authPasswordInput.addEventListener('input', updatePasswordStrength);
     }
 
     if (authModeToggleBtn) {

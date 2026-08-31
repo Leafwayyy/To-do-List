@@ -285,25 +285,46 @@ async function deleteGroupSubtask(groupId, task, subtaskId) {
 
 const groupStatusMsg = document.querySelector('.groupStatusMsg');
 const groupPageWrap = document.querySelector('.groupPageWrap');
-const groupSwitcherRow = document.querySelector('.groupSwitcherRow');
 const groupBrowseAllLink = document.querySelector('.groupBrowseAllLink');
 const groupSetupSection = document.querySelector('.groupSetupSection');
 const groupCreateForm = document.querySelector('.groupCreateForm');
 const groupCreateNameInput = document.querySelector('.groupCreateNameInput');
+const groupCreatePrivacySelect = document.querySelector('.groupCreatePrivacySelect');
 const groupCreateError = document.querySelector('.groupCreateError');
 const groupJoinForm = document.querySelector('.groupJoinForm');
 const groupJoinCodeInput = document.querySelector('.groupJoinCodeInput');
 const groupJoinError = document.querySelector('.groupJoinError');
+const groupJoinInfo = document.querySelector('.groupJoinInfo');
 const groupDashboard = document.querySelector('.groupDashboard');
 const groupInviteCode = document.querySelector('.groupInviteCode');
 const groupCopyInviteBtn = document.querySelector('.groupCopyInviteBtn');
 const groupRenameBtn = document.querySelector('.groupRenameBtn');
+const groupSettingsBtn = document.querySelector('.groupSettingsBtn');
+const groupSettingsCountBadge = groupSettingsBtn?.querySelector('.groupSettingsCountBadge');
 const groupLeaveBtn = document.querySelector('.groupLeaveBtn');
 const groupDeleteBtn = document.querySelector('.groupDeleteBtn');
 const memberRoster = document.querySelector('.memberRoster');
+const leaderboardList = document.querySelector('.leaderboardList');
+const leaderboardTabBtns = Array.from(document.querySelectorAll('.leaderboardTabBtn'));
+const leaderboardTabsEl = document.querySelector('.leaderboardTabs');
+const leaderboardTeaser = document.querySelector('.leaderboardTeaser');
+const memberRosterInviteHint = document.querySelector('.memberRosterInviteHint');
+const leaderboardMemberOverlay = document.querySelector('.leaderboardMemberOverlay');
+const leaderboardMemberModalTitle = document.querySelector('.leaderboardMemberModalTitle');
+const leaderboardMemberCloseBtn = document.querySelector('.leaderboardMemberCloseBtn');
+const leaderboardMemberList = document.querySelector('.leaderboardMemberList');
 const groupHistoryList = document.querySelector('.groupHistoryList');
+const groupHistoryOpenBtn = document.querySelector('.groupHistoryOpenBtn');
+const groupHistoryUnreadDot = document.querySelector('.historyUnreadDot');
+const groupHistoryOverlay = document.querySelector('.groupHistoryOverlay');
+const groupHistoryCloseBtn = document.querySelector('.groupHistoryCloseBtn');
 const suggestionsForYouPanel = document.querySelector('.suggestionsForYouPanel');
 const helpTourBtn = document.querySelector('.helpTourBtn');
+const navAttentionBadge = document.querySelector('.navAttentionBadge');
+const navAttentionCount = document.querySelector('.navAttentionCount');
+const groupOnboardingHint = document.querySelector('.groupOnboardingHint');
+const groupOnboardingStartTourBtn = document.querySelector('.groupOnboardingStartTourBtn');
+const groupOnboardingDismissBtn = document.querySelector('.groupOnboardingDismissBtn');
 const groupWelcomeOverlay = document.querySelector('.groupWelcomeOverlay');
 const groupWelcomeNameInput = document.querySelector('.groupWelcomeNameInput');
 const groupWelcomeContinueBtn = document.querySelector('.groupWelcomeContinueBtn');
@@ -327,7 +348,9 @@ const durationWrap = document.querySelector('.durationWrap');
 const durationChips = Array.from(document.querySelectorAll('.durationChip'));
 const groupTasksList = document.querySelector('.groupTasksList');
 const taskViewBtns = document.querySelectorAll('.taskViewBtn');
+const deadlineViewTabs = document.querySelector('.deadlineViewTabs');
 const groupMemberScopeTabs = document.querySelector('.groupMemberScopeTabs');
+const whoseTasksLabel = document.querySelector('.whoseTasksLabel');
 const yourNameInput = document.querySelector('.yourNameInput');
 const yourNameSaveBtn = document.querySelector('.yourNameSaveBtn');
 const yourNameSavedMsg = document.querySelector('.yourNameSavedMsg');
@@ -361,6 +384,15 @@ let selectedGroupId = null;
 let groupTasks = [];
 let groupSuggestions = [];
 let groupHistoryEntries = [];
+let groupHistoryLoadError = null; // set on a failed history load (e.g. rules not published yet) - see watchSelectedGroupTasks
+// Pending join requests for the selected group - only ever populated while
+// you're owner/admin there (see ensureJoinRequestsSubscription; a plain
+// member can't read this collection at all per firestore.rules).
+let groupJoinRequests = [];
+// Which groupId (if any) groupJoinRequests is currently subscribed for -
+// lets ensureJoinRequestsSubscription, called every renderApp(), no-op
+// cheaply instead of re-subscribing on every unrelated re-render.
+let joinRequestsSubscriptionKey = null;
 let showSetup = new URLSearchParams(window.location.search).get('new') === '1';
 let expandedSubtaskTaskIds = new Set();
 let expandedSnoozeTaskIds = new Set();
@@ -371,11 +403,22 @@ const commentUnsubscribes = {}; // taskId -> unsubscribe fn, only while expanded
 let activeView = 'all';
 // 'all' = everyone's tasks together; a uid = just that one person's.
 let activeMemberScope = 'all';
+// Leaderboard range: 'week' (calendar week, from the history log), 'month'
+// (calendar month, from currently-completed tasks), or 'all' (all-time,
+// also from currently-completed tasks) - see renderGroupLeaderboard.
+let leaderboardRange = 'week';
+// Last calendar day the leaderboard/history were computed for - lets
+// startGroupRealtimeUpdates notice a week/month boundary passing (or just
+// a completion aging out of "today") and re-render on its own, even with
+// nobody completing a task to otherwise trigger it.
+let lastGroupRealtimeDayKey = null;
 
 let unsubscribeGroups = null;
 let unsubscribeTasks = null;
 let unsubscribeSuggestions = null;
 let unsubscribeHistory = null;
+let unsubscribeJoinRequests = null;
+let groupRealtimeIntervalId = null;
 
 // A link from the "all my groups" browse page (?g=<id>) always wins over
 // whatever was last selected here.
@@ -400,6 +443,7 @@ function selectGroup(groupId) {
     showSetup = false;
     activeMemberScope = 'all';
     clearExpandedCommentSubscriptions();
+    closeGroupSettingsModal();
     try {
         localStorage.setItem(SELECTED_GROUP_KEY, groupId);
     } catch {
@@ -1618,15 +1662,69 @@ taskViewBtns.forEach((btn) => {
 // teammate - separate from the deadline-based views above, and also
 // settable by clicking a roster card in the side column (both control the
 // same activeMemberScope state).
+// Owner is always implicit via group.ownerId, never duplicated into
+// adminIds - so "isAdmin" only ever means "promoted, and not already the
+// owner" (the owner's own capabilities are a superset of admin's anyway).
+function getMyRoleInGroup(group) {
+    const isOwner = group.ownerId === currentUser?.uid;
+    const isAdmin = !isOwner && (group.adminIds || []).includes(currentUser?.uid);
+    return { isOwner, isAdmin };
+}
+
 function setActiveMemberScope(scope) {
     activeMemberScope = scope;
     const group = getSelectedGroup();
     if (group) {
         renderGroupMemberScopeTabs(group);
-        renderMemberRoster(group);
+        renderMemberRoster(group, getMyRoleInGroup(group));
         renderGroupHistory(group);
     }
     renderGroupTasks();
+}
+
+// Same "last viewed vs. server timestamp" shape as the comments unread dot
+// above (COMMENTS_LAST_VIEWED_KEY), but keyed by groupId rather than taskId
+// - history is a group-level feed, not a per-task thing. Deliberately
+// compares against the whole group's feed regardless of which "whose
+// tasks" scope is currently selected, matching the comments dot's own
+// per-task (not per-view) granularity.
+const HISTORY_LAST_VIEWED_KEY = 'todolist-history-last-viewed';
+
+function getHistoryLastViewedAt(groupId) {
+    try {
+        const stored = JSON.parse(localStorage.getItem(HISTORY_LAST_VIEWED_KEY) || '{}');
+        return stored[groupId] || null;
+    } catch {
+        return null;
+    }
+}
+
+function setHistoryLastViewedAt(groupId, isoString) {
+    try {
+        const stored = JSON.parse(localStorage.getItem(HISTORY_LAST_VIEWED_KEY) || '{}');
+        stored[groupId] = isoString;
+        localStorage.setItem(HISTORY_LAST_VIEWED_KEY, JSON.stringify(stored));
+    } catch {
+        // localStorage can be unavailable - the indicator just won't
+        // remember what you've already seen across reloads.
+    }
+}
+
+function hasUnreadHistory(groupId) {
+    if (!groupId || groupHistoryEntries.length === 0) {
+        return false;
+    }
+    // Newest-first already, per subscribeToGroupHistory's own
+    // orderBy('completedAt', 'desc') - no re-sort needed here.
+    const newest = groupHistoryEntries[0]?.completedAt;
+    if (!newest) {
+        return false;
+    }
+    const lastViewed = getHistoryLastViewedAt(groupId);
+    if (!lastViewed) {
+        return true;
+    }
+    return new Date(newest).getTime() > new Date(lastViewed).getTime();
 }
 
 // "Recently finished" - a lighter, non-calendar take on solo's activity
@@ -1636,22 +1734,39 @@ function setActiveMemberScope(scope) {
 // Reads from the permanent groupHistoryEntries log (see
 // subscribeToGroupHistory) rather than filtering the live groupTasks list,
 // so a completion stays here even after its task is later deleted.
-function renderGroupHistory() {
+function renderGroupHistory(group) {
+    groupHistoryUnreadDot?.classList.toggle('hidden', !hasUnreadHistory(group?.id));
+
     if (!groupHistoryList) {
         return;
     }
     groupHistoryList.innerHTML = '';
 
+    if (groupHistoryLoadError) {
+        const errorMsg = document.createElement('p');
+        errorMsg.classList.add('groupHistoryEmpty', 'groupHistoryError');
+        errorMsg.textContent = groupHistoryLoadError;
+        groupHistoryList.appendChild(errorMsg);
+        return;
+    }
+
     const scopedEntries = activeMemberScope === 'all'
         ? groupHistoryEntries
         : groupHistoryEntries.filter((entry) => entry.ownerId === activeMemberScope);
 
-    const finished = scopedEntries.slice(0, 12);
+    // Lives inside the .groupHistoryModalCard now (see index.html), opened
+    // on demand from the sidebar's .groupHistoryOpenBtn rather than sitting
+    // permanently on the page - so showing the full 50-entry log it's
+    // already subscribed to (rather than the old 12-item slice) doesn't
+    // grow the dashboard itself even for a group with a lot of history; the
+    // modal card and this list are both height-capped and scroll
+    // internally instead (style.css).
+    const finished = scopedEntries;
 
     if (finished.length === 0) {
         const empty = document.createElement('p');
         empty.classList.add('groupHistoryEmpty');
-        empty.textContent = 'Nothing finished here yet.';
+        empty.textContent = 'Nothing finished here yet - completed tasks show up here as soon as anyone checks one off.';
         groupHistoryList.appendChild(empty);
         return;
     }
@@ -1676,17 +1791,65 @@ function renderGroupHistory() {
     });
 }
 
+// Opened on demand from the sidebar rather than sitting permanently on the
+// page - same overlay/backdrop-click-to-close pattern as taskEditorOverlay.
+function openGroupHistoryModal(group) {
+    if (!groupHistoryOverlay) {
+        return;
+    }
+    if (group) {
+        setHistoryLastViewedAt(group.id, new Date().toISOString());
+        // Immediate feedback rather than waiting on the next renderApp().
+        groupHistoryUnreadDot?.classList.add('hidden');
+    }
+    groupHistoryOverlay.classList.remove('hidden');
+    groupHistoryOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function closeGroupHistoryModal() {
+    if (!groupHistoryOverlay) {
+        return;
+    }
+    groupHistoryOverlay.classList.add('hidden');
+    groupHistoryOverlay.setAttribute('aria-hidden', 'true');
+}
+
+groupHistoryOpenBtn?.addEventListener('click', () => {
+    playClickSound();
+    openGroupHistoryModal(getSelectedGroup());
+});
+
+groupHistoryCloseBtn?.addEventListener('click', () => {
+    playClickSound();
+    closeGroupHistoryModal();
+});
+
+groupHistoryOverlay?.addEventListener('click', (event) => {
+    if (event.target === groupHistoryOverlay) {
+        closeGroupHistoryModal();
+    }
+});
+
 // Pending suggestions a teammate made for YOU specifically (see the
 // "Suggest a task" button on each roster card) - accept to create the real
 // task in your own list, or dismiss it.
+// Shared with computeAttentionSummary() below, so the nav badge's count and
+// this panel's own contents can never drift apart.
+function getPendingSuggestionsForYou() {
+    if (!currentUser) {
+        return [];
+    }
+    return groupSuggestions.filter((suggestion) => (
+        suggestion.forUserId === currentUser.uid && suggestion.status === 'pending'
+    ));
+}
+
 function renderSuggestionsForYou(groupId) {
     if (!suggestionsForYouPanel || !currentUser) {
         return;
     }
 
-    const pendingForMe = groupSuggestions.filter((suggestion) => (
-        suggestion.forUserId === currentUser.uid && suggestion.status === 'pending'
-    ));
+    const pendingForMe = getPendingSuggestionsForYou();
 
     suggestionsForYouPanel.innerHTML = '';
     suggestionsForYouPanel.classList.toggle('hidden', pendingForMe.length === 0);
@@ -1896,13 +2059,188 @@ function submitSuggestTaskModal() {
     closeSuggestModal();
 }
 
+// Group settings modal - owner/admin only entry point (see .groupSettingsBtn
+// wiring below) for who-can-join and pending join requests. Built the same
+// dynamic way as the suggest-task modal above: reuses .taskEditorOverlay/
+// .taskEditorCard styling, toggled via the .open class. No member/role list
+// duplicated in here - kick/promote controls already live on the roster
+// cards, which are the one place members are listed.
+let groupSettingsOverlay = null;
+let groupSettingsGroupId = null;
+
+function initializeGroupSettingsModal() {
+    if (groupSettingsOverlay) {
+        return;
+    }
+
+    groupSettingsOverlay = document.createElement('div');
+    groupSettingsOverlay.className = 'taskEditorOverlay groupSettingsOverlay';
+    groupSettingsOverlay.innerHTML = `
+        <div class="taskEditorCard groupSettingsCard" role="dialog" aria-modal="true" aria-label="Group settings">
+            <h2>Group Settings</h2>
+            <label class="groupSettingsPrivacyLabel">
+                Who can join?
+                <select class="groupSettingsPrivacySelect">
+                    <option value="open">Open - anyone with the code joins instantly</option>
+                    <option value="invite-only">Invite-only - code holders must be approved</option>
+                    <option value="closed">Closed - no new members for now</option>
+                </select>
+            </label>
+            <p class="groupSettingsPrivacyNote hidden">Only the group's owner can change this.</p>
+            <div class="groupSettingsRequestsSection">
+                <p class="groupSettingsRequestsTitle">Pending join requests</p>
+                <div class="groupSettingsRequestsList"></div>
+            </div>
+            <div class="editorActions">
+                <button type="button" class="editorCancelBtn">Close</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(groupSettingsOverlay);
+
+    const privacySelect = groupSettingsOverlay.querySelector('.groupSettingsPrivacySelect');
+    privacySelect.addEventListener('change', () => {
+        if (!groupSettingsGroupId || privacySelect.disabled) {
+            return;
+        }
+        setGroupPrivacy(groupSettingsGroupId, privacySelect.value).catch((error) => {
+            console.error('Failed to update privacy:', error);
+            alert(error.message || 'Could not update who can join.');
+        });
+    });
+
+    groupSettingsOverlay.querySelector('.editorCancelBtn').addEventListener('click', closeGroupSettingsModal);
+    groupSettingsOverlay.addEventListener('click', (event) => {
+        if (event.target === groupSettingsOverlay) {
+            closeGroupSettingsModal();
+        }
+    });
+}
+
+function renderPendingJoinRequests(requests) {
+    if (!groupSettingsOverlay) {
+        return;
+    }
+    const list = groupSettingsOverlay.querySelector('.groupSettingsRequestsList');
+    list.innerHTML = '';
+
+    if (requests.length === 0) {
+        const empty = document.createElement('p');
+        empty.classList.add('groupSettingsRequestsEmpty');
+        empty.textContent = 'No pending requests.';
+        list.appendChild(empty);
+        return;
+    }
+
+    requests.forEach((request) => {
+        const row = document.createElement('div');
+        row.classList.add('groupSettingsRequestRow');
+
+        const name = document.createElement('span');
+        name.classList.add('groupSettingsRequestName');
+        name.textContent = request.name || 'Someone';
+        row.appendChild(name);
+
+        const actions = document.createElement('div');
+        actions.classList.add('groupSettingsRequestActions');
+
+        const approveBtn = document.createElement('button');
+        approveBtn.type = 'button';
+        approveBtn.classList.add('groupSettingsApproveBtn');
+        approveBtn.textContent = 'Approve';
+        approveBtn.addEventListener('click', () => {
+            playClickSound();
+            approveJoinRequest(groupSettingsGroupId, request.uid, request.name || 'Teammate').catch((error) => {
+                console.error('Failed to approve join request:', error);
+                alert('Could not approve that request.');
+            });
+        });
+        actions.appendChild(approveBtn);
+
+        const denyBtn = document.createElement('button');
+        denyBtn.type = 'button';
+        denyBtn.classList.add('groupSettingsDenyBtn');
+        denyBtn.textContent = 'Deny';
+        denyBtn.addEventListener('click', () => {
+            playClickSound();
+            denyJoinRequest(groupSettingsGroupId, request.uid).catch((error) => {
+                console.error('Failed to deny join request:', error);
+                alert('Could not deny that request.');
+            });
+        });
+        actions.appendChild(denyBtn);
+
+        row.appendChild(actions);
+        list.appendChild(row);
+    });
+}
+
+function openGroupSettingsModal(group) {
+    if (!currentUser) {
+        return;
+    }
+    initializeGroupSettingsModal();
+
+    groupSettingsGroupId = group.id;
+    const { isOwner } = getMyRoleInGroup(group);
+
+    const privacySelect = groupSettingsOverlay.querySelector('.groupSettingsPrivacySelect');
+    privacySelect.value = group.privacy || 'open';
+    privacySelect.disabled = !isOwner;
+    groupSettingsOverlay.querySelector('.groupSettingsPrivacyNote').classList.toggle('hidden', isOwner);
+
+    // Join requests are already loaded live by ensureJoinRequestsSubscription
+    // (started whenever an owner/admin has a group selected, not just while
+    // this modal happens to be open) - just render whatever's already there
+    // instead of opening a second, redundant subscription.
+    renderPendingJoinRequests(groupJoinRequests);
+
+    groupSettingsOverlay.classList.add('open');
+}
+
+function closeGroupSettingsModal() {
+    if (!groupSettingsOverlay) {
+        return;
+    }
+    groupSettingsOverlay.classList.remove('open');
+    groupSettingsGroupId = null;
+}
+
+groupSettingsBtn?.addEventListener('click', () => {
+    const group = getSelectedGroup();
+    if (group) {
+        playClickSound();
+        openGroupSettingsModal(group);
+    }
+});
+
 function renderGroupMemberScopeTabs(group) {
     if (!groupMemberScopeTabs) {
         return;
     }
-    groupMemberScopeTabs.innerHTML = '';
 
     const memberIds = group.memberIds || [];
+    // With only yourself in the group, this row is just "Everyone"/"Me" -
+    // two ways of saying the same thing. Hidden until a 2nd member makes
+    // the choice meaningful; reappears on its own the moment they join,
+    // since renderApp() re-runs on every membership change already.
+    const soloGroup = memberIds.length <= 1;
+    whoseTasksLabel?.classList.toggle('hidden', soloGroup);
+    groupMemberScopeTabs.classList.toggle('hidden', soloGroup);
+
+    if (soloGroup) {
+        groupMemberScopeTabs.innerHTML = '';
+        // Correct the state directly rather than calling setActiveMemberScope()
+        // (which would call back into this function and re-render the roster/
+        // history/tasks a second time) - every caller of renderGroupMemberScopeTabs
+        // already re-renders those right after, so this just needs the shared
+        // state fixed up before that happens.
+        activeMemberScope = 'all';
+        return;
+    }
+
+    groupMemberScopeTabs.innerHTML = '';
     const memberNames = group.memberNames || [];
 
     const makeTab = (scope, label) => {
@@ -1966,7 +2304,19 @@ function renderGroupTasks() {
 // Member roster
 // ---------------------------------------------------------------------
 
-function renderMemberRoster(group) {
+// A denied moderation write (promote/demote, kick) is almost always this
+// project's firestore.rules having the right logic locally but not yet
+// being *published* to the Firebase console - the same class of gap that
+// bit "Recently finished" and comments early on. Naming that directly
+// beats the raw Firestore "Missing or insufficient permissions." message,
+// which reads like the person just isn't allowed to do this at all.
+function describeGroupWriteError(error, fallback) {
+    return error?.code === 'permission-denied'
+        ? 'That action needs the latest security rules published to the Firebase console first.'
+        : (error.message || fallback);
+}
+
+function renderMemberRoster(group, { isOwner = false, isAdmin = false } = {}) {
     if (!memberRoster) {
         return;
     }
@@ -1974,6 +2324,12 @@ function renderMemberRoster(group) {
 
     const memberIds = group.memberIds || [];
     const memberNames = group.memberNames || [];
+    const adminIds = group.adminIds || [];
+
+    // A lone "You" card with nothing to compare against doesn't say WHY -
+    // point at the invite code already on the page rather than just
+    // leaving it as an unexplained roster of one.
+    memberRosterInviteHint?.classList.toggle('hidden', memberIds.length > 1);
 
     const cards = memberIds.map((memberId, index) => {
         const memberTasks = groupTasks.filter((task) => task.ownerId === memberId);
@@ -1985,6 +2341,13 @@ function renderMemberRoster(group) {
         const focusTask = activeTasks.length > 0
             ? [...activeTasks].sort(compareGroupTasksByPriority)[0]
             : null;
+        // Same overdue check updateGroupUrgencyAlert() already uses for the
+        // team-wide banner - here it's per-member, so a teammate who's
+        // fallen behind is visible right from the roster, not just once
+        // you're already looking at their tasks.
+        const hasOverdue = activeTasks.some((task) => getDeadlineStatus(task.dueAt).urgencyLevel === 'overdue');
+
+        const role = memberId === group.ownerId ? 'owner' : (adminIds.includes(memberId) ? 'admin' : 'member');
 
         return {
             memberId,
@@ -1992,7 +2355,9 @@ function renderMemberRoster(group) {
             total,
             doneCount,
             percent,
-            focusText: focusTask ? focusTask.text : null
+            focusText: focusTask ? focusTask.text : null,
+            hasOverdue,
+            role
         };
     });
 
@@ -2027,6 +2392,19 @@ function renderMemberRoster(group) {
         const name = document.createElement('p');
         name.classList.add('memberCardName');
         name.textContent = card.memberId === currentUser?.uid ? `${card.name} (You)` : card.name;
+        if (card.role !== 'member') {
+            const roleBadge = document.createElement('span');
+            roleBadge.classList.add('memberCardRoleBadge', `role-${card.role}`);
+            roleBadge.textContent = card.role === 'owner' ? 'Owner' : 'Admin';
+            name.appendChild(roleBadge);
+        }
+        if (card.hasOverdue) {
+            const overdueFlag = document.createElement('i');
+            overdueFlag.classList.add('fa-solid', 'fa-triangle-exclamation', 'memberCardOverdueFlag');
+            overdueFlag.title = 'Has an overdue task';
+            overdueFlag.setAttribute('aria-label', 'Has an overdue task');
+            name.appendChild(overdueFlag);
+        }
         memberCard.appendChild(name);
 
         const progressText = document.createElement('p');
@@ -2066,48 +2444,361 @@ function renderMemberRoster(group) {
             memberCard.appendChild(suggestBtn);
         }
 
+        // Moderation controls - never on your own card or the owner's.
+        // Kick: owner can remove anyone; an admin can only remove a plain
+        // member (never another admin). Promote/demote: owner-only, per the
+        // co-leader-style hierarchy (admins can't create more admins).
+        const canManage = (isOwner || isAdmin) && card.memberId !== currentUser?.uid && card.role !== 'owner';
+        const canKick = canManage && (isOwner || card.role !== 'admin');
+        const canChangeRole = isOwner && card.memberId !== currentUser?.uid && card.role !== 'owner';
+
+        if (canKick || canChangeRole) {
+            const actions = document.createElement('div');
+            actions.classList.add('memberCardModActions');
+
+            if (canChangeRole) {
+                const roleBtn = document.createElement('button');
+                roleBtn.type = 'button';
+                roleBtn.classList.add('memberCardRoleBtn');
+                roleBtn.textContent = card.role === 'admin' ? 'Remove admin' : 'Make admin';
+                roleBtn.addEventListener('click', async (event) => {
+                    event.stopPropagation();
+                    playClickSound();
+                    try {
+                        await setMemberRole(group.id, card.memberId, card.role !== 'admin');
+                    } catch (error) {
+                        alert(describeGroupWriteError(error, 'Could not update their role.'));
+                    }
+                });
+                actions.appendChild(roleBtn);
+            }
+
+            if (canKick) {
+                const kickBtn = document.createElement('button');
+                kickBtn.type = 'button';
+                kickBtn.classList.add('memberCardKickBtn');
+                kickBtn.innerHTML = '<i class="fa-solid fa-user-slash"></i> Kick';
+                kickBtn.addEventListener('click', async (event) => {
+                    event.stopPropagation();
+                    playClickSound();
+                    if (!confirm(`Remove ${card.name} from the group?`)) {
+                        return;
+                    }
+                    try {
+                        await kickMember(group.id, currentUser, card.memberId);
+                    } catch (error) {
+                        alert(describeGroupWriteError(error, 'Could not remove them.'));
+                    }
+                });
+                actions.appendChild(kickBtn);
+            }
+
+            memberCard.appendChild(actions);
+        }
+
         memberRoster.appendChild(memberCard);
     });
 }
 
 // ---------------------------------------------------------------------
-// Group switcher
-// ---------------------------------------------------------------------
+// Leaderboard - a ranked "who's gotten the most done" view, Clash-of-Clans-
+// style (crown for #1, medal colors for #2/#3, plain numbered badge from
+// #4 on). Three ranges, from two different sources chosen so neither
+// silently under- or over-counts:
+//   - "This week"/"This month": counted from groupHistoryEntries (the
+//     permanent history log, capped at 50 most-recent across the whole
+//     group) for week, since 50 is plenty for a week's worth of completions
+//     in practice; "This month" instead counts from currently-completed
+//     groupTasks (like "All time" below) since a month's worth could
+//     realistically blow past that 50-entry cap and silently undercount.
+//   - "All time": counted from currently-completed groupTasks. Not capped,
+//     but only reflects tasks that still exist - one that's since been
+//     deleted no longer counts.
+// Both "week" and "month" are calendar-based (the week starting Monday, the
+// month starting on the 1st) rather than a rolling 7/30-day window, so the
+// board actually resets at the start of a new week/month instead of just
+// slowly sliding - see the day-boundary check in startGroupRealtimeUpdates,
+// which re-renders this once the calendar day itself changes even with no
+// new completions to otherwise trigger a render.
+function getStartOfCalendarWeek(date) {
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const day = start.getDay(); // 0 = Sunday, 1 = Monday, ... 6 = Saturday
+    const daysSinceMonday = day === 0 ? 6 : day - 1;
+    start.setDate(start.getDate() - daysSinceMonday);
+    return start;
+}
 
-function renderGroupSwitcher() {
-    if (!groupSwitcherRow) {
+function getStartOfCalendarMonth(date) {
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(1);
+    return start;
+}
+
+const LEADERBOARD_RANGE_LABELS = { week: 'this week', month: 'this month', all: 'all time' };
+const LEADERBOARD_ORDINALS = { 1: '1st', 2: '2nd', 3: '3rd' };
+
+// Same {memberId -> completed task list} lookup the leaderboard's own
+// counts are built from, reused by the click-through member modal below so
+// the list it shows always matches the number next to that member's name.
+function getMemberCompletedEntriesForRange(memberId, range) {
+    if (range === 'week') {
+        const weekStart = getStartOfCalendarWeek(new Date()).getTime();
+        return groupHistoryEntries
+            .filter((entry) => entry.ownerId === memberId)
+            .map((entry) => ({ text: entry.taskText, completedAt: entry.completedAt }))
+            .filter((entry) => {
+                const completedAtMs = new Date(entry.completedAt).getTime();
+                return !Number.isNaN(completedAtMs) && completedAtMs >= weekStart;
+            });
+    }
+
+    const monthStart = range === 'month' ? getStartOfCalendarMonth(new Date()).getTime() : null;
+    return groupTasks
+        .filter((task) => task.ownerId === memberId && task.completed && task.completedAt)
+        .map((task) => ({ text: task.text, completedAt: task.completedAt }))
+        .filter((entry) => {
+            if (monthStart === null) {
+                return true;
+            }
+            const completedAtMs = new Date(entry.completedAt).getTime();
+            return !Number.isNaN(completedAtMs) && completedAtMs >= monthStart;
+        })
+        .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+}
+
+function renderGroupLeaderboard(group) {
+    if (!leaderboardList) {
         return;
     }
-    groupSwitcherRow.innerHTML = '';
 
-    (groups || []).forEach((group) => {
-        const card = document.createElement('button');
-        card.type = 'button';
-        card.classList.add('groupSwitcherCard');
-        if (!showSetup && group.id === getSelectedGroup()?.id) {
-            card.classList.add('active');
-        }
-        card.textContent = group.name;
-        card.addEventListener('click', () => {
-            playClickSound();
-            selectGroup(group.id);
-        });
-        groupSwitcherRow.appendChild(card);
+    const memberIds = group.memberIds || [];
+    const memberNames = group.memberNames || [];
+
+    // A solo group with no history yet has nothing a leaderboard can show -
+    // the full title/tabs/list chrome around an empty ranking just reads as
+    // broken. Collapse to one muted line (keeping the title, so the panel
+    // doesn't look outright empty) until either a teammate joins or a first
+    // completion is logged - whichever happens first flips this back to the
+    // real panel, live, next render.
+    const soloNoHistory = memberIds.length <= 1 && groupHistoryEntries.length === 0;
+    leaderboardTabsEl?.classList.toggle('hidden', soloNoHistory);
+    leaderboardList.classList.toggle('hidden', soloNoHistory);
+    leaderboardTeaser?.classList.toggle('hidden', !soloNoHistory);
+    if (soloNoHistory) {
+        return;
+    }
+
+    const counts = new Map(memberIds.map((memberId) => [memberId, 0]));
+
+    memberIds.forEach((memberId) => {
+        counts.set(memberId, getMemberCompletedEntriesForRange(memberId, leaderboardRange).length);
     });
 
-    const newGroupCard = document.createElement('button');
-    newGroupCard.type = 'button';
-    newGroupCard.classList.add('groupSwitcherCard', 'groupSwitcherNewCard');
-    if (showSetup) {
-        newGroupCard.classList.add('active');
+    const rows = memberIds.map((memberId, index) => ({
+        memberId,
+        name: resolveMemberName(memberId, memberNames[index], groupTasks),
+        count: counts.get(memberId) || 0
+    }));
+
+    rows.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+    leaderboardList.innerHTML = '';
+
+    if (rows.length === 0 || rows.every((row) => row.count === 0)) {
+        const empty = document.createElement('li');
+        empty.classList.add('leaderboardEmpty');
+        empty.textContent = leaderboardRange === 'all'
+            ? 'Nobody has finished a task yet.'
+            : `Finish a task to put your name here - or switch to "All time" to see further back.`;
+        leaderboardList.appendChild(empty);
+        return;
     }
-    newGroupCard.innerHTML = '<i class="fa-solid fa-plus"></i> New group';
-    newGroupCard.addEventListener('click', () => {
+
+    rows.forEach((row, index) => {
+        const rank = index + 1;
+
+        const item = document.createElement('li');
+        item.classList.add('leaderboardRow');
+        if (row.memberId === currentUser?.uid) {
+            item.classList.add('isYou');
+        }
+        item.setAttribute('role', 'button');
+        item.tabIndex = 0;
+        item.title = `See ${row.memberId === currentUser?.uid ? 'your' : row.name + '’s'} completed tasks (${LEADERBOARD_RANGE_LABELS[leaderboardRange]})`;
+
+        const rankBadge = document.createElement('span');
+        rankBadge.classList.add('leaderboardRank');
+        if (rank <= 3) {
+            // Top 3 get a gold/silver/bronze pill with an icon AND the
+            // ordinal itself ("1st"/"2nd"/"3rd") - the icon alone read as
+            // an unlabeled decoration rather than an actual rank.
+            rankBadge.classList.add(`rank-${rank}`);
+            const icon = document.createElement('i');
+            icon.classList.add('fa-solid', rank === 1 ? 'fa-crown' : 'fa-medal');
+            rankBadge.appendChild(icon);
+            rankBadge.appendChild(document.createTextNode(LEADERBOARD_ORDINALS[rank]));
+        } else {
+            rankBadge.textContent = String(rank);
+        }
+        item.appendChild(rankBadge);
+
+        const name = document.createElement('span');
+        name.classList.add('leaderboardName');
+        name.textContent = row.memberId === currentUser?.uid ? `${row.name} (You)` : row.name;
+        item.appendChild(name);
+
+        const count = document.createElement('span');
+        count.classList.add('leaderboardCount');
+        count.textContent = row.count === 1 ? '1 task' : `${row.count} tasks`;
+        item.appendChild(count);
+
+        const openMember = () => {
+            playClickSound();
+            openLeaderboardMemberModal(row.memberId, row.name);
+        };
+        item.addEventListener('click', openMember);
+        item.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openMember();
+            }
+        });
+
+        leaderboardList.appendChild(item);
+    });
+}
+
+leaderboardTabBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+        if (btn.dataset.range === leaderboardRange) {
+            return;
+        }
         playClickSound();
-        showSetup = true;
+        leaderboardRange = btn.dataset.range;
+        leaderboardTabBtns.forEach((tabBtn) => tabBtn.classList.toggle('active', tabBtn === btn));
+        const group = getSelectedGroup();
+        if (group) {
+            renderGroupLeaderboard(group);
+        }
+    });
+});
+
+// ---------------------------------------------------------------------
+// Leaderboard member modal - clicking a row shows that member's own
+// completed-task list for whichever range is currently selected above.
+// ---------------------------------------------------------------------
+
+function openLeaderboardMemberModal(memberId, memberName) {
+    if (!leaderboardMemberOverlay) {
+        return;
+    }
+
+    if (leaderboardMemberModalTitle) {
+        const whose = memberId === currentUser?.uid ? 'Your' : `${memberName}'s`;
+        leaderboardMemberModalTitle.textContent = `${whose} completed tasks (${LEADERBOARD_RANGE_LABELS[leaderboardRange]})`;
+    }
+
+    renderLeaderboardMemberList(memberId);
+
+    leaderboardMemberOverlay.classList.remove('hidden');
+    leaderboardMemberOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function closeLeaderboardMemberModal() {
+    if (!leaderboardMemberOverlay) {
+        return;
+    }
+    leaderboardMemberOverlay.classList.add('hidden');
+    leaderboardMemberOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function renderLeaderboardMemberList(memberId) {
+    if (!leaderboardMemberList) {
+        return;
+    }
+    leaderboardMemberList.innerHTML = '';
+
+    const entries = getMemberCompletedEntriesForRange(memberId, leaderboardRange);
+
+    if (entries.length === 0) {
+        const empty = document.createElement('p');
+        empty.classList.add('leaderboardMemberEmpty');
+        empty.textContent = `Nothing completed ${LEADERBOARD_RANGE_LABELS[leaderboardRange]} yet.`;
+        leaderboardMemberList.appendChild(empty);
+        return;
+    }
+
+    entries.forEach((entry) => {
+        const item = document.createElement('div');
+        item.classList.add('leaderboardMemberItem');
+
+        const text = document.createElement('p');
+        text.classList.add('leaderboardMemberItemText');
+        text.textContent = entry.text;
+        item.appendChild(text);
+
+        const meta = document.createElement('p');
+        meta.classList.add('leaderboardMemberItemMeta');
+        meta.textContent = formatFriendlyDateTime(new Date(entry.completedAt));
+        item.appendChild(meta);
+
+        leaderboardMemberList.appendChild(item);
+    });
+}
+
+leaderboardMemberCloseBtn?.addEventListener('click', () => {
+    playClickSound();
+    closeLeaderboardMemberModal();
+});
+
+leaderboardMemberOverlay?.addEventListener('click', (event) => {
+    if (event.target === leaderboardMemberOverlay) {
+        closeLeaderboardMemberModal();
+    }
+});
+
+// Always-on (not modal-scoped) subscription to pending join requests, so
+// the Group Settings button can carry a live count badge instead of only
+// revealing what's pending once you open it - see groupSettingsCountBadge
+// below. Only an owner/admin can actually run this query per
+// firestore.rules, so it's gated on that; idempotent against
+// joinRequestsSubscriptionKey so calling it every renderApp() (needed since
+// a role change - e.g. just got promoted - doesn't necessarily come with a
+// group switch) is a cheap no-op once already subscribed to the right
+// group.
+function ensureJoinRequestsSubscription(group, canSeeJoinRequests) {
+    const desiredKey = (group && canSeeJoinRequests) ? group.id : null;
+    if (desiredKey === joinRequestsSubscriptionKey) {
+        return;
+    }
+    if (unsubscribeJoinRequests) {
+        unsubscribeJoinRequests();
+        unsubscribeJoinRequests = null;
+    }
+    groupJoinRequests = [];
+    joinRequestsSubscriptionKey = desiredKey;
+    if (!desiredKey) {
+        return;
+    }
+    unsubscribeJoinRequests = subscribeToJoinRequests(group.id, (requests) => {
+        groupJoinRequests = requests;
+        renderApp();
+    }, (error) => {
+        console.error('Failed to load join requests:', error);
+        groupJoinRequests = [];
         renderApp();
     });
-    groupSwitcherRow.appendChild(newGroupCard);
+}
+
+function updateGroupSettingsBadge() {
+    if (!groupSettingsCountBadge) {
+        return;
+    }
+    const count = groupJoinRequests.length;
+    groupSettingsCountBadge.textContent = count > 9 ? '9+' : String(count);
+    groupSettingsCountBadge.classList.toggle('visible', count > 0);
 }
 
 // ---------------------------------------------------------------------
@@ -2133,11 +2824,8 @@ function renderApp() {
     groupStatusMsg?.classList.add('hidden');
     groupPageWrap?.classList.remove('hidden');
 
-    renderGroupSwitcher();
-
     const shouldShowSetup = showSetup || groups.length === 0;
     groupSetupSection?.classList.toggle('hidden', !shouldShowSetup);
-    groupSwitcherRow?.classList.toggle('hidden', groups.length === 0);
     groupBrowseAllLink?.classList.toggle('hidden', groups.length === 0);
 
     const group = getSelectedGroup();
@@ -2155,18 +2843,46 @@ function renderApp() {
         if (groupInviteCode) {
             groupInviteCode.textContent = group.inviteCode || group.id;
         }
-        const isOwner = group.ownerId === currentUser.uid;
-        groupLeaveBtn?.classList.toggle('hidden', isOwner);
+        const { isOwner, isAdmin } = getMyRoleInGroup(group);
+        // The owner can leave too now (ownership transfers to a remaining
+        // member - see leaveGroup) - only actually blocked, client-side in
+        // the click handler below, when they're the group's only member.
+        groupLeaveBtn?.classList.remove('hidden');
         groupDeleteBtn?.classList.toggle('hidden', !isOwner);
         groupRenameBtn?.classList.toggle('hidden', !isOwner);
+        groupSettingsBtn?.classList.toggle('hidden', !(isOwner || isAdmin));
+        // Re-evaluated every render (not just on group switch) so a role
+        // change alone - e.g. you just got promoted to admin - starts the
+        // subscription without needing a reload; the idempotency check
+        // inside makes this a no-op once nothing's actually changed.
+        ensureJoinRequestsSubscription(group, isOwner || isAdmin);
+        updateGroupSettingsBadge();
+        if (groupSettingsOverlay?.classList.contains('open') && groupSettingsGroupId === group.id) {
+            // Keep an already-open Settings modal live too, not just the
+            // badge - e.g. approving one request updates the remaining list
+            // immediately instead of only on next open.
+            renderPendingJoinRequests(groupJoinRequests);
+        }
         renderGroupMemberScopeTabs(group);
-        renderMemberRoster(group);
+        renderMemberRoster(group, { isOwner, isAdmin });
+        renderGroupLeaderboard(group);
         renderGroupHistory(group);
         renderSuggestionsForYou(group.id);
         renderGroupTasks();
+        // The 6-button deadline-filter row isn't worth much with barely any
+        // tasks to filter - condense it down to just All/Overdue (Overdue
+        // stays regardless of count, since it's meaningful even at 1 task
+        // and updateGroupUrgencyAlert already surfaces it independently)
+        // until there's enough to actually filter through.
+        deadlineViewTabs?.classList.toggle('condensed', groupTasks.length < 3);
         updateGroupMotivator();
         updateGroupUrgencyAlert();
+        updateNavAttentionBadge(group);
+        renderGroupOnboardingHint();
         maybeAutoStartGroupTour();
+    } else {
+        ensureJoinRequestsSubscription(null, false);
+        updateNavAttentionBadge(null);
     }
 }
 
@@ -2196,6 +2912,43 @@ function updateGroupMotivator() {
     } else {
         motivatorText.textContent = "Let's start!";
     }
+}
+
+// A single glanceable "does anything need me" number, aggregating the
+// group's other notification surfaces (unread comments, pending join
+// requests, suggestions waiting on you) into one place - all three are
+// already-computed/cheap over already-loaded data, no new subscriptions.
+// Deliberately scoped to the CURRENTLY SELECTED group only, not a total
+// across every group you're in - that would mean subscribing to every
+// group's data at once, out of scope here.
+function computeAttentionSummary() {
+    const unreadCommentsCount = groupTasks.filter(hasUnreadComments).length;
+    const joinRequestsCount = groupJoinRequests.length; // already role-gated by ensureJoinRequestsSubscription
+    const suggestionsCount = getPendingSuggestionsForYou().length;
+    return {
+        unreadCommentsCount,
+        joinRequestsCount,
+        suggestionsCount,
+        total: unreadCommentsCount + joinRequestsCount + suggestionsCount
+    };
+}
+
+function updateNavAttentionBadge(group) {
+    if (!navAttentionBadge || !navAttentionCount) {
+        return;
+    }
+    if (!group) {
+        navAttentionBadge.classList.remove('visible');
+        return;
+    }
+    const summary = computeAttentionSummary();
+    navAttentionCount.textContent = summary.total > 9 ? '9+' : String(summary.total);
+    navAttentionBadge.classList.toggle('visible', summary.total > 0);
+    navAttentionBadge.title = summary.total === 0 ? '' : [
+        summary.unreadCommentsCount && `${summary.unreadCommentsCount} unread comment${summary.unreadCommentsCount === 1 ? '' : 's'}`,
+        summary.joinRequestsCount && `${summary.joinRequestsCount} pending join request${summary.joinRequestsCount === 1 ? '' : 's'}`,
+        summary.suggestionsCount && `${summary.suggestionsCount} suggestion${summary.suggestionsCount === 1 ? '' : 's'} for you`
+    ].filter(Boolean).join(', ');
 }
 
 // Team-wide version of solo's updateUrgencyAlert() - scoped to every
@@ -2240,6 +2993,71 @@ function updateGroupUrgencyAlert() {
     }
 }
 
+// Keeps the per-task countdown badges and the urgency banner above ticking
+// together. Unlike solo (script.js's refreshDeadlineBadges + a 1s interval),
+// group.js only ever redrew badges as a side effect of renderGroupTasks() -
+// called from plenty of places (expanding subtasks/comments, switching a
+// view or member-scope tab) that have nothing to do with deadlines. Each of
+// those happened to refresh individual badges but never updateGroupUrgencyAlert(),
+// so the banner could sit on a stale "12m" while a task's own badge had
+// already ticked down to "3m". This interval refreshes both together, every
+// second, regardless of what else triggers a render.
+function refreshGroupDeadlineBadges() {
+    if (!groupTasksList) {
+        return;
+    }
+
+    groupTasksList.querySelectorAll('li[data-task-id]').forEach((taskItem) => {
+        const task = groupTasks.find((candidate) => candidate.id === taskItem.dataset.taskId);
+        if (!task) {
+            return;
+        }
+
+        const deadlineBadge = taskItem.querySelector('.deadlineBadge');
+        const countdownBadge = taskItem.querySelector('.countdownBadge');
+        if (!deadlineBadge || !countdownBadge) {
+            return;
+        }
+
+        const deadlineStatus = getTaskDisplayDeadlineStatus(task);
+
+        deadlineBadge.classList.remove('deadline-none', 'deadline-normal', 'deadline-soon', 'deadline-critical', 'deadline-overdue');
+        deadlineBadge.classList.add(deadlineStatus.deadlineClassName);
+        deadlineBadge.textContent = deadlineStatus.deadlineLabel;
+
+        countdownBadge.classList.remove('countdown-none', 'countdown-normal', 'countdown-soon', 'countdown-critical', 'countdown-overdue');
+        countdownBadge.classList.add(deadlineStatus.countdownClassName);
+        countdownBadge.textContent = deadlineStatus.countdownLabel;
+
+        taskItem.classList.remove('status-normal', 'status-soon', 'status-critical', 'status-overdue');
+        taskItem.classList.add(`status-${deadlineStatus.urgencyLevel}`);
+    });
+}
+
+function startGroupRealtimeUpdates() {
+    if (groupRealtimeIntervalId) {
+        clearInterval(groupRealtimeIntervalId);
+    }
+
+    groupRealtimeIntervalId = setInterval(() => {
+        refreshGroupDeadlineBadges();
+        updateGroupUrgencyAlert();
+
+        // Cheap once-a-second check, only acts on the rare tick where the
+        // calendar day has actually changed - that's the only thing that
+        // can move the "this week"/"this month" leaderboard windows without
+        // a task completion happening to trigger a render on its own.
+        const todayKey = getDateKey(new Date());
+        if (todayKey !== lastGroupRealtimeDayKey) {
+            lastGroupRealtimeDayKey = todayKey;
+            const group = getSelectedGroup();
+            if (group) {
+                renderGroupLeaderboard(group);
+            }
+        }
+    }, 1000);
+}
+
 // ---------------------------------------------------------------------
 // Group create/join forms
 // ---------------------------------------------------------------------
@@ -2251,7 +3069,7 @@ if (groupCreateForm) {
 
         playClickSound();
         try {
-            const groupId = await createGroup(groupCreateNameInput.value, currentUser);
+            const groupId = await createGroup(groupCreateNameInput.value, currentUser, groupCreatePrivacySelect?.value);
             groupCreateNameInput.value = '';
             selectGroup(groupId);
         } catch (error) {
@@ -2267,15 +3085,23 @@ if (groupJoinForm) {
     groupJoinForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         groupJoinError?.classList.add('hidden');
+        groupJoinInfo?.classList.add('hidden');
 
         playClickSound();
         try {
-            const groupId = await joinGroup(groupJoinCodeInput.value, currentUser);
+            const { groupId, status } = await joinGroup(groupJoinCodeInput.value, currentUser);
             groupJoinCodeInput.value = '';
+            if (status === 'requested') {
+                if (groupJoinInfo) {
+                    groupJoinInfo.textContent = 'Request sent - you\'ll get in once the group\'s owner or an admin approves it.';
+                    groupJoinInfo.classList.remove('hidden');
+                }
+                return;
+            }
             selectGroup(groupId);
         } catch (error) {
             if (groupJoinError) {
-                groupJoinError.textContent = 'Could not join - check the invite code and try again.';
+                groupJoinError.textContent = error.message || 'Could not join - check the invite code and try again.';
                 groupJoinError.classList.remove('hidden');
             }
         }
@@ -2326,7 +3152,18 @@ if (groupLeaveBtn) {
         if (!group || !currentUser) {
             return;
         }
-        if (!confirm(`Leave "${group.name}"? You'll need the invite code to rejoin.`)) {
+
+        const isOwner = group.ownerId === currentUser.uid;
+        const otherMemberCount = (group.memberIds || []).length - 1;
+        if (isOwner && otherMemberCount === 0) {
+            alert('You\'re the only member of this group - delete it instead of leaving it.');
+            return;
+        }
+
+        const confirmText = isOwner
+            ? `Leave "${group.name}"? Ownership will be handed to a random remaining member. You'll need the invite code to rejoin.`
+            : `Leave "${group.name}"? You'll need the invite code to rejoin.`;
+        if (!confirm(confirmText)) {
             return;
         }
         try {
@@ -2541,6 +3378,10 @@ taskInput?.addEventListener('keydown', (event) => {
 // ---------------------------------------------------------------------
 
 function resetGroupState() {
+    if (groupRealtimeIntervalId) {
+        clearInterval(groupRealtimeIntervalId);
+        groupRealtimeIntervalId = null;
+    }
     if (unsubscribeGroups) {
         unsubscribeGroups();
         unsubscribeGroups = null;
@@ -2553,6 +3394,17 @@ function resetGroupState() {
         unsubscribeSuggestions();
         unsubscribeSuggestions = null;
     }
+    // renderApp() below bails out at its very first check once currentUser
+    // is null, so it never reaches the else-branch cleanup that would
+    // normally tear this down - has to happen explicitly here instead.
+    if (unsubscribeJoinRequests) {
+        unsubscribeJoinRequests();
+        unsubscribeJoinRequests = null;
+    }
+    groupJoinRequests = [];
+    joinRequestsSubscriptionKey = null;
+    navAttentionBadge?.classList.remove('visible');
+    closeGroupSettingsModal();
     currentUser = null;
     groups = undefined;
     groupTasks = [];
@@ -2586,6 +3438,7 @@ function watchSelectedGroupTasks() {
     if (!group) {
         groupTasks = [];
         groupHistoryEntries = [];
+        groupHistoryLoadError = null;
         renderApp();
         return;
     }
@@ -2618,10 +3471,19 @@ function watchSelectedGroupTasks() {
     }
     unsubscribeHistory = subscribeToGroupHistory(group.id, (entries) => {
         groupHistoryEntries = entries;
+        groupHistoryLoadError = null;
         renderApp();
     }, (error) => {
         console.error('Failed to load group history:', error);
         groupHistoryEntries = [];
+        // Same permission-denied message as comments (see toggleGroupCommentsExpanded)
+        // - the most common cause is the firestore.rules history/{entryId}
+        // rules existing locally but not yet published to the Firebase
+        // console, which otherwise fails silently and just looks like an
+        // empty "Nothing finished here yet." forever.
+        groupHistoryLoadError = error?.code === 'permission-denied'
+            ? 'Recently finished isn\'t turned on for this project yet (the security rules need to be published).'
+            : 'Could not load recently finished tasks.';
         renderApp();
     });
 }
@@ -2669,7 +3531,10 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.groupMemberScopeTabs',
         title: 'Whose tasks',
-        text: 'See everyone\'s tasks together, just your own, or drill into one teammate\'s.'
+        text: 'See everyone\'s tasks together, just your own, or drill into one teammate\'s.',
+        // Hidden for a solo group (see renderGroupMemberScopeTabs) - skip
+        // this step rather than highlighting a hidden, zero-size element.
+        isRelevant: () => (getSelectedGroup()?.memberIds || []).length > 1
     },
     {
         selector: '.deadlineViewTabs',
@@ -2682,9 +3547,9 @@ const GROUP_TOUR_STEPS = [
         text: 'See everyone\'s progress and current focus. Click a card to filter to their tasks, or suggest a task for them.'
     },
     {
-        selector: '.groupHistoryPanel',
+        selector: '.groupHistoryOpenBtn',
         title: 'Recently finished',
-        text: 'A running log of what the team has been completing.'
+        text: 'Open a running log of what the team has been completing.'
     },
     {
         selector: '.groupBrowseAllLink',
@@ -2693,10 +3558,53 @@ const GROUP_TOUR_STEPS = [
     }
 ];
 
+// Persistent, dismissible reminder mirroring solo's own .onboardingHint
+// (script.js's renderOnboardingHint/dismissOnboardingHint) - group had only
+// the one-shot welcome modal + auto-tour, with nothing left lingering on
+// the page for anyone who skips or closes the tour before finishing it.
+// Reuses GROUP_COACH_KEY rather than a separate key, so "tour completed"
+// and "hint dismissed" are the same one-way state solo already treats them
+// as.
+function dismissGroupOnboardingHint() {
+    playClickSound();
+    try {
+        localStorage.setItem(GROUP_COACH_KEY, 'dismissed');
+    } catch {
+        // Non-fatal - worst case the hint just reappears next visit.
+    }
+    renderGroupOnboardingHint();
+}
+
+function renderGroupOnboardingHint() {
+    if (!groupOnboardingHint) {
+        return;
+    }
+    let coachState = null;
+    try {
+        coachState = localStorage.getItem(GROUP_COACH_KEY);
+    } catch {
+        // localStorage unavailable - treat as not-yet-seen, same as solo.
+    }
+    const shouldHide = coachState === 'dismissed' || coachState === 'tour-completed';
+    groupOnboardingHint.classList.toggle('hidden', shouldHide);
+}
+
 const groupTourController = createTourController({
     steps: GROUP_TOUR_STEPS,
-    storageKey: GROUP_COACH_KEY
+    storageKey: GROUP_COACH_KEY,
+    onEnd: () => renderGroupOnboardingHint()
 });
+
+if (groupOnboardingDismissBtn) {
+    groupOnboardingDismissBtn.addEventListener('click', dismissGroupOnboardingHint);
+}
+
+if (groupOnboardingStartTourBtn) {
+    groupOnboardingStartTourBtn.addEventListener('click', () => {
+        playClickSound();
+        groupTourController.start();
+    });
+}
 
 let hasAutoStartedGroupTour = false;
 
@@ -2806,6 +3714,7 @@ AuthGate.init({
         currentUser = user;
         groups = undefined;
         renderApp();
+        startGroupRealtimeUpdates();
         loadProfileName(user, (name) => {
             if (yourNameInput) {
                 yourNameInput.value = name;

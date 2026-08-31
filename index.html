@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260830c">
+    <link rel="stylesheet" href="style.css?v=20260830n">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#050225">
@@ -41,7 +41,7 @@
     </div>
 
     <div class="userBadge hidden">
-        <a class="groupNavLink" href="group/">Group</a>
+        <a class="groupNavLink" href="group/browse.html">Groups</a>
         <button class="helpTourBtn" type="button" title="Restart the tutorial"><i class="fa-solid fa-question"></i></button>
         <img class="userBadgeAvatar hidden" alt="">
         <span class="userBadgeName"></span>
@@ -291,7 +291,16 @@
             <div class="authCard" role="dialog" aria-modal="true" aria-label="Sign in">
                 <form class="authEmailForm">
                     <input type="email" class="authEmailInput" placeholder="Email" autocomplete="email" required>
-                    <input type="password" class="authPasswordInput" placeholder="Password" autocomplete="current-password" required>
+                    <div class="authPasswordWrap">
+                        <input type="password" class="authPasswordInput" placeholder="Password" autocomplete="current-password" required>
+                        <button type="button" class="authPasswordToggleBtn" aria-label="Show password" title="Show password">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="authPasswordStrength hidden" aria-live="polite">
+                        <div class="authPasswordStrengthBar"><span class="authPasswordStrengthFill"></span></div>
+                        <p class="authPasswordStrengthLabel"></p>
+                    </div>
                     <button type="button" class="authForgotPasswordBtn">Forgot password?</button>
                     <label class="authConsentRow hidden">
                         <input type="checkbox" class="authConsentCheckbox">
@@ -314,10 +323,10 @@
         </div>
     </div>
 
-    <script src="task-shared.js?v=20260830c"></script>
-    <script src="auth-gate.js?v=20260829a"></script>
+    <script src="task-shared.js?v=20260830e"></script>
+    <script src="auth-gate.js?v=20260830a"></script>
     <script src="script.js?v=20260830b"></script>
-    <script type="module" src="firebase-init.js?v=20260830c"></script>
+    <script type="module" src="firebase-init.js?v=20260830d"></script>
     <script src="settings.js?v=20260830c"></script>
 
 
