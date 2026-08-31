@@ -650,14 +650,18 @@ function startRewardReelTicking(track, tileStepPx) {
 // beforeShow runs right before that step's target is looked up (e.g. to
 // open a collapsed panel the target lives inside). waitFor (optional):
 // { event, selector? } - makes the step interactive instead of a passive
-// Next-through: the Next button is hidden entirely (a disabled-but-still-
-// button-shaped Next invites clicking it directly, which is exactly the
-// wrong element), the target gets a pulsing highlight instead of a static
-// one, and the step only advances once the user actually performs `event`
-// on `selector` (defaults to the step's own selector) - Skip still works
-// normally throughout. onStart (optional): called right as the tour opens,
-// e.g. to hide a page's separate passive "quick start" hint card so it
-// doesn't sit underneath/behind the modal for the whole tour.
+// Next-through: the Next button stays visible but disabled/relabeled (so
+// the card doesn't look broken with only a Skip button), the target gets a
+// pulsing highlight instead of a static one, and the step only advances
+// once the user actually performs `event` on `selector` (defaults to the
+// step's own selector) - Skip still works normally throughout. The bug
+// that actually blocked the real target (.tourOverlay sitting on top of
+// it in the stacking order - see .tourOverlay.interactive in style.css)
+// was never about this button; it's fixed independently of whether the
+// button is shown, disabled, or hidden. onStart (optional): called right
+// as the tour opens, e.g. to hide a page's separate passive "quick start"
+// hint card so it doesn't sit underneath/behind the modal for the whole
+// tour.
 function createTourController({ steps, storageKey, onEnd, onStart }) {
     const tourOverlay = document.querySelector('.tourOverlay');
     const tourCard = document.querySelector('.tourCard');
@@ -678,7 +682,7 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
     function clearPendingInteraction() {
         tourOverlay?.classList.remove('interactive');
         if (tourNextBtn) {
-            tourNextBtn.style.display = '';
+            tourNextBtn.disabled = false;
         }
         if (!pendingInteraction) {
             return;
@@ -768,10 +772,8 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
                 pendingInteraction = { element: waitTarget, eventName: step.waitFor.event, handler, waitingElement: target };
                 target.classList.add('tourTargetWaiting');
                 tourOverlay?.classList.add('interactive');
-                // No Next button for an interactive step at all - a disabled
-                // one still looks/reads like the thing to click, which is
-                // exactly backwards; the pulsing highlight is the only cue.
-                tourNextBtn.style.display = 'none';
+                tourNextBtn.disabled = true;
+                tourNextBtn.textContent = 'Waiting...';
             }
         }
 
