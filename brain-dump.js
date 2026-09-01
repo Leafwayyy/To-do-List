@@ -450,6 +450,28 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         scrollToBottom();
     }
 
+    // 429 specifically means the app's ENTIRE shared free-tier Gemini quota
+    // is exhausted for the day (one API key/quota pool for every user, not
+    // per-account - see the Worker's own comment), not a brief throttle -
+    // resetsAt (the Worker's own best estimate, Google doesn't publish an
+    // exact guaranteed instant) gets converted to the user's own local time
+    // here rather than shown as a bare UTC/ISO string.
+    function describeErrorResponse(status, data) {
+        if (status === 429 && data?.resetsAt) {
+            const resetDate = new Date(data.resetsAt);
+            if (!Number.isNaN(resetDate.getTime())) {
+                const resetLabel = resetDate.toLocaleString([], {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit'
+                });
+                return `Dusty's hit her shared daily message limit. She should be back around ${resetLabel} your time.`;
+            }
+        }
+        return (data && data.reply) || 'Something went wrong - try again in a bit.';
+    }
+
     function appendTypingIndicator() {
         const row = document.createElement('div');
         row.classList.add('brainDumpMsgRow');
@@ -1241,7 +1263,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             typingBubble.remove();
 
             if (!response.ok || !data) {
-                appendErrorBubble((data && data.reply) || 'Something went wrong - try again in a bit.');
+                appendErrorBubble(describeErrorResponse(response.status, data));
                 return;
             }
 
