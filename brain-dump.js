@@ -283,6 +283,15 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     const fabEl = document.querySelector('.brainDumpToggleBtn');
     let greetTimeoutId = null;
 
+    // Dusty, the floating bottom-right mascot that opens this chat. Both
+    // script.js and group/group.js already look up the SAME
+    // .brainDumpToggleBtn element themselves (for click wiring, and for
+    // group.js's hidden-until-a-group-is-selected gating) - this file grabs
+    // it too, independently, just to inject Dusty's portrait/animations
+    // into it. Nothing here changes what that element IS to those files.
+    const fabEl = document.querySelector('.brainDumpToggleBtn');
+    let greetTimeoutId = null;
+
     function isOpen() {
         return Boolean(overlay && overlay.classList.contains('open'));
     }
