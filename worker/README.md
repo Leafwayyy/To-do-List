@@ -44,10 +44,25 @@ checks incoming requests' `Origin` header against. It already includes the
 GitHub Pages origin and `localhost:8000` for local testing. Add any other
 origin you serve the app from, then `npx wrangler deploy` again.
 
-## If this ever needs real per-user rate limiting
+## Per-user rate limiting
 
-v1 deliberately skips it - see the comments in `brain-dump-worker.js`. Token
-verification stops unauthenticated traffic, and Gemini's own free-tier daily
-request ceiling is the practical backstop for now. If this app gets real
-traffic, a Durable Object (or Workers KV, accepting its 1,000-writes/day-total
-free-tier ceiling) is the upgrade path for a genuine per-user daily cap.
+Built in - see `checkAndIncrementRateLimit`/`DAILY_MESSAGE_LIMIT_PER_USER` in
+`brain-dump-worker.js`. Each signed-in user is capped at a fixed number of
+Brain Dump messages per day (Workers KV, `RATE_LIMIT_KV` binding), independent
+of whatever the Gemini API's own quota allows. The point isn't backstopping
+the free tier - it's bounding worst-case PAID cost exposure from a single
+abused, compromised, or scripted account once billing is enabled on the
+Gemini API key and its free-tier ceiling stops being a hard cost cap on its
+own.
+
+If the `RATE_LIMIT_KV` namespace ever needs recreating (a new Cloudflare
+account, a fresh project, etc.):
+```
+npx wrangler kv namespace create RATE_LIMIT_KV
+```
+then paste the printed `id` into the `[[kv_namespaces]]` block in
+`wrangler.toml` and redeploy. Workers KV free tier (100k reads/day, 1k
+writes/day) is far more than this app needs at its current scale - a
+Durable Object (needs the paid Workers plan) would be the eventual upgrade
+if traffic ever grew enough for KV's eventual consistency or its write
+ceiling to actually matter.

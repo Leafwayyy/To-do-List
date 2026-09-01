@@ -12,6 +12,10 @@
 
 (function () {
     const SOUND_MUTED_KEY = 'todoSoundMutedV1';
+    // Matches BRAIN_DUMP_MEMORY_SOFT_LIMIT in brain-dump.js - kept as its
+    // own constant here rather than shared, same independent-per-file
+    // convention this app already uses for other small cross-file numbers.
+    const MEMORY_SOFT_LIMIT = 60;
 
     // settings.js is always the same physical file at the repo root
     // regardless of whether it's loaded from index.html (root) or the
@@ -33,6 +37,15 @@
     let deleteBtn = null;
     let deleteStatus = null;
     let deleteArmed = false;
+    let memoryOverlay = null;
+    let memoryList = null;
+    let memoryEmpty = null;
+    let memoryCount = null;
+    let memoryManageCount = null;
+    let memoryAddInput = null;
+    let memoryAddBtn = null;
+    let memoryAddStatus = null;
+    let currentMemoryTotal = 0;
 
     function injectStyles() {
         const style = document.createElement('style');
@@ -112,7 +125,7 @@
                 padding: 8px 10px;
                 font: inherit;
             }
-            .settingsSaveNameBtn, .settingsSignOutBtn, .settingsExportBtn, .settingsLinkBtn, .settingsDeleteBtn {
+            .settingsSaveNameBtn, .settingsSignOutBtn, .settingsExportBtn, .settingsLinkBtn, .settingsDeleteBtn, .settingsMemoryManageBtn, .settingsMemoryAddBtn {
                 background: rgba(181, 139, 255, 0.16);
                 border: 1px solid rgba(170, 152, 255, 0.44);
                 color: #f6f4ff;
@@ -131,6 +144,90 @@
             .settingsDeleteBtn { background: rgba(224, 90, 90, 0.14); border-color: rgba(224, 90, 90, 0.5); }
             .settingsDeleteBtn.isArmed { background: rgba(224, 90, 90, 0.32); }
             .settingsCard a { color: #b58bff; }
+            .settingsMemoryManageCount { opacity: 0.8; }
+            /* A nested panel (opened from the "Manage memories" button, see
+               openMemoryOverlay) rather than an inline list in the main
+               Settings card - a long memory list (up to
+               BRAIN_DUMP_MEMORY_SOFT_LIMIT of 60 in brain-dump.js) was
+               pushing Groups/Privacy/Delete-account further and further
+               down the main modal otherwise. Higher z-index than
+               .settingsOverlay so it stacks on top of it. */
+            .settingsMemoryOverlay {
+                position: fixed;
+                inset: 0;
+                z-index: 950;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(4, 6, 10, 0.72);
+                padding: 20px;
+            }
+            .settingsMemoryOverlay.hidden { display: none; }
+            .settingsMemoryCard {
+                width: 100%;
+                max-width: 420px;
+                max-height: 80vh;
+                overflow-y: auto;
+                background: linear-gradient(150deg, #050225, #0a0537, #140a46);
+                border: 1px solid rgba(170, 152, 255, 0.36);
+                border-radius: 16px;
+                color: #f6f4ff;
+                font-family: 'Inter', system-ui, sans-serif;
+                padding: 22px 24px 26px;
+            }
+            /* These two toggle "hidden" via JS (refreshMemoryList) - each
+               needs its own rule since .hidden alone was never generically
+               styled in this file (only .settingsOverlay.hidden was),
+               which is why the empty-state message used to stay visible
+               even with saved memories showing above it. */
+            .settingsMemoryEmpty.hidden { display: none; }
+            .settingsMemoryCount.hidden { display: none; }
+            .settingsMemoryAddStatus.hidden { display: none; }
+            .settingsMemoryAddRow { display: flex; gap: 8px; margin-bottom: 4px; }
+            .settingsMemoryAddInput {
+                flex: 1;
+                min-width: 0;
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(170, 152, 255, 0.3);
+                border-radius: 8px;
+                color: #f6f4ff;
+                padding: 8px 10px;
+                font: inherit;
+                font-size: 0.86rem;
+            }
+            .settingsMemoryAddBtn { padding: 8px 16px; }
+            .settingsMemoryAddStatus { color: #e08a8a; margin: 6px 0 12px; }
+            .settingsMemoryList {
+                list-style: none;
+                margin: 0;
+                padding: 0 2px 0 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+            .settingsMemoryItem {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(170, 152, 255, 0.24);
+                border-radius: 8px;
+                padding: 8px 10px;
+                font-size: 0.86rem;
+            }
+            .settingsMemoryItemText { flex: 1; min-width: 0; word-break: break-word; }
+            .settingsMemoryForgetBtn {
+                flex: 0 0 auto;
+                background: transparent;
+                border: none;
+                color: #d7d0ff;
+                cursor: pointer;
+                font-size: 1rem;
+                line-height: 1;
+                padding: 2px 4px;
+            }
+            .settingsMemoryForgetBtn:hover { color: #e08a8a; }
         `;
         document.head.appendChild(style);
     }
@@ -193,6 +290,12 @@
                 </section>
 
                 <section class="settingsSection">
+                    <h3>Dusty's memory</h3>
+                    <p class="settingsHint">Facts Dusty has saved about you, with your OK, to help future chats - nothing here unless you confirmed it first.</p>
+                    <button type="button" class="settingsMemoryManageBtn">Manage memories<span class="settingsMemoryManageCount"></span></button>
+                </section>
+
+                <section class="settingsSection">
                     <h3>Groups</h3>
                     <p class="settingsHint">Manage, leave, or delete groups you belong to.</p>
                     <a class="settingsLinkBtn" href="${MANAGE_GROUPS_URL}">Manage my groups</a>
@@ -226,6 +329,7 @@
         });
         node.querySelector('.settingsExportBtn').addEventListener('click', exportTasks);
         node.querySelector('.settingsDeleteBtn').addEventListener('click', onDeleteClick);
+        node.querySelector('.settingsMemoryManageBtn').addEventListener('click', openMemoryOverlay);
 
         emailText = node.querySelector('.settingsEmail');
         nameInput = node.querySelector('.settingsNameInput');
@@ -233,6 +337,7 @@
         muteToggle = node.querySelector('.settingsMuteToggle');
         deleteBtn = node.querySelector('.settingsDeleteBtn');
         deleteStatus = node.querySelector('.settingsDeleteStatus');
+        memoryManageCount = node.querySelector('.settingsMemoryManageCount');
 
         muteToggle.addEventListener('change', () => {
             try {
@@ -266,8 +371,144 @@
     }
 
     function onKeyDown(event) {
-        if (event.key === 'Escape') {
-            closeOverlay();
+        if (event.key !== 'Escape') {
+            return;
+        }
+        // The memory panel sits on top of the main Settings panel (see
+        // openMemoryOverlay) - Escape should close whichever is actually on
+        // top first, not both at once.
+        if (memoryOverlay && !memoryOverlay.classList.contains('hidden')) {
+            closeMemoryOverlay();
+            return;
+        }
+        closeOverlay();
+    }
+
+    function buildMemoryOverlay() {
+        const node = document.createElement('div');
+        node.className = 'settingsMemoryOverlay hidden';
+        node.setAttribute('aria-hidden', 'true');
+        node.innerHTML = `
+            <div class="settingsMemoryCard" role="dialog" aria-modal="true" aria-label="Dusty's memory">
+                <div class="settingsHeader">
+                    <h2>Dusty's memory</h2>
+                    <button type="button" class="settingsCloseBtn" aria-label="Close">&times;</button>
+                </div>
+                <p class="settingsHint">Facts Dusty has saved about you, with your OK, to help future chats - nothing here unless you confirmed it first.</p>
+
+                <div class="settingsMemoryAddRow">
+                    <input type="text" class="settingsMemoryAddInput" maxlength="300" placeholder="Tell Dusty something to remember...">
+                    <button type="button" class="settingsMemoryAddBtn">Add</button>
+                </div>
+                <p class="settingsMemoryAddStatus settingsHint hidden" aria-live="polite"></p>
+
+                <p class="settingsMemoryCount settingsHint hidden"></p>
+                <ul class="settingsMemoryList"></ul>
+                <p class="settingsMemoryEmpty settingsHint hidden">Nothing remembered yet.</p>
+            </div>
+        `;
+        document.body.appendChild(node);
+
+        node.addEventListener('click', (event) => {
+            if (event.target === node) {
+                closeMemoryOverlay();
+            }
+        });
+        node.querySelector('.settingsCloseBtn').addEventListener('click', closeMemoryOverlay);
+        node.querySelector('.settingsMemoryAddBtn').addEventListener('click', addMemoryManually);
+
+        memoryList = node.querySelector('.settingsMemoryList');
+        memoryEmpty = node.querySelector('.settingsMemoryEmpty');
+        memoryCount = node.querySelector('.settingsMemoryCount');
+        memoryAddInput = node.querySelector('.settingsMemoryAddInput');
+        memoryAddBtn = node.querySelector('.settingsMemoryAddBtn');
+        memoryAddStatus = node.querySelector('.settingsMemoryAddStatus');
+
+        memoryAddInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addMemoryManually();
+            }
+        });
+
+        return node;
+    }
+
+    // Lets you tell Dusty something directly, without needing to phrase it
+    // in a chat message and hope she offers to save it - the only OTHER
+    // way a memory gets created (see brain-dump.js's commitMemories).
+    // Writes to the exact same users/{uid}/dustyMemory collection, so both
+    // paths are indistinguishable once saved.
+    async function addMemoryManually() {
+        if (!currentUser || !memoryAddInput) {
+            return;
+        }
+        const trimmed = memoryAddInput.value.trim();
+        if (!trimmed) {
+            return;
+        }
+        if (currentMemoryTotal >= MEMORY_SOFT_LIMIT) {
+            if (memoryAddStatus) {
+                memoryAddStatus.textContent = `You're at the ${MEMORY_SOFT_LIMIT}-memory soft limit - delete something below first.`;
+                memoryAddStatus.classList.remove('hidden');
+            }
+            return;
+        }
+
+        memoryAddBtn.disabled = true;
+        if (memoryAddStatus) {
+            memoryAddStatus.classList.add('hidden');
+        }
+        try {
+            const { doc, setDoc, collection, serverTimestamp } = window.ToDoAuth.firestore;
+            // doc(collectionRef) with no id segment auto-generates one -
+            // this file stays dependency-free from task-shared.js's
+            // generateTaskId() on purpose (see the file-level comment
+            // about staying self-contained).
+            await setDoc(doc(collection(window.ToDoAuth.db, 'users', currentUser.uid, 'dustyMemory')), {
+                text: trimmed.slice(0, 300),
+                createdAt: serverTimestamp()
+            });
+            memoryAddInput.value = '';
+            refreshMemoryList();
+        } catch (error) {
+            console.error('Failed to add memory manually:', error);
+            if (memoryAddStatus) {
+                memoryAddStatus.textContent = 'Could not save. Try again.';
+                memoryAddStatus.classList.remove('hidden');
+            }
+        } finally {
+            memoryAddBtn.disabled = false;
+        }
+    }
+
+    function openMemoryOverlay() {
+        playClickSoundSafely();
+        if (!memoryOverlay) {
+            memoryOverlay = buildMemoryOverlay();
+        }
+        refreshMemoryList();
+        memoryOverlay.classList.remove('hidden');
+        memoryOverlay.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeMemoryOverlay() {
+        if (!memoryOverlay) {
+            return;
+        }
+        memoryOverlay.classList.add('hidden');
+        memoryOverlay.setAttribute('aria-hidden', 'true');
+    }
+
+    // This file has no shared click-sound helper of its own (unlike
+    // script.js/group.js's playClickSound) - task-shared.js's version is
+    // usually already on the page, but settings.js is deliberately usable
+    // standalone, so this stays optional rather than a hard dependency.
+    function playClickSoundSafely() {
+        try {
+            window.playClickSound?.();
+        } catch {
+            // Non-fatal - the button still works without the sound.
         }
     }
 
@@ -291,6 +532,89 @@
         }).catch((error) => {
             console.error('Failed to load profile name:', error);
         });
+
+        refreshMemoryList();
+    }
+
+    // Re-fetched fresh both when the main Settings panel opens (updates
+    // just the compact "Manage memories (N)" count) and again when the
+    // memory panel itself opens (fills in the actual list) - no live
+    // subscription, these are modals you glance at, not something that
+    // needs to update while sitting open. Built with createElement/
+    // textContent throughout, not innerHTML, since a saved memory's text
+    // is whatever the user (or Dusty, before they confirmed it) typed -
+    // the same reasoning that mattered for the group suggestions panel.
+    function refreshMemoryList() {
+        if (!currentUser) {
+            return;
+        }
+        const { collection, getDocs } = window.ToDoAuth.firestore;
+        getDocs(collection(window.ToDoAuth.db, 'users', currentUser.uid, 'dustyMemory')).then((snapshot) => {
+            const total = snapshot.docs.length;
+            setMemoryCounts(total);
+
+            // The memory panel is built lazily (see openMemoryOverlay) -
+            // nothing further to render until it exists.
+            if (!memoryList) {
+                return;
+            }
+
+            memoryList.innerHTML = '';
+            snapshot.docs.forEach((memoryDoc) => {
+                const memory = memoryDoc.data();
+                const item = document.createElement('li');
+                item.className = 'settingsMemoryItem';
+
+                const textSpan = document.createElement('span');
+                textSpan.className = 'settingsMemoryItemText';
+                textSpan.textContent = memory.text || '';
+                item.appendChild(textSpan);
+
+                const forgetBtn = document.createElement('button');
+                forgetBtn.type = 'button';
+                forgetBtn.className = 'settingsMemoryForgetBtn';
+                forgetBtn.setAttribute('aria-label', 'Forget this');
+                forgetBtn.title = 'Forget this';
+                forgetBtn.textContent = '×';
+                forgetBtn.addEventListener('click', async () => {
+                    forgetBtn.disabled = true;
+                    try {
+                        const { doc, deleteDoc } = window.ToDoAuth.firestore;
+                        await deleteDoc(doc(window.ToDoAuth.db, 'users', currentUser.uid, 'dustyMemory', memoryDoc.id));
+                        item.remove();
+                        setMemoryCounts(memoryList.children.length);
+                    } catch (error) {
+                        console.error('Failed to delete saved memory:', error);
+                        forgetBtn.disabled = false;
+                    }
+                });
+                item.appendChild(forgetBtn);
+
+                memoryList.appendChild(item);
+            });
+        }).catch((error) => {
+            console.error('Failed to load saved memories:', error);
+        });
+    }
+
+    // Updates every place a memory count is shown - the compact button in
+    // the main Settings panel, and (if built) the count line and
+    // empty-state inside the memory panel itself. 60 matches
+    // BRAIN_DUMP_MEMORY_SOFT_LIMIT in brain-dump.js (kept as a plain
+    // number here, not a shared constant - same independent-per-file
+    // convention this app already uses for other small cross-file numbers).
+    function setMemoryCounts(total) {
+        currentMemoryTotal = total;
+        if (memoryManageCount) {
+            memoryManageCount.textContent = total > 0 ? ` (${total})` : '';
+        }
+        if (memoryEmpty) {
+            memoryEmpty.classList.toggle('hidden', total > 0);
+        }
+        if (memoryCount) {
+            memoryCount.textContent = total > 0 ? `${total} saved (up to ${MEMORY_SOFT_LIMIT})` : '';
+            memoryCount.classList.toggle('hidden', total === 0);
+        }
     }
 
     async function saveDisplayName() {
@@ -315,13 +639,18 @@
         }
         try {
             const { collection, getDocs } = window.ToDoAuth.firestore;
-            const snapshot = await getDocs(collection(window.ToDoAuth.db, 'users', currentUser.uid, 'tasks'));
-            const exportedTasks = snapshot.docs.map((taskDoc) => ({ id: taskDoc.id, ...taskDoc.data() }));
+            const [tasksSnapshot, memorySnapshot] = await Promise.all([
+                getDocs(collection(window.ToDoAuth.db, 'users', currentUser.uid, 'tasks')),
+                getDocs(collection(window.ToDoAuth.db, 'users', currentUser.uid, 'dustyMemory'))
+            ]);
+            const exportedTasks = tasksSnapshot.docs.map((taskDoc) => ({ id: taskDoc.id, ...taskDoc.data() }));
+            const exportedMemories = memorySnapshot.docs.map((memoryDoc) => ({ id: memoryDoc.id, ...memoryDoc.data() }));
             const payload = {
                 exportedAt: new Date().toISOString(),
                 account: currentUser.email || currentUser.uid,
                 taskCount: exportedTasks.length,
-                tasks: exportedTasks
+                tasks: exportedTasks,
+                dustyMemory: exportedMemories
             };
             const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
@@ -409,6 +738,12 @@
 
             const tasksSnapshot = await getDocs(collection(db, 'users', uid, 'tasks'));
             await Promise.all(tasksSnapshot.docs.map((taskDoc) => deleteDoc(taskDoc.ref)));
+
+            // Firestore doesn't cascade-delete subcollections when the
+            // parent doc goes - dustyMemory needs its own explicit pass,
+            // same as tasks just above.
+            const memorySnapshot = await getDocs(collection(db, 'users', uid, 'dustyMemory'));
+            await Promise.all(memorySnapshot.docs.map((memoryDoc) => deleteDoc(memoryDoc.ref)));
 
             const profileRef = doc(db, 'users', uid);
             const profileSnapshot = await getDoc(profileRef);

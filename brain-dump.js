@@ -12,13 +12,23 @@
 // Talks to a small external Cloudflare Worker (see /worker in this repo)
 // that holds the Gemini API key server-side and verifies every request
 // carries a real Firebase ID token for this project before spending one.
-// This file never touches Firestore directly - it only ever gets back a
-// list of PROPOSED tasks, shown as editable/uncheckable review cards, and
-// hands whatever the user actually confirms to the page's own commitTasks
-// callback, which writes them the exact same way manual task entry does.
-// Chat history and any attachment are entirely in-memory - nothing here is
-// ever persisted, and files are sent to the Worker only for the moment
-// they're read, never stored anywhere.
+// It only ever gets back a list of PROPOSED tasks, shown as editable/
+// uncheckable review cards, and hands whatever the user actually confirms
+// to the page's own commitTasks callback, which writes them the exact same
+// way manual task entry does - so this file can't create/modify a task on
+// its own, only propose one. Chat history and any attachment are entirely
+// in-memory - nothing here is ever persisted (except the read-only task
+// snapshot below, which is never written anywhere, just read).
+//
+// It DOES read Firestore directly for one thing: gatherTaskContext(), a
+// fresh read-only snapshot of the user's solo tasks and every group they're
+// in (not just whichever one happens to be selected), sent along with every
+// message so the AI can see the user's real existing workload - avoid
+// duplicate suggestions, give prioritization guidance, answer "what should
+// I focus on" style questions - regardless of which page Brain Dump is
+// opened from. This is a plain read (same security rules as the rest of
+// the app already enforce - a user can already see everything gathered
+// here), never a write.
 
 // Fill this in after deploying the Worker - see worker/README.md.
 const BRAIN_DUMP_WORKER_URL = 'https://todo-brain-dump.leafwayyy.workers.dev';
@@ -41,10 +51,99 @@ const BRAIN_DUMP_DIFFICULTY_OPTIONS = [
 const BRAIN_DUMP_ACCEPTED_TYPES = 'image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain';
 const BRAIN_DUMP_MAX_FILE_BYTES = 4 * 1024 * 1024; // 4MB per attachment, checked client-side
 const BRAIN_DUMP_MAX_HISTORY_TURNS = 10;
+const BRAIN_DUMP_MAX_CONTEXT_TASKS = 150; // per list (solo, or each group) - a defensive cap, not a realistic ceiling
+const BRAIN_DUMP_MAX_MEMORIES = 60; // how many saved memories get sent as context per message - a defensive cap
+const BRAIN_DUMP_MEMORY_SOFT_LIMIT = 60; // stop offering to save new ones past this - nudges toward deleting stale ones from Settings instead of growing forever
 
 function brainDumpToDatetimeLocalValue(date) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function brainDumpSummarizeTask(task) {
+    return {
+        id: task.id, // needed so Dusty can target an exact task when commenting on a teammate's
+        text: task.text,
+        completed: Boolean(task.completed),
+        matrix: task.matrix || null,
+        difficulty: task.difficulty || null,
+        dueAt: task.dueAt || null,
+        scheduledAt: task.scheduledAt || null,
+        owner: task.ownerName || null // only meaningful for group tasks - absent on solo ones
+    };
+}
+
+// A fresh, one-time, read-only snapshot - not a live subscription, since
+// this only ever needs "what does their workload look like right now, at
+// the moment they hit send" rather than staying continuously in sync.
+async function gatherTaskContext(user) {
+    const { db, firestore } = window.ToDoAuth;
+    const { collection, getDocs, query, where } = firestore;
+
+    let soloTasks = [];
+    try {
+        const soloSnapshot = await getDocs(collection(db, 'users', user.uid, 'tasks'));
+        soloTasks = soloSnapshot.docs
+            .map((taskDoc) => ({ id: taskDoc.id, ...taskDoc.data() }))
+            .filter((task) => !task.completed)
+            .slice(0, BRAIN_DUMP_MAX_CONTEXT_TASKS)
+            .map(brainDumpSummarizeTask);
+    } catch (error) {
+        console.error('Brain Dump: failed to load solo tasks for context:', error);
+    }
+
+    let groupsContext = [];
+    try {
+        const groupsQuery = query(collection(db, 'groups'), where('memberIds', 'array-contains', user.uid));
+        const groupsSnapshot = await getDocs(groupsQuery);
+        // memberNames (parallel to memberIds) is already a field on the group
+        // doc - free to include, and needed so Dusty knows a teammate's name
+        // even if they have zero active tasks right now.
+        const groups = groupsSnapshot.docs.map((groupDoc) => ({
+            id: groupDoc.id,
+            name: groupDoc.data().name,
+            memberNames: groupDoc.data().memberNames || []
+        }));
+
+        groupsContext = await Promise.all(groups.map(async (group) => {
+            try {
+                const tasksSnapshot = await getDocs(collection(db, 'groups', group.id, 'tasks'));
+                const groupTasks = tasksSnapshot.docs
+                    .map((taskDoc) => ({ id: taskDoc.id, ...taskDoc.data() }))
+                    .filter((task) => !task.completed)
+                    .slice(0, BRAIN_DUMP_MAX_CONTEXT_TASKS)
+                    .map(brainDumpSummarizeTask);
+                return { id: group.id, name: group.name, memberNames: group.memberNames, tasks: groupTasks };
+            } catch (error) {
+                console.error(`Brain Dump: failed to load tasks for group ${group.id}:`, error);
+                return { id: group.id, name: group.name, memberNames: group.memberNames, tasks: [] };
+            }
+        }));
+    } catch (error) {
+        console.error('Brain Dump: failed to load groups for context:', error);
+    }
+
+    return { soloTasks, groups: groupsContext };
+}
+
+// A fresh, one-time, read-only snapshot of users/{uid}/dustyMemory - the
+// short list of facts Dusty has asked to remember and the user explicitly
+// confirmed (see createMemoryReviewCard/commitMemories below). Sent with
+// every message, solo or group, since this is about the PERSON, not
+// whichever list they happen to have open.
+async function gatherDustyMemories(user) {
+    const { db, firestore } = window.ToDoAuth;
+    const { collection, getDocs } = firestore;
+
+    try {
+        const snapshot = await getDocs(collection(db, 'users', user.uid, 'dustyMemory'));
+        return snapshot.docs
+            .map((memoryDoc) => ({ id: memoryDoc.id, text: memoryDoc.data().text }))
+            .slice(0, BRAIN_DUMP_MAX_MEMORIES);
+    } catch (error) {
+        console.error('Brain Dump: failed to load saved memories:', error);
+        return [];
+    }
 }
 
 function readFileAsBase64(file) {
@@ -60,6 +159,98 @@ function readFileAsBase64(file) {
     });
 }
 
+// Date#toISOString() always converts to UTC ("Z"), which is exactly wrong
+// here - the Worker takes this string completely literally ("The current
+// date/time is <this>."), so a UTC timestamp reads as a UTC "today" to
+// Gemini. Anyone west of UTC whose local clock has already rolled past
+// midnight-UTC (e.g. it's 6pm in Calgary, already past midnight in UTC)
+// gets tomorrow's date treated as today - "prepare for my 9:30am class
+// tomorrow" resolves against the wrong day entirely. This builds a proper
+// ISO 8601 string with the LOCAL wall-clock time and its real UTC offset
+// (plus the IANA zone name, for a human-readable double-check) instead, so
+// "today"/"tomorrow" always resolve against the user's own calendar date.
+function getClientTimeString() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+
+    const offsetMinutes = -now.getTimezoneOffset();
+    const offsetSign = offsetMinutes >= 0 ? '+' : '-';
+    const absOffsetMinutes = Math.abs(offsetMinutes);
+    const offset = `${offsetSign}${pad(Math.floor(absOffsetMinutes / 60))}:${pad(absOffsetMinutes % 60)}`;
+
+    const localIso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+        + `T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}${offset}`;
+
+    let timeZoneName = '';
+    try {
+        timeZoneName = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    } catch {
+        // Some environments don't support this - the offset above is
+        // already unambiguous on its own.
+    }
+
+    return timeZoneName ? `${localIso} (${timeZoneName})` : localIso;
+}
+
+// Dusty's portrait - built fresh at whatever pixel size a given spot needs
+// (the bottom-right FAB, the chat header, each assistant message). Pure
+// inline SVG - no image file, no build step, scales crisply, and the named
+// classes on individual parts (eyes/eyelids) are what style.css's blink/
+// bounce/greet animations target. A bust portrait (head + ears + a hint of
+// back/shoulder) rather than a full sitting-body illustration, since a full
+// body wouldn't read cleanly at the ~24px size used next to chat messages.
+function buildDustyAvatarMarkup(size) {
+    return `
+        <svg class="dustyArt" viewBox="0 0 100 100" width="${size}" height="${size}" aria-hidden="true" focusable="false">
+            <defs>
+                <radialGradient id="dustyFurGrad" cx="35%" cy="28%" r="80%">
+                    <stop offset="0%" stop-color="#fffaf0"/>
+                    <stop offset="100%" stop-color="#eee0c8"/>
+                </radialGradient>
+                <filter id="dustyGlow" x="-80%" y="-80%" width="260%" height="260%">
+                    <feGaussianBlur stdDeviation="2.4" result="blur"/>
+                    <feMerge>
+                        <feMergeNode in="blur"/>
+                        <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
+                </filter>
+            </defs>
+
+            <path d="M16 80 Q28 54 55 59 Q77 63 80 84 Z" fill="#f2b979"/>
+
+            <path d="M20 36 L11 8 L41 28 Z" fill="url(#dustyFurGrad)" stroke="#3a2a63" stroke-width="3.5" stroke-linejoin="round"/>
+            <path d="M80 36 L89 8 L59 28 Z" fill="url(#dustyFurGrad)" stroke="#3a2a63" stroke-width="3.5" stroke-linejoin="round"/>
+            <path d="M22 29 L17 14 L32 25 Z" fill="#f6c68f"/>
+
+            <circle cx="50" cy="53" r="35" fill="url(#dustyFurGrad)" stroke="#3a2a63" stroke-width="3.5"/>
+
+            <path d="M18 56 Q11 61 16 70" stroke="#3a2a63" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.35"/>
+            <path d="M82 56 Q89 61 84 70" stroke="#3a2a63" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.35"/>
+
+            <g stroke="#3a2a63" stroke-width="1.4" opacity="0.5" stroke-linecap="round">
+                <path d="M10 58 L27 60"/>
+                <path d="M10 66 L27 64"/>
+                <path d="M90 58 L73 60"/>
+                <path d="M90 66 L73 64"/>
+            </g>
+
+            <g filter="url(#dustyGlow)">
+                <ellipse cx="37" cy="53" rx="8.5" ry="9.5" fill="#3fc7ff"/>
+                <ellipse cx="63" cy="53" rx="8.5" ry="9.5" fill="#3fc7ff"/>
+                <circle cx="37" cy="53" r="3.2" fill="#0d2b40"/>
+                <circle cx="63" cy="53" r="3.2" fill="#0d2b40"/>
+                <circle cx="34" cy="49.5" r="1.7" fill="#fff"/>
+                <circle cx="60" cy="49.5" r="1.7" fill="#fff"/>
+            </g>
+            <rect class="dustyEyelid dustyEyelidL" x="27.5" y="42" width="19" height="19" rx="9.5" fill="#eee0c8"/>
+            <rect class="dustyEyelid dustyEyelidR" x="53.5" y="42" width="19" height="19" rx="9.5" fill="#eee0c8"/>
+
+            <path d="M50 61 L45.5 65.5 L54.5 65.5 Z" fill="#e8879c"/>
+            <path d="M50 65.5 Q50 70 43.5 69.5 M50 65.5 Q50 70 56.5 69.5" stroke="#3a2a63" stroke-width="2" fill="none" stroke-linecap="round"/>
+        </svg>
+    `;
+}
+
 // context: 'solo' | 'group' - only ever changes prompt wording server-side,
 // never auth or Firestore access. commitTasks(draftTasks): called with the
 // user-confirmed, still-checked draft objects (possibly hand-edited) when
@@ -68,20 +259,105 @@ function readFileAsBase64(file) {
 // exactly as the AI (or the user's own edit) left it - NOTHING here is
 // trusted or sanitized; that's commitTasks' job, same as it would be for
 // any other task-creation entry point.
-function createBrainDumpController({ context, commitTasks }) {
+function createBrainDumpController({ context, commitTasks, commitSuggestions, commitComments, getCurrentGroupId }) {
     let overlay = null;
     let messagesEl = null;
     let attachmentsRowEl = null;
     let textInput = null;
     let sendBtn = null;
+    let attachBtn = null;
     let fileInput = null;
+    let rateStatusEl = null;
 
     let history = []; // [{ role: 'user'|'assistant', text }] - capped, never persisted
     let pendingAttachments = []; // [{ mimeType, data, name }] for the NEXT send only
     let isSending = false;
+    let rateCountdownIntervalId = null;
+
+    // Dusty, the floating bottom-right mascot that opens this chat. Both
+    // script.js and group/group.js already look up the SAME
+    // .brainDumpToggleBtn element themselves (for click wiring, and for
+    // group.js's hidden-until-a-group-is-selected gating) - this file grabs
+    // it too, independently, just to inject Dusty's portrait/animations
+    // into it. Nothing here changes what that element IS to those files.
+    const fabEl = document.querySelector('.brainDumpToggleBtn');
+    let greetTimeoutId = null;
 
     function isOpen() {
         return Boolean(overlay && overlay.classList.contains('open'));
+    }
+
+    // Shows once ever, across the whole app (same key checked/set from
+    // both Solo and Group) - not account-level tracking like the onboarding
+    // tour, just a plain localStorage flag, since this is a cosmetic nudge
+    // rather than something that needs to survive a different device.
+    function maybeShowIntroHint() {
+        if (!fabEl) {
+            return;
+        }
+        let alreadySeen = false;
+        try {
+            alreadySeen = localStorage.getItem('dustyIntroSeen') === '1';
+        } catch {
+            alreadySeen = false;
+        }
+        if (alreadySeen) {
+            return;
+        }
+
+        const hint = document.createElement('div');
+        hint.className = 'dustyHint';
+        hint.textContent = "Hi, I'm Dusty! Tap me if you need help.";
+        fabEl.appendChild(hint);
+
+        let dismissed = false;
+        const dismiss = () => {
+            if (dismissed) {
+                return;
+            }
+            dismissed = true;
+            try {
+                localStorage.setItem('dustyIntroSeen', '1');
+            } catch {
+                // localStorage unavailable - non-fatal, the hint just
+                // reappears next load, which is harmless.
+            }
+            hint.classList.add('dustyHintHide');
+            setTimeout(() => hint.remove(), 400);
+        };
+
+        setTimeout(dismiss, 6000);
+        fabEl.addEventListener('click', dismiss, { once: true });
+    }
+
+    // Runs once, immediately, rather than lazily in build() (which only
+    // fires on first open) - Dusty needs to be visible and idling on the
+    // page well before anyone opens the chat.
+    function mountFab() {
+        if (!fabEl) {
+            return;
+        }
+        fabEl.innerHTML = buildDustyAvatarMarkup(40);
+        fabEl.setAttribute('aria-label', 'Chat with Dusty');
+        fabEl.title = "Chat with Dusty - let AI turn what you type into tasks";
+        maybeShowIntroHint();
+    }
+    mountFab();
+
+    // Little "happy to see you" burst when Dusty reappears after the chat
+    // closes - not literally a wave (no arm in a bust-only portrait), a
+    // quick perk/bounce instead.
+    function playGreetBurst() {
+        if (!fabEl) {
+            return;
+        }
+        clearTimeout(greetTimeoutId);
+        fabEl.classList.remove('dustyGreet');
+        // Force reflow so re-adding the class restarts the animation even
+        // if a previous greet burst is still finishing.
+        void fabEl.offsetWidth;
+        fabEl.classList.add('dustyGreet');
+        greetTimeoutId = setTimeout(() => fabEl.classList.remove('dustyGreet'), 700);
     }
 
     function scrollToBottom() {
@@ -106,14 +382,67 @@ function createBrainDumpController({ context, commitTasks }) {
         scrollToBottom();
     }
 
-    function appendAssistantBubble(replyText) {
+    // Small Dusty portrait shown next to each of her own messages, so the
+    // conversation visibly reads as chatting with a character rather than
+    // a bare utility - not used for the user's own bubbles or system-y
+    // error bubbles, only Dusty's actual replies/typing indicator.
+    function buildAvatarEl() {
+        const el = document.createElement('div');
+        el.className = 'brainDumpMsgAvatar';
+        el.innerHTML = buildDustyAvatarMarkup(24);
+        return el;
+    }
+
+    function appendAssistantBubble(replyText, quickReplies) {
+        const row = document.createElement('div');
+        row.classList.add('brainDumpMsgRow');
+        row.appendChild(buildAvatarEl());
         const bubble = document.createElement('div');
         bubble.classList.add('brainDumpMsg', 'brainDumpMsgAssistant');
         const p = document.createElement('p');
         p.textContent = replyText;
         bubble.appendChild(p);
-        messagesEl.appendChild(bubble);
+        row.appendChild(bubble);
+        messagesEl.appendChild(row);
+
+        if (Array.isArray(quickReplies) && quickReplies.length > 0) {
+            appendQuickReplies(quickReplies);
+        }
+
         scrollToBottom();
+    }
+
+    // Tappable, one-tap version of whatever multiple-choice-style question
+    // Dusty just asked in her reply (see the Worker's STEP 3 quickReplies
+    // rule) - tapping one drops it into the input, still editable, rather
+    // than sending it outright, so a slightly-off option can be tweaked
+    // before it's actually sent. The whole set removes itself once any one
+    // is picked - by then they're answered/stale, and clicking them again
+    // later wouldn't make sense against a newer message.
+    function appendQuickReplies(options) {
+        const wrap = document.createElement('div');
+        wrap.classList.add('brainDumpQuickReplies');
+        options.slice(0, 4).forEach((optionText) => {
+            const trimmed = String(optionText || '').trim();
+            if (!trimmed) {
+                return;
+            }
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.classList.add('brainDumpQuickReplyChip');
+            chip.textContent = trimmed;
+            chip.addEventListener('click', () => {
+                textInput.value = trimmed;
+                textInput.focus();
+                textInput.style.height = 'auto';
+                textInput.style.height = `${Math.min(textInput.scrollHeight, 160)}px`;
+                wrap.remove();
+            });
+            wrap.appendChild(chip);
+        });
+        if (wrap.children.length > 0) {
+            messagesEl.appendChild(wrap);
+        }
     }
 
     function appendErrorBubble(text) {
@@ -124,13 +453,105 @@ function createBrainDumpController({ context, commitTasks }) {
         scrollToBottom();
     }
 
+    // 429 specifically means the app's ENTIRE shared free-tier Gemini quota
+    // is exhausted for the day (one API key/quota pool for every user, not
+    // per-account - see the Worker's own comment), not a brief throttle -
+    // resetsAt (the Worker's own best estimate, Google doesn't publish an
+    // exact guaranteed instant) gets converted to the user's own local time
+    // here rather than shown as a bare UTC/ISO string.
+    function describeErrorResponse(status, data) {
+        if (status === 429 && data?.resetsAt) {
+            const resetDate = new Date(data.resetsAt);
+            if (!Number.isNaN(resetDate.getTime())) {
+                const resetLabel = resetDate.toLocaleString([], {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit'
+                });
+                // Two distinct reasons share the 429 status - the Worker's
+                // own per-user session-block cap (error: 'rate_limited',
+                // bounds cost exposure from one account, see
+                // getRateLimitState/RATE_LIMIT_WINDOW_MS in
+                // brain-dump-worker.js) vs. the whole app's shared Gemini
+                // quota (error: 'busy'). Worth telling apart - one is "you
+                // specifically", the other is "everyone, including you".
+                // The rate-limited case also normally gets caught earlier
+                // by updateRateStatus's own live countdown before a send
+                // even goes out - this is the fallback wording for it.
+                if (data.error === 'rate_limited') {
+                    return `You've used up this session's message budget. It resets around ${resetLabel} your time.`;
+                }
+                return `Dusty's hit her shared daily message limit. She should be back around ${resetLabel} your time.`;
+            }
+        }
+        return (data && data.reply) || 'Something went wrong - try again in a bit.';
+    }
+
+    // Reflects the Worker's per-session token budget (see rateLimit on
+    // every response, success or error) as a small persistent status line,
+    // and - once it's actually exhausted - locks the composer and counts
+    // down live until the window resets, auto-unlocking on its own rather
+    // than needing a reload or a failed send to notice it's over.
+    function updateRateStatus(rateLimit) {
+        clearInterval(rateCountdownIntervalId);
+        if (!rateLimit || !rateStatusEl) {
+            return;
+        }
+        const { tokensUsed, tokenBudget, resetsAt } = rateLimit;
+        const resetDate = new Date(resetsAt);
+        if (Number.isNaN(resetDate.getTime()) || !tokenBudget) {
+            return;
+        }
+        const isBlocked = tokensUsed >= tokenBudget;
+
+        const renderTick = () => {
+            const msLeft = resetDate.getTime() - Date.now();
+            if (msLeft <= 0) {
+                clearInterval(rateCountdownIntervalId);
+                rateStatusEl.classList.add('hidden');
+                setComposerDisabled(false);
+                return;
+            }
+            const totalSeconds = Math.ceil(msLeft / 1000);
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+            const countdownLabel = hours > 0
+                ? `${hours}h ${minutes}m`
+                : minutes > 0
+                    ? `${minutes}m ${seconds}s`
+                    : `${seconds}s`;
+
+            rateStatusEl.textContent = isBlocked
+                ? `You've used this session's message budget. Resets in ${countdownLabel}.`
+                : `${Math.min(100, Math.round((tokensUsed / tokenBudget) * 100))}% of this session's budget used - resets in ${countdownLabel}.`;
+        };
+
+        rateStatusEl.classList.remove('hidden');
+        rateStatusEl.classList.toggle('blocked', isBlocked);
+        setComposerDisabled(isBlocked);
+        renderTick();
+        rateCountdownIntervalId = setInterval(renderTick, 1000);
+    }
+
+    function setComposerDisabled(disabled) {
+        if (textInput) textInput.disabled = disabled;
+        if (sendBtn) sendBtn.disabled = disabled;
+        if (attachBtn) attachBtn.disabled = disabled;
+    }
+
     function appendTypingIndicator() {
+        const row = document.createElement('div');
+        row.classList.add('brainDumpMsgRow');
+        row.appendChild(buildAvatarEl());
         const bubble = document.createElement('div');
         bubble.classList.add('brainDumpMsg', 'brainDumpMsgAssistant', 'brainDumpTyping');
-        bubble.textContent = 'Thinking...';
-        messagesEl.appendChild(bubble);
+        bubble.textContent = 'Dusty is thinking...';
+        row.appendChild(bubble);
+        messagesEl.appendChild(row);
         scrollToBottom();
-        return bubble;
+        return row;
     }
 
     // Returns { element, read() } rather than stashing state on the DOM
@@ -140,12 +561,25 @@ function createBrainDumpController({ context, commitTasks }) {
         const card = document.createElement('div');
         card.classList.add('brainDumpTaskCard');
 
+        const header = document.createElement('div');
+        header.classList.add('brainDumpTaskCardHeader');
+
         const checkboxLabel = document.createElement('label');
         checkboxLabel.classList.add('brainDumpTaskCardCheck');
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = true;
         checkboxLabel.appendChild(checkbox);
+        header.appendChild(checkboxLabel);
+
+        // Adds just this one task right away, independent of the bulk
+        // "Add checked" footer button below - so picking one specific task
+        // out of several proposed doesn't require unchecking every other one.
+        const addOneBtn = document.createElement('button');
+        addOneBtn.type = 'button';
+        addOneBtn.classList.add('brainDumpTaskCardAddBtn');
+        addOneBtn.textContent = 'Add';
+        header.appendChild(addOneBtn);
 
         const fields = document.createElement('div');
         fields.classList.add('brainDumpTaskCardFields');
@@ -185,31 +619,96 @@ function createBrainDumpController({ context, commitTasks }) {
             : '3';
         row.appendChild(difficultySelectEl);
 
+        const dueAtWrap = document.createElement('div');
+        dueAtWrap.classList.add('brainDumpTaskCardDeadlineWrap');
         const dueAtInputEl = document.createElement('input');
         dueAtInputEl.type = 'datetime-local';
         dueAtInputEl.classList.add('brainDumpTaskCardDeadline');
         if (draft.dueAt && !Number.isNaN(new Date(draft.dueAt).getTime())) {
             dueAtInputEl.value = brainDumpToDatetimeLocalValue(new Date(draft.dueAt));
         }
-        row.appendChild(dueAtInputEl);
-
+        dueAtWrap.appendChild(dueAtInputEl);
+        // The bare native input's own calendar glyph is small and easy to
+        // miss - an explicit button makes "click here to set a deadline"
+        // obvious, same as every other deadline field in this app
+        // (see .editorDeadlineWrap/.editorCalendarBtn).
+        const dueAtCalendarBtn = document.createElement('button');
+        dueAtCalendarBtn.type = 'button';
+        dueAtCalendarBtn.classList.add('brainDumpTaskCardDeadlineBtn');
+        dueAtCalendarBtn.setAttribute('aria-label', 'Set deadline');
+        dueAtCalendarBtn.title = 'Set deadline';
+        dueAtCalendarBtn.innerHTML = '<i class="fa-regular fa-calendar"></i>';
+        dueAtCalendarBtn.addEventListener('click', () => {
+            if (typeof dueAtInputEl.showPicker === 'function') {
+                dueAtInputEl.showPicker();
+            } else {
+                dueAtInputEl.focus();
+            }
+        });
+        dueAtWrap.appendChild(dueAtCalendarBtn);
+        row.appendChild(dueAtWrap);
         fields.appendChild(row);
-        card.appendChild(checkboxLabel);
+
+        // One subtask per line - simpler to read/edit than a full dynamic
+        // add/remove-row UI, and matches how short these lists actually are.
+        // Sized to its actual line count (via the rows attribute, not a
+        // fixed height + scrollbar) so every step is visible without
+        // scrolling, and grows/shrinks live as the user edits it.
+        const subtasksInputEl = document.createElement('textarea');
+        subtasksInputEl.classList.add('brainDumpTaskCardSubtasks');
+        subtasksInputEl.placeholder = 'Steps (one per line, optional)';
+        subtasksInputEl.value = Array.isArray(draft.subtasks) ? draft.subtasks.filter(Boolean).join('\n') : '';
+        const resizeSubtasksInput = () => {
+            subtasksInputEl.rows = Math.min(8, Math.max(2, subtasksInputEl.value.split('\n').length));
+        };
+        resizeSubtasksInput();
+        subtasksInputEl.addEventListener('input', resizeSubtasksInput);
+        fields.appendChild(subtasksInputEl);
+
+        card.appendChild(header);
         card.appendChild(fields);
 
-        return {
-            element: card,
-            read: () => ({
-                included: checkbox.checked,
-                text: textInputEl.value,
-                matrix: matrixSelectEl.value,
-                difficulty: difficultySelectEl.value,
-                taskType: draft.taskType || 'open',
-                estimateMinutes: draft.estimateMinutes || null,
-                dueAt: dueAtInputEl.value ? new Date(dueAtInputEl.value).toISOString() : null,
-                scheduledAt: draft.scheduledAt || null
-            })
+        const read = () => ({
+            included: checkbox.checked,
+            text: textInputEl.value,
+            matrix: matrixSelectEl.value,
+            difficulty: difficultySelectEl.value,
+            taskType: draft.taskType || 'open',
+            estimateMinutes: draft.estimateMinutes || null,
+            dueAt: dueAtInputEl.value ? new Date(dueAtInputEl.value).toISOString() : null,
+            scheduledAt: draft.scheduledAt || null,
+            subtasks: subtasksInputEl.value.split('\n').map((line) => line.trim()).filter(Boolean)
+        });
+
+        const markAdded = () => {
+            fields.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; });
+            checkbox.disabled = true;
+            checkbox.checked = false;
+            addOneBtn.remove();
+            const addedLabel = document.createElement('span');
+            addedLabel.classList.add('brainDumpTaskCardAddedLabel');
+            addedLabel.textContent = 'Added';
+            header.appendChild(addedLabel);
         };
+
+        addOneBtn.addEventListener('click', async () => {
+            const draftNow = read();
+            if (!draftNow.text.trim()) {
+                return;
+            }
+            addOneBtn.disabled = true;
+            addOneBtn.textContent = 'Adding...';
+            try {
+                await commitTasks([draftNow]);
+                markAdded();
+            } catch (error) {
+                console.error('Failed to add brain-dump task:', error);
+                addOneBtn.disabled = false;
+                addOneBtn.textContent = 'Try again';
+            }
+        });
+
+        return { element: card, read, markAdded };
     }
 
     function appendTaskReview(tasks) {
@@ -233,7 +732,10 @@ function createBrainDumpController({ context, commitTasks }) {
         status.classList.add('brainDumpTaskReviewStatus');
         footer.appendChild(status);
 
-        const addBtnLabel = tasks.length === 1 ? 'Add task' : `Add ${tasks.length} tasks`;
+        // Not a static count in the label - individual "Add" buttons on
+        // each card (see createTaskReviewCard) can change how many are
+        // actually still checked before this is ever clicked.
+        const addBtnLabel = 'Add checked tasks';
         const addBtn = document.createElement('button');
         addBtn.type = 'button';
         addBtn.classList.add('brainDumpAddBtn');
@@ -269,12 +771,464 @@ function createBrainDumpController({ context, commitTasks }) {
         scrollToBottom();
     }
 
+    // Shared checkbox-then-bulk-confirm footer scaffolding for the two
+    // teammate-facing review types below (suggestions/comments) - same
+    // shape as appendTaskReview above, factored out so those two don't
+    // each duplicate the whole "read every card, filter to checked,
+    // bulk-commit, show a result line" dance.
+    function appendReviewSection({ drafts, buildCard, commit, sectionClass, addBtnLabel, doneLabel }) {
+        const section = document.createElement('div');
+        section.classList.add('brainDumpTaskReview', sectionClass);
+
+        const cards = drafts.map((draft) => {
+            const { element, read } = buildCard(draft);
+            section.appendChild(element);
+            return { read };
+        });
+
+        const footer = document.createElement('div');
+        footer.classList.add('brainDumpTaskReviewFooter');
+
+        const status = document.createElement('p');
+        status.classList.add('brainDumpTaskReviewStatus');
+        footer.appendChild(status);
+
+        const bulkBtn = document.createElement('button');
+        bulkBtn.type = 'button';
+        bulkBtn.classList.add('brainDumpAddBtn');
+        bulkBtn.textContent = addBtnLabel;
+        bulkBtn.addEventListener('click', async () => {
+            const confirmed = cards.map((card) => card.read()).filter((draft) => draft.included && draft.text.trim());
+            if (confirmed.length === 0) {
+                status.textContent = 'Nothing checked.';
+                return;
+            }
+
+            bulkBtn.disabled = true;
+            bulkBtn.textContent = 'Sending...';
+            try {
+                await commit(confirmed);
+                section.innerHTML = '';
+                const done = document.createElement('p');
+                done.classList.add('brainDumpTaskReviewDone');
+                done.textContent = confirmed.length === 1 ? `${doneLabel} 1.` : `${doneLabel} ${confirmed.length}.`;
+                section.appendChild(done);
+                scrollToBottom();
+            } catch (error) {
+                console.error('Failed to commit brain-dump review section:', error);
+                bulkBtn.disabled = false;
+                bulkBtn.textContent = addBtnLabel;
+                status.textContent = 'Something went wrong - try again.';
+            }
+        });
+        footer.appendChild(bulkBtn);
+
+        section.appendChild(footer);
+        messagesEl.appendChild(section);
+        scrollToBottom();
+    }
+
+    // "Suggest a task for a teammate" draft - only ever rendered when Dusty
+    // was explicitly asked to suggest something to a named group member
+    // (see the Worker's system prompt). Confirming here calls
+    // commitSuggestions, which resolves forMemberName to a real uid against
+    // the CURRENT group's live roster and posts through the exact same
+    // suggestTaskForMember() a manual suggestion already uses - the
+    // teammate still has to accept it from their own Suggestions for You
+    // panel before it becomes a real task, same as any other suggestion.
+    function createSuggestionReviewCard(draft) {
+        const card = document.createElement('div');
+        card.classList.add('brainDumpTaskCard');
+
+        const header = document.createElement('div');
+        header.classList.add('brainDumpTaskCardHeader');
+
+        const checkboxLabel = document.createElement('label');
+        checkboxLabel.classList.add('brainDumpTaskCardCheck');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkboxLabel.appendChild(checkbox);
+        header.appendChild(checkboxLabel);
+
+        const sendOneBtn = document.createElement('button');
+        sendOneBtn.type = 'button';
+        sendOneBtn.classList.add('brainDumpTaskCardAddBtn');
+        sendOneBtn.textContent = 'Send';
+        header.appendChild(sendOneBtn);
+
+        const fields = document.createElement('div');
+        fields.classList.add('brainDumpTaskCardFields');
+
+        const targetLabel = document.createElement('p');
+        targetLabel.classList.add('brainDumpTaskCardTarget');
+        targetLabel.textContent = `Suggesting to: ${draft.forMemberName || 'Unknown'}`;
+        fields.appendChild(targetLabel);
+
+        const textInputEl = document.createElement('input');
+        textInputEl.type = 'text';
+        textInputEl.classList.add('brainDumpTaskCardText');
+        textInputEl.value = draft.text || '';
+        textInputEl.maxLength = 240;
+        fields.appendChild(textInputEl);
+
+        const row = document.createElement('div');
+        row.classList.add('brainDumpTaskCardRow');
+
+        const matrixSelectEl = document.createElement('select');
+        matrixSelectEl.classList.add('brainDumpTaskCardMatrix');
+        BRAIN_DUMP_MATRIX_OPTIONS.forEach((option) => {
+            const opt = document.createElement('option');
+            opt.value = option.value;
+            opt.textContent = option.label;
+            matrixSelectEl.appendChild(opt);
+        });
+        matrixSelectEl.value = BRAIN_DUMP_MATRIX_OPTIONS.some((o) => o.value === draft.matrix) ? draft.matrix : 'schedule';
+        row.appendChild(matrixSelectEl);
+
+        const difficultySelectEl = document.createElement('select');
+        difficultySelectEl.classList.add('brainDumpTaskCardDifficulty');
+        BRAIN_DUMP_DIFFICULTY_OPTIONS.forEach((option) => {
+            const opt = document.createElement('option');
+            opt.value = String(option.value);
+            opt.textContent = option.label;
+            difficultySelectEl.appendChild(opt);
+        });
+        const parsedDifficulty = Number(draft.difficulty);
+        difficultySelectEl.value = (Number.isInteger(parsedDifficulty) && parsedDifficulty >= 1 && parsedDifficulty <= 5)
+            ? String(parsedDifficulty)
+            : '3';
+        row.appendChild(difficultySelectEl);
+
+        const dueAtWrap = document.createElement('div');
+        dueAtWrap.classList.add('brainDumpTaskCardDeadlineWrap');
+        const dueAtInputEl = document.createElement('input');
+        dueAtInputEl.type = 'datetime-local';
+        dueAtInputEl.classList.add('brainDumpTaskCardDeadline');
+        if (draft.dueAt && !Number.isNaN(new Date(draft.dueAt).getTime())) {
+            dueAtInputEl.value = brainDumpToDatetimeLocalValue(new Date(draft.dueAt));
+        }
+        dueAtWrap.appendChild(dueAtInputEl);
+        const dueAtCalendarBtn = document.createElement('button');
+        dueAtCalendarBtn.type = 'button';
+        dueAtCalendarBtn.classList.add('brainDumpTaskCardDeadlineBtn');
+        dueAtCalendarBtn.setAttribute('aria-label', 'Set deadline');
+        dueAtCalendarBtn.title = 'Set deadline';
+        dueAtCalendarBtn.innerHTML = '<i class="fa-regular fa-calendar"></i>';
+        dueAtCalendarBtn.addEventListener('click', () => {
+            if (typeof dueAtInputEl.showPicker === 'function') {
+                dueAtInputEl.showPicker();
+            } else {
+                dueAtInputEl.focus();
+            }
+        });
+        dueAtWrap.appendChild(dueAtCalendarBtn);
+        row.appendChild(dueAtWrap);
+        fields.appendChild(row);
+
+        card.appendChild(header);
+        card.appendChild(fields);
+
+        const read = () => ({
+            included: checkbox.checked,
+            forMemberName: draft.forMemberName,
+            text: textInputEl.value,
+            matrix: matrixSelectEl.value,
+            difficulty: difficultySelectEl.value,
+            dueAt: dueAtInputEl.value ? new Date(dueAtInputEl.value).toISOString() : null
+        });
+
+        const markSent = () => {
+            fields.querySelectorAll('input, select').forEach((el) => { el.disabled = true; });
+            checkbox.disabled = true;
+            checkbox.checked = false;
+            sendOneBtn.remove();
+            const sentLabel = document.createElement('span');
+            sentLabel.classList.add('brainDumpTaskCardAddedLabel');
+            sentLabel.textContent = 'Sent';
+            header.appendChild(sentLabel);
+        };
+
+        sendOneBtn.addEventListener('click', async () => {
+            const draftNow = read();
+            if (!draftNow.text.trim()) {
+                return;
+            }
+            sendOneBtn.disabled = true;
+            sendOneBtn.textContent = 'Sending...';
+            try {
+                await commitSuggestions([draftNow]);
+                markSent();
+            } catch (error) {
+                console.error('Failed to send brain-dump suggestion:', error);
+                sendOneBtn.disabled = false;
+                sendOneBtn.textContent = 'Try again';
+            }
+        });
+
+        return { element: card, read };
+    }
+
+    // "Comment on a teammate's task" draft - same explicit-ask-only gating
+    // as suggestions above. taskId/taskPreview both come straight from
+    // Gemini, but only taskId is ever used for the actual write, and
+    // commitComments (group.js) independently re-checks it against the
+    // group's own live, already-loaded task list before posting - never
+    // trusted blind.
+    function createCommentReviewCard(draft) {
+        const card = document.createElement('div');
+        card.classList.add('brainDumpTaskCard');
+
+        const header = document.createElement('div');
+        header.classList.add('brainDumpTaskCardHeader');
+
+        const checkboxLabel = document.createElement('label');
+        checkboxLabel.classList.add('brainDumpTaskCardCheck');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkboxLabel.appendChild(checkbox);
+        header.appendChild(checkboxLabel);
+
+        const postOneBtn = document.createElement('button');
+        postOneBtn.type = 'button';
+        postOneBtn.classList.add('brainDumpTaskCardAddBtn');
+        postOneBtn.textContent = 'Post';
+        header.appendChild(postOneBtn);
+
+        const fields = document.createElement('div');
+        fields.classList.add('brainDumpTaskCardFields');
+
+        const targetLabel = document.createElement('p');
+        targetLabel.classList.add('brainDumpTaskCardTarget');
+        targetLabel.textContent = `Commenting on ${draft.memberName || 'teammate'}'s task: "${draft.taskPreview || ''}"`;
+        fields.appendChild(targetLabel);
+
+        // Reuses the subtasks textarea's auto-sizing styling/behavior -
+        // same "grow to line count, no forced scrolling" treatment.
+        const textInputEl = document.createElement('textarea');
+        textInputEl.classList.add('brainDumpTaskCardSubtasks');
+        textInputEl.value = draft.text || '';
+        textInputEl.maxLength = 500;
+        const resizeInput = () => {
+            textInputEl.rows = Math.min(6, Math.max(2, textInputEl.value.split('\n').length));
+        };
+        resizeInput();
+        textInputEl.addEventListener('input', resizeInput);
+        fields.appendChild(textInputEl);
+
+        card.appendChild(header);
+        card.appendChild(fields);
+
+        const read = () => ({
+            included: checkbox.checked,
+            taskId: draft.taskId,
+            memberName: draft.memberName,
+            taskPreview: draft.taskPreview,
+            text: textInputEl.value
+        });
+
+        const markPosted = () => {
+            textInputEl.disabled = true;
+            checkbox.disabled = true;
+            checkbox.checked = false;
+            postOneBtn.remove();
+            const postedLabel = document.createElement('span');
+            postedLabel.classList.add('brainDumpTaskCardAddedLabel');
+            postedLabel.textContent = 'Posted';
+            header.appendChild(postedLabel);
+        };
+
+        postOneBtn.addEventListener('click', async () => {
+            const draftNow = read();
+            if (!draftNow.text.trim()) {
+                return;
+            }
+            postOneBtn.disabled = true;
+            postOneBtn.textContent = 'Posting...';
+            try {
+                await commitComments([draftNow]);
+                markPosted();
+            } catch (error) {
+                console.error('Failed to post brain-dump comment:', error);
+                postOneBtn.disabled = false;
+                postOneBtn.textContent = 'Try again';
+            }
+        });
+
+        return { element: card, read };
+    }
+
+    function appendSuggestionReview(suggestions) {
+        if (!commitSuggestions || !suggestions || suggestions.length === 0) {
+            return;
+        }
+        appendReviewSection({
+            drafts: suggestions,
+            buildCard: createSuggestionReviewCard,
+            commit: commitSuggestions,
+            sectionClass: 'brainDumpSuggestionReview',
+            addBtnLabel: 'Send checked suggestions',
+            doneLabel: 'Sent'
+        });
+    }
+
+    function appendCommentReview(comments) {
+        if (!commitComments || !comments || comments.length === 0) {
+            return;
+        }
+        appendReviewSection({
+            drafts: comments,
+            buildCard: createCommentReviewCard,
+            commit: commitComments,
+            sectionClass: 'brainDumpCommentReview',
+            addBtnLabel: 'Post checked comments',
+            doneLabel: 'Posted'
+        });
+    }
+
+    // "Remember this about me" draft - unlike suggestions/comments, Dusty
+    // may propose one without being explicitly asked (see the Worker's
+    // MEMORY prompt section), but it's still just a draft: nothing is
+    // saved to users/{uid}/dustyMemory until confirmed here. Deliberately
+    // simple - no matrix/difficulty/deadline, just a short editable fact.
+    function createMemoryReviewCard(draft) {
+        const card = document.createElement('div');
+        card.classList.add('brainDumpTaskCard');
+
+        const header = document.createElement('div');
+        header.classList.add('brainDumpTaskCardHeader');
+
+        const checkboxLabel = document.createElement('label');
+        checkboxLabel.classList.add('brainDumpTaskCardCheck');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkboxLabel.appendChild(checkbox);
+        header.appendChild(checkboxLabel);
+
+        const rememberOneBtn = document.createElement('button');
+        rememberOneBtn.type = 'button';
+        rememberOneBtn.classList.add('brainDumpTaskCardAddBtn');
+        rememberOneBtn.textContent = 'Remember';
+        header.appendChild(rememberOneBtn);
+
+        const fields = document.createElement('div');
+        fields.classList.add('brainDumpTaskCardFields');
+
+        const targetLabel = document.createElement('p');
+        targetLabel.classList.add('brainDumpTaskCardTarget');
+        targetLabel.textContent = 'Remember this about you:';
+        fields.appendChild(targetLabel);
+
+        const textInputEl = document.createElement('input');
+        textInputEl.type = 'text';
+        textInputEl.classList.add('brainDumpTaskCardText');
+        textInputEl.value = draft.text || '';
+        textInputEl.maxLength = 300;
+        fields.appendChild(textInputEl);
+
+        card.appendChild(header);
+        card.appendChild(fields);
+
+        const read = () => ({
+            included: checkbox.checked,
+            text: textInputEl.value
+        });
+
+        const markRemembered = () => {
+            textInputEl.disabled = true;
+            checkbox.disabled = true;
+            checkbox.checked = false;
+            rememberOneBtn.remove();
+            const rememberedLabel = document.createElement('span');
+            rememberedLabel.classList.add('brainDumpTaskCardAddedLabel');
+            rememberedLabel.textContent = 'Saved';
+            header.appendChild(rememberedLabel);
+        };
+
+        rememberOneBtn.addEventListener('click', async () => {
+            const draftNow = read();
+            if (!draftNow.text.trim()) {
+                return;
+            }
+            rememberOneBtn.disabled = true;
+            rememberOneBtn.textContent = 'Saving...';
+            try {
+                await commitMemories([draftNow]);
+                markRemembered();
+            } catch (error) {
+                console.error('Failed to save brain-dump memory:', error);
+                rememberOneBtn.disabled = false;
+                rememberOneBtn.textContent = 'Try again';
+            }
+        });
+
+        return { element: card, read };
+    }
+
+    function appendMemoryReview(memoryProposals) {
+        if (!memoryProposals || memoryProposals.length === 0) {
+            return;
+        }
+        appendReviewSection({
+            drafts: memoryProposals,
+            buildCard: createMemoryReviewCard,
+            commit: commitMemories,
+            sectionClass: 'brainDumpMemoryReview',
+            addBtnLabel: 'Save checked memories',
+            doneLabel: 'Saved'
+        });
+    }
+
+    // Writes confirmed memories straight to users/{uid}/dustyMemory - kept
+    // self-contained here (unlike commitTasks/commitSuggestions/
+    // commitComments, which differ between solo and group and so are
+    // supplied by each page) since this write is identical regardless of
+    // which page Brain Dump is open from. knownMemoryCount is a best-effort
+    // local count refreshed each time gatherDustyMemories runs (see
+    // sendMessage) - a soft nudge to stop offering new saves once someone
+    // has a lot stored, not a hard security limit (firestore.rules doesn't
+    // cap the count, only each memory's own text length).
+    let knownMemoryCount = 0;
+    async function commitMemories(drafts) {
+        const user = window.ToDoAuth?.auth?.currentUser;
+        if (!user) {
+            throw new Error('Not signed in.');
+        }
+        const { db, firestore } = window.ToDoAuth;
+        const { doc, setDoc, collection, serverTimestamp } = firestore;
+
+        for (const draft of drafts) {
+            const trimmedText = (draft.text || '').trim();
+            if (!trimmedText) {
+                continue;
+            }
+            if (knownMemoryCount >= BRAIN_DUMP_MEMORY_SOFT_LIMIT) {
+                console.error('Brain Dump: memory soft limit reached - skipped saving the rest of this batch. Delete some old ones from Settings first.');
+                break;
+            }
+            await setDoc(doc(collection(db, 'users', user.uid, 'dustyMemory'), generateTaskId()), {
+                text: trimmedText.slice(0, 300),
+                createdAt: serverTimestamp()
+            });
+            knownMemoryCount += 1;
+        }
+    }
+
     function renderAttachmentChips() {
         attachmentsRowEl.innerHTML = '';
         pendingAttachments.forEach((attachment, index) => {
             const chip = document.createElement('span');
             chip.classList.add('brainDumpAttachmentChip');
-            chip.textContent = attachment.name;
+            // The filename truncates inside its OWN bounded span - a long
+            // name used to overflow the whole chip's max-width and clip
+            // the remove button right along with it, making it impossible
+            // to click for anything but very short filenames.
+            const nameSpan = document.createElement('span');
+            nameSpan.classList.add('brainDumpAttachmentChipName');
+            nameSpan.textContent = attachment.name;
+            chip.appendChild(nameSpan);
             const remove = document.createElement('button');
             remove.type = 'button';
             remove.setAttribute('aria-label', `Remove ${attachment.name}`);
@@ -341,7 +1295,19 @@ function createBrainDumpController({ context, commitTasks }) {
         const typingBubble = appendTypingIndicator();
 
         try {
-            const idToken = await user.getIdToken();
+            // Fetched together - the token and the workload snapshot are
+            // independent reads, no reason to wait on one before starting
+            // the other.
+            const [idToken, taskContext, memories] = await Promise.all([
+                user.getIdToken(),
+                gatherTaskContext(user),
+                gatherDustyMemories(user)
+            ]);
+            // Best-effort refresh of the soft-limit counter (see
+            // commitMemories) - a real Firestore read, so more reliable
+            // than just incrementing locally forever, but still not load-
+            // bearing for anything beyond "stop offering to save more".
+            knownMemoryCount = memories.length;
             const response = await fetch(BRAIN_DUMP_WORKER_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
@@ -350,21 +1316,34 @@ function createBrainDumpController({ context, commitTasks }) {
                     message: text,
                     history: priorHistory,
                     attachments: attachmentsForThisTurn.map(({ mimeType, data }) => ({ mimeType, data })),
-                    clientTime: new Date().toISOString()
+                    clientTime: getClientTimeString(),
+                    taskContext,
+                    memories,
+                    // null on solo (no getCurrentGroupId passed at all) or
+                    // when no group is currently selected - either way the
+                    // Worker's prompt then has no group it's allowed to
+                    // target, so teammateSuggestions/teammateComments come
+                    // back empty regardless of what's asked.
+                    currentGroupId: typeof getCurrentGroupId === 'function' ? getCurrentGroupId() : null
                 })
             });
 
             const data = await response.json().catch(() => null);
             typingBubble.remove();
 
+            updateRateStatus(data?.rateLimit);
+
             if (!response.ok || !data) {
-                appendErrorBubble((data && data.reply) || 'Something went wrong - try again in a bit.');
+                appendErrorBubble(describeErrorResponse(response.status, data));
                 return;
             }
 
-            appendAssistantBubble(data.reply || "Here's what I found:");
+            appendAssistantBubble(data.reply || "Here's what I found:", data.quickReplies);
             history = [...history, { role: 'assistant', text: data.reply || '' }].slice(-BRAIN_DUMP_MAX_HISTORY_TURNS);
             appendTaskReview(data.tasks);
+            appendSuggestionReview(data.teammateSuggestions);
+            appendCommentReview(data.teammateComments);
+            appendMemoryReview(data.memoryProposals);
         } catch (error) {
             console.error('Brain dump request failed:', error);
             typingBubble.remove();
@@ -379,16 +1358,22 @@ function createBrainDumpController({ context, commitTasks }) {
         overlay = document.createElement('div');
         overlay.className = 'brainDumpOverlay';
         overlay.innerHTML = `
-            <div class="brainDumpCard" role="dialog" aria-modal="true" aria-label="Brain dump">
+            <div class="brainDumpCard" role="dialog" aria-modal="true" aria-label="Chat with Dusty">
                 <div class="brainDumpHeader">
-                    <h2>Brain Dump</h2>
+                    <div class="brainDumpHeaderIdentity">
+                        <div class="brainDumpHeaderAvatar">${buildDustyAvatarMarkup(40)}</div>
+                        <div class="brainDumpHeaderText">
+                            <h2>Dusty</h2>
+                            <p class="brainDumpHeaderSubtitle">Brain dump assistant</p>
+                        </div>
+                    </div>
                     <button type="button" class="brainDumpCloseBtn" aria-label="Close">
                         <i class="fa-solid fa-xmark"></i>
                     </button>
                 </div>
-                <p class="brainDumpIntro">Type out whatever's going on - I'll pull out the actual tasks.</p>
                 <div class="brainDumpMessages"></div>
                 <div class="brainDumpAttachmentsRow hidden"></div>
+                <p class="brainDumpRateStatus hidden" aria-live="polite"></p>
                 <form class="brainDumpComposer">
                     <button type="button" class="brainDumpAttachBtn" aria-label="Attach a photo or file" title="Attach a photo or file">
                         <i class="fa-solid fa-paperclip"></i>
@@ -408,7 +1393,8 @@ function createBrainDumpController({ context, commitTasks }) {
         textInput = overlay.querySelector('.brainDumpTextInput');
         sendBtn = overlay.querySelector('.brainDumpSendBtn');
         fileInput = overlay.querySelector('.brainDumpFileInput');
-        const attachBtn = overlay.querySelector('.brainDumpAttachBtn');
+        attachBtn = overlay.querySelector('.brainDumpAttachBtn');
+        rateStatusEl = overlay.querySelector('.brainDumpRateStatus');
         const closeBtn = overlay.querySelector('.brainDumpCloseBtn');
         const composer = overlay.querySelector('.brainDumpComposer');
 
@@ -454,10 +1440,61 @@ function createBrainDumpController({ context, commitTasks }) {
         }
         overlay.classList.add('open');
         textInput.focus();
+        // Dusty tucks away into the now-open chat card's own header
+        // avatar rather than floating over it.
+        fabEl?.classList.add('brainDumpFabHidden');
+        maybeShowWelcomeBack();
+    }
+
+    // Plain, general greetings - no memory content quoted (tried that,
+    // read as a flat, clinical readout no matter how it was phrased, plus
+    // duplicated what the static header text already said). Just a warm
+    // hello and a reminder of what she can help with, varied each time.
+    const WELCOME_BACK_GREETINGS = [
+        "Hey! I'm Dusty. Tell me what's going on and I'll help turn it into tasks.",
+        "Welcome back! Whenever you're ready, just tell me what's on your mind.",
+        "Hi again! Type out whatever's going on, I'll sort it into real tasks for you.",
+        "Good to see you! Let me know what's up and I'll help you get it organized.",
+        "Hey there! Brain-dump away, I'll help turn it into a plan."
+    ];
+    const LAST_WELCOME_GREETING_KEY = 'dustyLastWelcomeGreeting';
+
+    // Never repeats the same greeting twice in a row (including across a
+    // page reload, via localStorage).
+    function pickWelcomeGreetingIndex() {
+        let lastIndex = -1;
+        try {
+            lastIndex = Number(localStorage.getItem(LAST_WELCOME_GREETING_KEY));
+        } catch {
+            lastIndex = -1;
+        }
+        let index = Math.floor(Math.random() * WELCOME_BACK_GREETINGS.length);
+        if (WELCOME_BACK_GREETINGS.length > 1 && index === lastIndex) {
+            index = (index + 1) % WELCOME_BACK_GREETINGS.length;
+        }
+        try {
+            localStorage.setItem(LAST_WELCOME_GREETING_KEY, String(index));
+        } catch {
+            // Non-fatal - worst case a repeat greeting slips through once.
+        }
+        return index;
+    }
+
+    // Fires once per fresh session (chat history is in-memory only and
+    // resets on page reload - this replaces the old static intro line with
+    // something that actually varies). Purely client-side - no Firestore
+    // read, no Gemini call, shows instantly.
+    function maybeShowWelcomeBack() {
+        if (messagesEl.children.length > 0) {
+            return; // already an ongoing conversation this session
+        }
+        appendAssistantBubble(WELCOME_BACK_GREETINGS[pickWelcomeGreetingIndex()]);
     }
 
     function close() {
         overlay?.classList.remove('open');
+        fabEl?.classList.remove('brainDumpFabHidden');
+        playGreetBurst();
     }
 
     return { open, close, isOpen };

@@ -10,3 +10,13 @@ ALLOWED_ORIGINS = "https://leafwayyy.github.io,http://localhost:8000"
 
 # Secret - NEVER put this here. Set it once with:
 #   wrangler secret put GEMINI_API_KEY
+
+# Per-user session-block rate limit storage (see getRateLimitState/
+# recordTokenUsage in brain-dump-worker.js) - each user gets a rolling
+# token budget per RATE_LIMIT_WINDOW_MS (5h), bounding worst-case cost
+# exposure from a single abused/compromised account independent of
+# whatever the Gemini API's own quota allows. Free tier: 100k reads/day,
+# 1k writes/day - plenty at this app's current scale.
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "6df5ae6965cb4f809a34aa7bd074199c"
