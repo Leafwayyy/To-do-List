@@ -178,7 +178,7 @@ async function retractSuggestion(groupId, suggestionId) {
     await deleteDoc(doc(db(), 'groups', groupId, 'suggestions', suggestionId));
 }
 
-async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, scheduledAt, taskType, estimateMinutes }) {
+async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, scheduledAt, taskType, estimateMinutes, subtasks }) {
     const trimmedText = text.trim();
     if (!trimmedText) {
         return;
@@ -187,6 +187,19 @@ async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, sc
     const { doc, setDoc } = fs();
     const timestamp = new Date().toISOString();
     const validTaskType = getValidTaskType(taskType);
+    // Optional - manual entry never passes this, so it defaults to [] same
+    // as before; Brain Dump's commitAiTasksGroup is the only caller that
+    // populates it (see brain-dump.js).
+    const initialSubtasks = (Array.isArray(subtasks) ? subtasks : [])
+        .map((subtaskText) => (subtaskText || '').trim())
+        .filter(Boolean)
+        .slice(0, 200)
+        .map((subtaskText) => ({
+            id: generateSubtaskId(),
+            text: subtaskText.slice(0, 240),
+            completed: false,
+            createdAt: timestamp
+        }));
 
     await setDoc(doc(db(), 'groups', groupId, 'tasks', generateTaskId()), {
         ownerId: user.uid,
@@ -199,7 +212,7 @@ async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, sc
         scheduledAt: scheduledAt || null,
         taskType: validTaskType,
         estimateMinutes: validTaskType === 'timeboxed' ? (estimateMinutes || null) : null,
-        subtasks: [],
+        subtasks: initialSubtasks,
         createdAt: timestamp,
         updatedAt: timestamp
     });
@@ -320,6 +333,7 @@ const groupHistoryOverlay = document.querySelector('.groupHistoryOverlay');
 const groupHistoryCloseBtn = document.querySelector('.groupHistoryCloseBtn');
 const suggestionsForYouPanel = document.querySelector('.suggestionsForYouPanel');
 const brainDumpToggleBtn = document.querySelector('.brainDumpToggleBtn');
+const groupAlertToggleBtn = document.querySelector('.groupAlertToggleBtn');
 const helpTourBtn = document.querySelector('.helpTourBtn');
 const navAttentionBadge = document.querySelector('.navAttentionBadge');
 const navAttentionCount = document.querySelector('.navAttentionCount');
@@ -420,6 +434,23 @@ let unsubscribeSuggestions = null;
 let unsubscribeHistory = null;
 let unsubscribeJoinRequests = null;
 let groupRealtimeIntervalId = null;
+
+// Desktop popup alerts for your own urgent/overdue tasks in the currently
+// selected group - a port of solo's system (script.js's popupAlertsEnabled/
+// maybeNotifyTaskUrgency), scoped to YOUR tasks only (not the whole team's -
+// that would mean a notification storm in any group with more than one
+// active person) and to whichever group is currently selected, since that's
+// the only group this page keeps live task data for.
+const GROUP_SETTINGS_KEY = 'todoGroupSettingsV1';
+const GROUP_REMINDER_COOLDOWN_MS = {
+    soon: 45 * 60 * 1000,
+    critical: 20 * 60 * 1000,
+    overdue: 30 * 60 * 1000
+};
+const GROUP_GLOBAL_REMINDER_GAP_MS = 8 * 60 * 1000;
+const groupStageReminderTimestamps = new Map();
+let groupLastGlobalReminderAt = 0;
+let groupPopupAlertsEnabled = false;
 
 // A link from the "all my groups" browse page (?g=<id>) always wins over
 // whatever was last selected here.
@@ -1859,9 +1890,20 @@ function renderSuggestionsForYou(groupId) {
         const row = document.createElement('div');
         row.classList.add('suggestionRow');
 
+        // Built with textContent/createElement, not innerHTML - both
+        // fromUserName (a teammate's own account display name) and text
+        // (suggestion content, potentially AI-drafted then user-edited via
+        // Brain Dump) are attacker-controllable strings. Interpolating
+        // either into innerHTML would let a crafted display name or
+        // suggestion body execute arbitrary script in the recipient's
+        // browser the moment this panel renders.
         const text = document.createElement('p');
         text.classList.add('suggestionRowText');
-        text.innerHTML = `<span class="suggestionRowFrom">${suggestion.fromUserName || 'A teammate'} suggests:</span> ${suggestion.text}`;
+        const fromSpan = document.createElement('span');
+        fromSpan.classList.add('suggestionRowFrom');
+        fromSpan.textContent = `${suggestion.fromUserName || 'A teammate'} suggests:`;
+        text.appendChild(fromSpan);
+        text.appendChild(document.createTextNode(` ${suggestion.text || ''}`));
         row.appendChild(text);
 
         const badges = document.createElement('div');
@@ -2840,6 +2882,12 @@ function renderApp() {
     // Same reasoning - nothing for Brain Dump to add tasks to without a
     // selected group.
     brainDumpToggleBtn?.classList.toggle('hidden', !shouldShowDashboard);
+    // Same reasoning - alerts are scoped to the currently selected group's
+    // tasks, so there's nothing to toggle without one selected.
+    groupAlertToggleBtn?.classList.toggle('hidden', !shouldShowDashboard);
+    if (shouldShowDashboard) {
+        updateGroupAlertToggleButton();
+    }
 
     // The big page title shows the selected group's name once you're
     // looking at one, and falls back to "Group" anywhere else (switcher,
@@ -3002,6 +3050,169 @@ function updateGroupUrgencyAlert() {
     }
 }
 
+function loadGroupSettings() {
+    try {
+        const saved = localStorage.getItem(GROUP_SETTINGS_KEY);
+        const parsed = saved ? JSON.parse(saved) : null;
+        groupPopupAlertsEnabled = Boolean(parsed?.popupAlertsEnabled);
+    } catch {
+        groupPopupAlertsEnabled = false;
+    }
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+        groupPopupAlertsEnabled = false;
+    }
+    updateGroupAlertToggleButton();
+}
+
+function saveGroupSettings() {
+    try {
+        localStorage.setItem(GROUP_SETTINGS_KEY, JSON.stringify({ popupAlertsEnabled: groupPopupAlertsEnabled }));
+    } catch {
+        // localStorage unavailable - non-fatal, just won't persist across reloads.
+    }
+}
+
+function updateGroupAlertToggleButton() {
+    if (!groupAlertToggleBtn) {
+        return;
+    }
+    if (!('Notification' in window)) {
+        groupAlertToggleBtn.textContent = 'Popup alerts: Unsupported';
+        groupAlertToggleBtn.classList.remove('enabled');
+        groupAlertToggleBtn.disabled = true;
+        return;
+    }
+    groupAlertToggleBtn.disabled = false;
+    groupAlertToggleBtn.classList.toggle('enabled', groupPopupAlertsEnabled);
+    groupAlertToggleBtn.textContent = groupPopupAlertsEnabled ? 'Popup alerts: On' : 'Popup alerts: Off';
+}
+
+function onToggleGroupPopupAlerts() {
+    playClickSound();
+
+    if (!('Notification' in window)) {
+        groupPopupAlertsEnabled = false;
+        updateGroupAlertToggleButton();
+        saveGroupSettings();
+        return;
+    }
+
+    if (!groupPopupAlertsEnabled) {
+        if (Notification.permission === 'granted') {
+            groupPopupAlertsEnabled = true;
+            updateGroupAlertToggleButton();
+            saveGroupSettings();
+            return;
+        }
+
+        Notification.requestPermission().then((permission) => {
+            groupPopupAlertsEnabled = permission === 'granted';
+            updateGroupAlertToggleButton();
+            saveGroupSettings();
+        });
+        return;
+    }
+
+    groupPopupAlertsEnabled = false;
+    updateGroupAlertToggleButton();
+    saveGroupSettings();
+}
+
+if (groupAlertToggleBtn) {
+    groupAlertToggleBtn.addEventListener('click', onToggleGroupPopupAlerts);
+}
+
+function getGroupUrgencyRank(urgencyLevel) {
+    if (urgencyLevel === 'overdue') {
+        return 3;
+    }
+    if (urgencyLevel === 'critical') {
+        return 2;
+    }
+    if (urgencyLevel === 'soon') {
+        return 1;
+    }
+    return 0;
+}
+
+function isNotifiableGroupUrgency(task, status) {
+    return Boolean(status.hasDeadline && !task.completed && getGroupUrgencyRank(status.urgencyLevel) > 0);
+}
+
+function pruneGroupStageReminderTimestamps(now = Date.now()) {
+    const maxAgeMs = 3 * 24 * 60 * 60 * 1000;
+    for (const [key, timestamp] of groupStageReminderTimestamps.entries()) {
+        if (now - timestamp > maxAgeMs) {
+            groupStageReminderTimestamps.delete(key);
+        }
+    }
+}
+
+// Scans YOUR OWN tasks in the currently selected group (not the whole
+// team's - see the state block near the top of this file) for the single
+// most urgent one and fires at most one desktop notification per tick, per
+// the same stage/global cooldown rules solo uses. Only ever covers the
+// selected group, since that's the only one this page keeps live task data
+// for - switching groups naturally starts covering the new one instead.
+function maybeNotifyGroupTaskUrgency() {
+    if (!groupPopupAlertsEnabled || !('Notification' in window) || Notification.permission !== 'granted' || !currentUser) {
+        return;
+    }
+
+    let notificationCandidate = null;
+    groupTasks.forEach((task) => {
+        if (task.ownerId !== currentUser.uid) {
+            return;
+        }
+        const status = getTaskDisplayDeadlineStatus(task);
+        if (!isNotifiableGroupUrgency(task, status)) {
+            return;
+        }
+        if (!notificationCandidate) {
+            notificationCandidate = { task, status };
+            return;
+        }
+        const currentRank = getGroupUrgencyRank(status.urgencyLevel);
+        const candidateRank = getGroupUrgencyRank(notificationCandidate.status.urgencyLevel);
+        if (currentRank > candidateRank
+            || (currentRank === candidateRank && status.deadlineTimestamp < notificationCandidate.status.deadlineTimestamp)) {
+            notificationCandidate = { task, status };
+        }
+    });
+
+    if (!notificationCandidate) {
+        return;
+    }
+
+    const { task, status } = notificationCandidate;
+    const stage = status.urgencyLevel;
+    const now = Date.now();
+    const stageCooldown = GROUP_REMINDER_COOLDOWN_MS[stage] || GROUP_REMINDER_COOLDOWN_MS.soon;
+    const notifyKey = `${task.id}|${task.dueAt || ''}|${stage}`;
+    const lastStageReminderAt = groupStageReminderTimestamps.get(notifyKey) || 0;
+
+    if (lastStageReminderAt > 0 && now - lastStageReminderAt < stageCooldown) {
+        return;
+    }
+    if (now - groupLastGlobalReminderAt < GROUP_GLOBAL_REMINDER_GAP_MS) {
+        return;
+    }
+
+    groupStageReminderTimestamps.set(notifyKey, now);
+    groupLastGlobalReminderAt = now;
+    pruneGroupStageReminderTimestamps(now);
+
+    const group = getSelectedGroup();
+    const title = stage === 'overdue'
+        ? 'Reminder: group task overdue'
+        : stage === 'critical'
+            ? 'Reminder: group task due very soon'
+            : 'Reminder: group task due soon';
+    const groupLabel = group ? ` in ${group.name}` : '';
+    const body = `${task.text}${groupLabel} • ${status.countdownLabel}`;
+    new Notification(title, { body, silent: false });
+}
+
 // Keeps the per-task countdown badges and the urgency banner above ticking
 // together. Unlike solo (script.js's refreshDeadlineBadges + a 1s interval),
 // group.js only ever redrew badges as a side effect of renderGroupTasks() -
@@ -3051,6 +3262,7 @@ function startGroupRealtimeUpdates() {
     groupRealtimeIntervalId = setInterval(() => {
         refreshGroupDeadlineBadges();
         updateGroupUrgencyAlert();
+        maybeNotifyGroupTaskUrgency();
 
         // Cheap once-a-second check, only acts on the rare tick where the
         // calendar day has actually changed - that's the only thing that
@@ -3401,14 +3613,88 @@ async function commitAiTasksGroup(draftTasks) {
             dueAt: isValidDateValue(draft.dueAt) ? new Date(draft.dueAt).toISOString() : null,
             scheduledAt: isValidDateValue(draft.scheduledAt) ? new Date(draft.scheduledAt).toISOString() : null,
             taskType,
-            estimateMinutes: taskType === 'timeboxed' ? parseDurationMinutes(draft.estimateMinutes) : null
+            estimateMinutes: taskType === 'timeboxed' ? parseDurationMinutes(draft.estimateMinutes) : null,
+            subtasks: draft.subtasks
         });
+    }
+}
+
+// Dusty suggesting a task for a teammate - only ever rendered/callable
+// when Dusty was explicitly asked to suggest something to a named group
+// member (see the Worker's system prompt's hard rule). forMemberName is
+// resolved against the CURRENT group's own live roster right here - never
+// trusted as a ready-made uid from the AI. suggestTaskForMember() (this
+// file, above) is the exact same function a manual "suggest a task for
+// them" click already uses, so the teammate still has to accept it
+// themselves from their own Suggestions for You panel before it becomes a
+// real task - nothing here bypasses that.
+async function commitAiSuggestionsGroup(drafts) {
+    const group = getSelectedGroup();
+    if (!group || !currentUser) {
+        throw new Error('No group selected.');
+    }
+
+    const memberNames = group.memberNames || [];
+    const memberIds = group.memberIds || [];
+
+    for (const draft of drafts) {
+        const trimmedText = (draft.text || '').trim();
+        const wantedName = (draft.forMemberName || '').trim().toLowerCase();
+        if (!trimmedText || !wantedName) {
+            continue;
+        }
+
+        const matchingIndexes = memberNames
+            .map((name, index) => ((name || '').trim().toLowerCase() === wantedName ? index : -1))
+            .filter((index) => index !== -1);
+        if (matchingIndexes.length !== 1) {
+            // No match, or more than one teammate shares that name - either
+            // way, guessing would risk suggesting to the wrong person, so
+            // this draft is skipped rather than silently misdirected.
+            console.error(`Brain Dump: could not uniquely resolve teammate "${draft.forMemberName}" for a suggestion.`);
+            continue;
+        }
+
+        await suggestTaskForMember(group.id, currentUser, memberIds[matchingIndexes[0]], {
+            text: trimmedText,
+            matrix: draft.matrix,
+            difficulty: draft.difficulty,
+            dueAt: isValidDateValue(draft.dueAt) ? new Date(draft.dueAt).toISOString() : null
+        });
+    }
+}
+
+// Dusty commenting on a teammate's task - same explicit-ask-only gating.
+// taskId comes from Gemini, but is independently re-checked against this
+// group's own live, already-loaded groupTasks before ever calling
+// addComment() (this file, above) - a stale or hallucinated id is skipped,
+// never trusted blind.
+async function commitAiCommentsGroup(drafts) {
+    const group = getSelectedGroup();
+    if (!group || !currentUser) {
+        throw new Error('No group selected.');
+    }
+
+    for (const draft of drafts) {
+        const trimmedText = (draft.text || '').trim();
+        if (!trimmedText || !draft.taskId) {
+            continue;
+        }
+        const realTask = groupTasks.find((task) => task.id === draft.taskId);
+        if (!realTask) {
+            console.error(`Brain Dump: could not find task "${draft.taskId}" for a comment - skipped.`);
+            continue;
+        }
+        await addComment(group.id, realTask.id, currentUser, trimmedText);
     }
 }
 
 const brainDumpController = createBrainDumpController({
     context: 'group',
-    commitTasks: commitAiTasksGroup
+    commitTasks: commitAiTasksGroup,
+    commitSuggestions: commitAiSuggestionsGroup,
+    commitComments: commitAiCommentsGroup,
+    getCurrentGroupId: () => getSelectedGroup()?.id || null
 });
 if (brainDumpToggleBtn) {
     brainDumpToggleBtn.addEventListener('click', () => {
@@ -3456,6 +3742,11 @@ function resetGroupState() {
     joinRequestsSubscriptionKey = null;
     navAttentionBadge?.classList.remove('visible');
     closeGroupSettingsModal();
+    // So a different account signing in during the same page load doesn't
+    // inherit the previous account's reminder cooldown history.
+    groupStageReminderTimestamps.clear();
+    groupLastGlobalReminderAt = 0;
+    groupPopupAlertsEnabled = false;
     currentUser = null;
     groups = undefined;
     groupTasks = [];
@@ -3608,6 +3899,16 @@ const GROUP_TOUR_STEPS = [
         selector: '.groupBrowseAllLink',
         title: 'Managing multiple groups',
         text: 'See every group you\'re in, with each one\'s members, from here.'
+    },
+    {
+        selector: '.groupAlertToggleBtn',
+        title: 'Popup alerts',
+        text: 'Turn this on to get a desktop notification when one of YOUR tasks in this group is due soon or overdue.'
+    },
+    {
+        selector: '.brainDumpToggleBtn',
+        title: 'Meet Dusty',
+        text: 'Tap Dusty any time to brain-dump what\'s going on - she can also suggest a task to a teammate or comment on one of their tasks if you ask her to, always showing you exactly what she\'d send before anything actually goes out.'
     }
 ];
 
@@ -3786,6 +4087,7 @@ AuthGate.init({
         currentUser = user;
         groups = undefined;
         renderApp();
+        loadGroupSettings();
         startGroupRealtimeUpdates();
         // First time THIS app has ever been opened on this account - see
         // shouldAutoPlayGroupTour above. Fire-and-forget (not awaited) so

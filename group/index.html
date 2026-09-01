@@ -11,7 +11,7 @@
     <!-- Same stylesheet as the solo app, loaded once, the normal way - no
          second build/bundle for this page, so there's nothing for its rules
          to collide with. -->
-    <link rel="stylesheet" href="../style.css?v=20260831c">
+    <link rel="stylesheet" href="../style.css?v=20260831l">
 </head>
 <body class="authChecking">
 
@@ -22,13 +22,20 @@
 
     <div class="userBadge hidden">
         <a class="groupNavLink" href="../">My Tasks</a>
-        <button class="brainDumpToggleBtn hidden" type="button" title="Brain dump - let AI turn what you type into tasks"><i class="fa-solid fa-comment-dots"></i> Brain Dump</button>
         <button class="helpTourBtn" type="button" title="Restart the group tutorial"><i class="fa-solid fa-question"></i></button>
         <span class="navAttentionBadge" title=""><i class="fa-regular fa-bell"></i><span class="navAttentionCount"></span></span>
         <img class="userBadgeAvatar hidden" alt="">
         <span class="userBadgeName"></span>
         <button class="userSignOutBtn" type="button" title="Sign out">Sign out</button>
     </div>
+
+    <!-- Dusty, the Brain Dump mascot - fixed bottom-right (see .brainDumpToggleBtn
+         in style.css). Kept as a standalone element, not inside .userBadge,
+         since position:fixed takes it out of document flow regardless; its
+         portrait/animations/hint are injected by brain-dump.js at startup.
+         Starts hidden - group.js's renderApp() shows/hides it exactly like
+         before (nothing to add tasks to without a selected group). -->
+    <button class="brainDumpToggleBtn hidden" type="button"></button>
 
     <div class="authOverlay">
         <div class="authGlow" aria-hidden="true"></div>
@@ -123,6 +130,7 @@
                                 <button type="button" class="groupCopyInviteBtn" title="Copy invite code"><i class="fa-solid fa-copy"></i></button>
                             </p>
                             <div class="groupDashboardHeaderActions">
+                                <button type="button" class="groupAlertToggleBtn hidden">Popup alerts: Off</button>
                                 <button type="button" class="groupSettingsBtn hidden"><i class="fa-solid fa-gear"></i> Group settings<span class="groupSettingsCountBadge"></span></button>
                                 <button type="button" class="groupLeaveBtn hidden">Leave group</button>
                                 <button type="button" class="groupDeleteBtn hidden">Delete group</button>
@@ -327,11 +335,11 @@
     </div>
 
     <script src="../task-shared.js?v=20260831e"></script>
-    <script src="../brain-dump.js?v=20260831b"></script>
+    <script src="../brain-dump.js?v=20260831n"></script>
     <script src="../auth-gate.js?v=20260830a"></script>
     <script src="groups-data.js?v=20260830c"></script>
-    <script src="group.js?v=20260831d"></script>
+    <script src="group.js?v=20260831h"></script>
     <script type="module" src="../firebase-init.js?v=20260831a"></script>
-    <script src="../settings.js?v=20260830c"></script>
+    <script src="../settings.js?v=20260830g"></script>
 </body>
 </html>
