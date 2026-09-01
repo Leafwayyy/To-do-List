@@ -173,6 +173,11 @@ const TOUR_STEPS = [
         selector: '.groupNavLink',
         title: 'Working with a team?',
         text: 'Click Group up here to create a shared workspace - everyone\'s tasks, progress, and deadlines in one place.'
+    },
+    {
+        selector: '.brainDumpToggleBtn',
+        title: 'Meet Dusty',
+        text: 'Tap Dusty any time to brain-dump what\'s on your mind - type it all out, attach a photo or file if that\'s easier, and she\'ll turn it into real tasks for you to review before anything gets added.'
     }
 ];
 
@@ -566,6 +571,16 @@ function commitAiTasksSolo(draftTasks) {
         const estimateMinutes = taskType === 'timeboxed' ? parseDurationMinutes(draft.estimateMinutes) : null;
         const dueAt = isValidDateValue(draft.dueAt) ? new Date(draft.dueAt).toISOString() : null;
         const scheduledAt = isValidDateValue(draft.scheduledAt) ? new Date(draft.scheduledAt).toISOString() : null;
+        const subtasks = (Array.isArray(draft.subtasks) ? draft.subtasks : [])
+            .map((subtaskText) => (subtaskText || '').trim())
+            .filter(Boolean)
+            .slice(0, 200)
+            .map((subtaskText) => ({
+                id: generateSubtaskId(),
+                text: subtaskText.slice(0, 240),
+                completed: false,
+                createdAt: timestamp
+            }));
 
         tasks.push({
             id: generateTaskId(),
@@ -580,8 +595,8 @@ function commitAiTasksSolo(draftTasks) {
             createdAt: timestamp,
             updatedAt: timestamp,
             manualOrder: nextManualOrder,
-            subtasks: [],
-            subtasksExpanded: false
+            subtasks,
+            subtasksExpanded: subtasks.length > 0
         });
         nextManualOrder += 1;
     });

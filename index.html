@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260831c">
+    <link rel="stylesheet" href="style.css?v=20260831l">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#050225">
@@ -42,12 +42,17 @@
 
     <div class="userBadge hidden">
         <a class="groupNavLink" href="group/browse.html">Groups</a>
-        <button class="brainDumpToggleBtn" type="button" title="Brain dump - let AI turn what you type into tasks"><i class="fa-solid fa-comment-dots"></i> Brain Dump</button>
         <button class="helpTourBtn" type="button" title="Restart the tutorial"><i class="fa-solid fa-question"></i></button>
         <img class="userBadgeAvatar hidden" alt="">
         <span class="userBadgeName"></span>
         <button class="userSignOutBtn" type="button" title="Sign out">Sign out</button>
     </div>
+
+    <!-- Dusty, the Brain Dump mascot - fixed bottom-right (see .brainDumpToggleBtn
+         in style.css). Kept as a standalone element, not inside .userBadge,
+         since position:fixed takes it out of document flow regardless; its
+         portrait/animations/hint are injected by brain-dump.js at startup. -->
+    <button class="brainDumpToggleBtn" type="button"></button>
 
     <div class="container">
         <div class="appShell">
@@ -325,11 +330,11 @@
     </div>
 
     <script src="task-shared.js?v=20260831e"></script>
-    <script src="brain-dump.js?v=20260831b"></script>
+    <script src="brain-dump.js?v=20260831n"></script>
     <script src="auth-gate.js?v=20260830a"></script>
-    <script src="script.js?v=20260831d"></script>
+    <script src="script.js?v=20260831f"></script>
     <script type="module" src="firebase-init.js?v=20260831a"></script>
-    <script src="settings.js?v=20260830c"></script>
+    <script src="settings.js?v=20260830g"></script>
 
 
 </body>

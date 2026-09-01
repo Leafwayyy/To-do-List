@@ -50,6 +50,21 @@ service cloud.firestore {
         && (!('subtasks' in request.resource.data) || request.resource.data.subtasks.size() <= 200);
     }
 
+    // Dusty's memory - short, user-visible facts Dusty asked to remember
+    // and the user explicitly confirmed (see brain-dump.js's
+    // createMemoryReviewCard/commitMemories). Personal to the account, not
+    // group-scoped, same reasoning as solo tasks above. Add/delete only -
+    // no update rule, same "immutable once posted" simplicity as group
+    // comments; editing a memory means deleting it and letting Dusty (or
+    // the user, from Settings) note a new one.
+    match /users/{uid}/dustyMemory/{memoryId} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 300;
+    }
+
     // Feature 4: groups. The invite code IS the document ID (see
     // group-app/src/groups.js), which is what lets "join by code" work as a
     // narrow, self-contained security rule below instead of needing a Cloud

@@ -2989,7 +2989,10 @@ body::after{
 .editorTaskTypeSelect,
 .editorDifficultySelect,
 .groupCreatePrivacySelect,
-.groupSettingsPrivacySelect{
+.groupSettingsPrivacySelect,
+.brainDumpTaskCardMatrix,
+.brainDumpTaskCardDifficulty,
+.brainDumpTaskCardDeadline{
     color-scheme: dark;
 }
 
@@ -2999,7 +3002,9 @@ body::after{
 .editorTaskTypeSelect option,
 .editorDifficultySelect option,
 .groupCreatePrivacySelect option,
-.groupSettingsPrivacySelect option{
+.groupSettingsPrivacySelect option,
+.brainDumpTaskCardMatrix option,
+.brainDumpTaskCardDifficulty option{
     background: #1a1143;
     color: #f7f3ff;
     font-weight: 600;
@@ -4914,23 +4919,60 @@ body.authGateActive .authOverlay{
     border-color: var(--violet-accent, #d7b778);
 }
 
+/* Dusty - the Brain Dump mascot. Fixed bottom-right on both Solo and Group
+   pages. Kept as the SAME .brainDumpToggleBtn class/selector script.js and
+   group.js already query - group.js's existing renderApp() gating
+   (.hidden while no group is selected) and both files' click -> open()
+   wiring need no changes; only this element's shape/position/content
+   changed. brain-dump.js's mountFab() injects Dusty's SVG portrait and the
+   first-visit hint bubble into it at controller-creation time, and toggles
+   .brainDumpFabHidden/.dustyGreet from open()/close(). */
 .brainDumpToggleBtn{
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    border: 1px solid rgba(142, 197, 255, 0.34);
-    background: rgba(20, 30, 45, 0.95);
-    border-radius: 999px;
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 700;
-    color: #dce8fb;
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 1420;
+    width: 68px;
+    height: 68px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 28%, rgba(255, 250, 240, 0.98), rgba(120, 92, 200, 0.92));
+    box-shadow: 0 0 0 3px rgba(178, 161, 255, 0.5), 0 14px 30px rgba(12, 6, 40, 0.55);
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: visible;
+    transition: transform 0.25s ease, opacity 0.25s ease, box-shadow 0.2s ease;
 }
 
 .brainDumpToggleBtn:hover{
-    background: rgba(35, 40, 49, 0.96);
-    border-color: var(--violet-accent, #d7b778);
+    box-shadow: 0 0 0 4px rgba(203, 176, 255, 0.72), 0 16px 34px rgba(12, 6, 40, 0.6);
+}
+
+.brainDumpToggleBtn .dustyArt{
+    animation: dustyBounce 3.2s ease-in-out infinite;
+}
+
+.brainDumpToggleBtn:hover .dustyArt{
+    animation-duration: 1.6s;
+}
+
+/* One-shot "happy to see you" burst played from playGreetBurst() when
+   Dusty reappears after the chat closes - not a literal wave (a bust
+   portrait has no arm), a quick perk/bounce instead. */
+.brainDumpToggleBtn.dustyGreet .dustyArt{
+    animation: dustyGreetPulse 0.6s ease-out;
+}
+
+/* While the chat card is open, Dusty is already branded into its header -
+   the FAB tucks away instead of floating over the open card. */
+.brainDumpToggleBtn.brainDumpFabHidden{
+    transform: scale(0.4);
+    opacity: 0;
+    pointer-events: none;
+    box-shadow: none;
 }
 
 /* Group page only (see group.js's renderApp) - same reasoning as
@@ -4938,6 +4980,98 @@ body.authGateActive .authOverlay{
    group. Solo never applies this class - always available there. */
 .brainDumpToggleBtn.hidden{
     display: none;
+}
+
+@keyframes dustyBounce{
+    0%, 100%{ transform: translateY(0) rotate(0deg); }
+    30%{ transform: translateY(-6px) rotate(-4deg); }
+    50%{ transform: translateY(0) rotate(0deg); }
+    72%{ transform: translateY(-3px) rotate(3deg); }
+}
+
+@keyframes dustyGreetPulse{
+    0%{ transform: scale(1) rotate(0deg); }
+    35%{ transform: scale(1.18) rotate(-6deg); }
+    65%{ transform: scale(0.94) rotate(4deg); }
+    100%{ transform: scale(1) rotate(0deg); }
+}
+
+/* Blink - targets the eyelid rects baked into every Dusty portrait
+   (buildDustyAvatarMarkup in brain-dump.js), wherever it's used (FAB,
+   chat header, message avatars all blink in sync). transform-box: fill-box
+   makes "center" resolve to each rect's own geometry rather than the SVG
+   viewport, so no per-instance transform-origin math is needed. */
+@keyframes dustyBlink{
+    0%, 92%, 100%{ transform: scaleY(0); }
+    95%, 97%{ transform: scaleY(1); }
+}
+
+.dustyEyelid{
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: dustyBlink 4.6s ease-in-out infinite;
+}
+
+.dustyEyelidR{
+    animation-delay: 0.05s;
+}
+
+/* First-visit-only speech bubble, shown/dismissed by
+   maybeShowIntroHint() in brain-dump.js (localStorage-tracked, once ever). */
+.dustyHint{
+    position: absolute;
+    right: calc(100% + 10px);
+    bottom: 8px;
+    width: max-content;
+    max-width: 190px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(178, 161, 255, 0.5);
+    background: linear-gradient(155deg, rgba(58, 42, 131, 0.97), rgba(34, 24, 92, 0.98));
+    color: #f4efff;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+    text-align: left;
+    box-shadow: 0 10px 26px rgba(8, 5, 30, 0.5);
+    animation: dustyHintIn 0.3s ease-out;
+}
+
+.dustyHint::after{
+    content: '';
+    position: absolute;
+    left: 100%;
+    bottom: 14px;
+    border: 6px solid transparent;
+    border-left-color: rgba(34, 24, 92, 0.98);
+}
+
+.dustyHint.dustyHintHide{
+    animation: dustyHintOut 0.4s ease-in forwards;
+}
+
+@keyframes dustyHintIn{
+    from{ opacity: 0; transform: translateY(6px); }
+    to{ opacity: 1; transform: translateY(0); }
+}
+
+@keyframes dustyHintOut{
+    from{ opacity: 1; transform: translateY(0); }
+    to{ opacity: 0; transform: translateY(6px); }
+}
+
+@media (max-width: 620px){
+    .brainDumpToggleBtn{
+        right: 12px;
+        bottom: 12px;
+        width: 56px;
+        height: 56px;
+    }
+
+    .dustyHint{
+        max-width: 150px;
+        font-size: 11px;
+    }
 }
 
 /* Brain Dump chat - built dynamically by brain-dump.js, same overlay/.open
@@ -4979,10 +5113,33 @@ body.authGateActive .authOverlay{
     flex: 0 0 auto;
 }
 
+.brainDumpHeaderIdentity{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.brainDumpHeaderAvatar{
+    flex: 0 0 auto;
+    display: flex;
+    line-height: 0;
+}
+
+.brainDumpHeaderText{
+    display: flex;
+    flex-direction: column;
+}
+
 .brainDumpHeader h2{
     margin: 0;
     font-size: 18px;
     color: #f4efff;
+}
+
+.brainDumpHeaderSubtitle{
+    margin: 0;
+    font-size: 11px;
+    color: rgba(217, 206, 255, 0.72);
 }
 
 .brainDumpCloseBtn{
@@ -5002,13 +5159,6 @@ body.authGateActive .authOverlay{
     background: rgba(255, 255, 255, 0.16);
 }
 
-.brainDumpIntro{
-    flex: 0 0 auto;
-    margin: 6px 0 10px;
-    font-size: 12px;
-    color: rgba(217, 206, 255, 0.72);
-}
-
 .brainDumpMessages{
     flex: 1 1 auto;
     min-height: 0;
@@ -5019,8 +5169,54 @@ body.authGateActive .authOverlay{
     padding-right: 2px;
 }
 
+/* Assistant messages/typing are wrapped in a .brainDumpMsgRow (avatar +
+   bubble) by appendAssistantBubble()/appendTypingIndicator(); user
+   messages and error bubbles are not (no avatar makes sense for either). */
+.brainDumpMsgRow{
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    align-self: flex-start;
+    max-width: 90%;
+}
+
+.brainDumpMsgAvatar{
+    flex: 0 0 auto;
+    line-height: 0;
+}
+
+/* Tappable version of a multiple-choice-style question Dusty just asked -
+   see appendQuickReplies in brain-dump.js. Left-margin roughly lines the
+   chips up under the bubble text rather than under the avatar (24px
+   avatar + 8px row gap). */
+.brainDumpQuickReplies{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-self: flex-start;
+    max-width: 90%;
+    margin: -4px 0 0 32px;
+}
+
+.brainDumpQuickReplyChip{
+    border: 1px solid rgba(178, 161, 255, 0.5);
+    border-radius: 999px;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #dce8fb;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.brainDumpQuickReplyChip:hover{
+    background: rgba(198, 168, 255, 0.2);
+    border-color: rgba(203, 176, 255, 0.85);
+}
+
 .brainDumpMsg{
-    max-width: 88%;
+    min-width: 0;
     padding: 8px 12px;
     border-radius: 12px;
     font-size: 13px;
@@ -5033,6 +5229,7 @@ body.authGateActive .authOverlay{
 
 .brainDumpMsgUser{
     align-self: flex-end;
+    max-width: 88%;
     background: linear-gradient(120deg, rgba(198, 168, 255, 0.98), rgba(145, 154, 255, 0.98));
     color: #120a32;
 }
@@ -5044,7 +5241,7 @@ body.authGateActive .authOverlay{
 }
 
 .brainDumpMsgAssistant{
-    align-self: flex-start;
+    flex: 1 1 auto;
     background: rgba(255, 255, 255, 0.08);
     color: #f4efff;
 }
@@ -5081,9 +5278,93 @@ body.authGateActive .authOverlay{
     background: rgba(255, 255, 255, 0.05);
 }
 
+.brainDumpTaskCardHeader{
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding-top: 2px;
+}
+
 .brainDumpTaskCardCheck{
     flex: 0 0 auto;
-    padding-top: 4px;
+}
+
+/* Hand-styled rather than relying on accent-color alone - accent-color's
+   actual rendered weight/contrast varies enough across browsers that it
+   was reading as a plain, barely-there checkbox. Shared by every review
+   card type (task/suggestion/comment/memory - they all use this same
+   .brainDumpTaskCardCheck class), so this one fix covers all of them. */
+.brainDumpTaskCardCheck input{
+    appearance: none;
+    -webkit-appearance: none;
+    width: 22px;
+    height: 22px;
+    margin: 0;
+    flex-shrink: 0;
+    position: relative;
+    border-radius: 6px;
+    border: 2px solid rgba(178, 161, 255, 0.5);
+    background: rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.brainDumpTaskCardCheck input:hover{
+    border-color: rgba(203, 176, 255, 0.85);
+}
+
+.brainDumpTaskCardCheck input:checked{
+    background: linear-gradient(120deg, rgba(198, 168, 255, 0.98), rgba(145, 154, 255, 0.98));
+    border-color: rgba(203, 176, 255, 0.92);
+}
+
+.brainDumpTaskCardCheck input:checked::after{
+    content: '';
+    position: absolute;
+    left: 6px;
+    top: 2px;
+    width: 6px;
+    height: 11px;
+    border: solid #120a32;
+    border-width: 0 2.5px 2.5px 0;
+    transform: rotate(45deg);
+}
+
+.brainDumpTaskCardCheck input:disabled{
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.brainDumpTaskCardCheck input:focus-visible{
+    outline: 2px solid rgba(203, 176, 255, 0.9);
+    outline-offset: 2px;
+}
+
+.brainDumpTaskCardAddBtn{
+    height: 22px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 999px;
+    background: linear-gradient(120deg, rgba(198, 168, 255, 0.98), rgba(145, 154, 255, 0.98));
+    color: #120a32;
+    font-size: 10px;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.brainDumpTaskCardAddBtn:disabled{
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.brainDumpTaskCardAddedLabel{
+    font-size: 10px;
+    font-weight: 700;
+    color: #7fe0a3;
+    white-space: nowrap;
 }
 
 .brainDumpTaskCardFields{
@@ -5092,6 +5373,16 @@ body.authGateActive .authOverlay{
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+
+/* Read-only "Suggesting to: X" / "Commenting on X's task: ..." line on
+   the teammate-suggestion/comment review cards - see
+   createSuggestionReviewCard/createCommentReviewCard in brain-dump.js. */
+.brainDumpTaskCardTarget{
+    margin: 0;
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(217, 206, 255, 0.85);
 }
 
 .brainDumpTaskCardText{
@@ -5105,6 +5396,22 @@ body.authGateActive .authOverlay{
     font-size: 12px;
 }
 
+.brainDumpTaskCardSubtasks{
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid rgba(185, 167, 255, 0.4);
+    border-radius: 8px;
+    background: linear-gradient(145deg, rgba(53, 39, 120, 0.95), rgba(35, 24, 92, 0.96));
+    color: #f7f3ff;
+    font-family: inherit;
+    font-size: 11px;
+    resize: vertical;
+}
+
+.brainDumpTaskCardSubtasks::placeholder{
+    color: rgba(217, 206, 255, 0.55);
+}
+
 .brainDumpTaskCardRow{
     display: flex;
     flex-wrap: wrap;
@@ -5112,8 +5419,7 @@ body.authGateActive .authOverlay{
 }
 
 .brainDumpTaskCardMatrix,
-.brainDumpTaskCardDifficulty,
-.brainDumpTaskCardDeadline{
+.brainDumpTaskCardDifficulty{
     flex: 1 1 100px;
     height: 30px;
     padding: 0 6px;
@@ -5123,6 +5429,46 @@ body.authGateActive .authOverlay{
     color: #f7f3ff;
     font-size: 11px;
     color-scheme: dark;
+}
+
+.brainDumpTaskCardDeadlineWrap{
+    flex: 1 1 140px;
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+}
+
+.brainDumpTaskCardDeadline{
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 30px;
+    padding: 0 6px;
+    border: 1px solid rgba(185, 167, 255, 0.4);
+    border-radius: 8px;
+    background: linear-gradient(145deg, rgba(53, 39, 120, 0.95), rgba(35, 24, 92, 0.96));
+    color: #f7f3ff;
+    font-size: 11px;
+    color-scheme: dark;
+}
+
+.brainDumpTaskCardDeadlineBtn{
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border: 1px solid rgba(185, 167, 255, 0.4);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #e5dcff;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+}
+
+.brainDumpTaskCardDeadlineBtn:hover{
+    background: rgba(255, 255, 255, 0.14);
+    border-color: var(--violet-accent, #d7b778);
 }
 
 .brainDumpTaskReviewFooter{
@@ -5178,24 +5524,41 @@ body.authGateActive .authOverlay{
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 3px 8px;
+    padding: 3px 6px 3px 8px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.08);
     color: #dce8fb;
     font-size: 11px;
-    max-width: 180px;
+    max-width: 200px;
+}
+
+/* Truncates on its own - the remove button (a flex sibling, not part of
+   this) stays outside the clipped area so it's always clickable regardless
+   of filename length. */
+.brainDumpAttachmentChipName{
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
 }
 
 .brainDumpAttachmentChip button{
     flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border: none;
+    border-radius: 50%;
     background: transparent;
     color: inherit;
     cursor: pointer;
     font-size: 10px;
+}
+
+.brainDumpAttachmentChip button:hover{
+    background: rgba(255, 255, 255, 0.16);
 }
 
 .brainDumpComposer{
@@ -5692,6 +6055,48 @@ body.authGateActive .authOverlay{
 }
 
 .groupSettingsBtn.hidden{
+    display: none;
+}
+
+/* Desktop popup alert toggle for the group dashboard - a self-contained
+   final rule (not the older layered .alertToggleBtn cascade solo's version
+   predates), matching this session's other group-header buttons. */
+.groupAlertToggleBtn{
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid var(--violet-border-soft);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--violet-muted);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.groupAlertToggleBtn:hover{
+    color: var(--violet-accent);
+    border-color: var(--violet-accent);
+}
+
+.groupAlertToggleBtn.enabled{
+    border-color: rgba(203, 176, 255, 0.86);
+    background: linear-gradient(120deg, rgba(201, 165, 255, 0.94), rgba(141, 148, 255, 0.95));
+    color: #120a32;
+}
+
+.groupAlertToggleBtn.enabled:hover{
+    color: #120a32;
+    border-color: rgba(212, 181, 255, 0.98);
+    background: linear-gradient(120deg, rgba(212, 181, 255, 0.98), rgba(154, 161, 255, 0.98));
+}
+
+.groupAlertToggleBtn:disabled{
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.groupAlertToggleBtn.hidden{
     display: none;
 }
 
