@@ -537,6 +537,10 @@ async function callGemini(body, env) {
 export default {
     async fetch(request, env) {
         const origin = request.headers.get('Origin') || '';
+        // Temporary - pinpointing where a slow request's time actually
+        // goes (auth/KV/Gemini/KV) rather than guessing. Safe to strip
+        // once that's confirmed; visible live via `wrangler tail`.
+        const t0 = Date.now();
 
         if (request.method === 'OPTIONS') {
             return new Response(null, { status: 204, headers: corsHeaders(origin, env) });
@@ -557,11 +561,13 @@ export default {
             console.error('Auth rejected:', error.message);
             return jsonResponse({ error: 'unauthorized' }, 401, origin, env);
         }
+        const tAuth = Date.now();
 
         // Checked right after identity, before spending any effort parsing
         // the body or calling Gemini - see getRateLimitState's own comment
         // for why this exists independent of Gemini's own quota.
         const rateLimitState = await getRateLimitState(uid, env);
+        const tRateRead = Date.now();
         if (rateLimitState && rateLimitState.tokensUsed >= RATE_LIMIT_TOKEN_BUDGET_PER_WINDOW) {
             return jsonResponse(
                 {
@@ -585,7 +591,14 @@ export default {
 
         try {
             const { tokensUsed, ...result } = await callGemini(body, env);
+            const tGemini = Date.now();
             await recordTokenUsage(uid, env, rateLimitState, tokensUsed);
+            const tKvWrite = Date.now();
+            console.log(
+                `Brain dump timing for ${uid}: auth=${tAuth - t0}ms kvRead=${tRateRead - tAuth}ms `
+                + `gemini=${tGemini - tRateRead}ms kvWrite=${tKvWrite - tGemini}ms total=${tKvWrite - t0}ms `
+                + `tokensUsed=${tokensUsed}`
+            );
             const updatedState = rateLimitState
                 ? { ...rateLimitState, tokensUsed: rateLimitState.tokensUsed + Math.max(0, tokensUsed) }
                 : null;
