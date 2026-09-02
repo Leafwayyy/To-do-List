@@ -309,6 +309,31 @@ const groupJoinCodeInput = document.querySelector('.groupJoinCodeInput');
 const groupJoinError = document.querySelector('.groupJoinError');
 const groupJoinInfo = document.querySelector('.groupJoinInfo');
 const groupDashboard = document.querySelector('.groupDashboard');
+const groupViewTabButtons = Array.from(document.querySelectorAll('.viewTab'));
+const groupViewPanels = Array.from(document.querySelectorAll('.viewPanel'));
+
+// Navigation (section A of the UI/UX rework): Tasks vs. Team, same pattern as
+// solo's switchSoloView. GROUP_TOUR_STEPS' beforeShow hooks call this to
+// self-correct onto the right view regardless of step order or a manual tab
+// click mid-tour.
+function switchGroupView(view) {
+    groupViewTabButtons.forEach((button) => {
+        const isActive = button.dataset.view === view;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+
+    groupViewPanels.forEach((panel) => {
+        panel.classList.toggle('hidden', panel.dataset.viewPanel !== view);
+    });
+}
+
+groupViewTabButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+        playClickSound();
+        switchGroupView(button.dataset.view || 'tasks');
+    });
+});
 const groupInviteCode = document.querySelector('.groupInviteCode');
 const groupCopyInviteBtn = document.querySelector('.groupCopyInviteBtn');
 const groupRenameBtn = document.querySelector('.groupRenameBtn');
@@ -316,6 +341,14 @@ const groupSettingsBtn = document.querySelector('.groupSettingsBtn');
 const groupSettingsCountBadge = groupSettingsBtn?.querySelector('.groupSettingsCountBadge');
 const groupLeaveBtn = document.querySelector('.groupLeaveBtn');
 const groupDeleteBtn = document.querySelector('.groupDeleteBtn');
+// Built (and groupLeaveBtn/groupDeleteBtn reparented into it) right away,
+// not lazily on first "Group settings" click - both buttons can go from
+// hidden to visible as soon as a group loads (see the isOwner-driven
+// classList calls in renderApp()), which can happen well before the user
+// ever opens Settings, so the move has to be done before that, not after.
+// initializeGroupSettingsModal (defined further down) is function-hoisted,
+// so calling it here is safe despite running before its own definition.
+initializeGroupSettingsModal();
 const memberRoster = document.querySelector('.memberRoster');
 const leaderboardList = document.querySelector('.leaderboardList');
 const leaderboardTabBtns = Array.from(document.querySelectorAll('.leaderboardTabBtn'));
@@ -2134,6 +2167,11 @@ function initializeGroupSettingsModal() {
                 <p class="groupSettingsRequestsTitle">Pending join requests</p>
                 <div class="groupSettingsRequestsList"></div>
             </div>
+            <section class="settingsSection settingsDangerSection groupSettingsDangerSection">
+                <h3>Leave or delete this group</h3>
+                <p class="settingsHint">Leaving removes you from this group. Deleting removes it - and every task in it - for everyone. Neither can be undone.</p>
+                <div class="groupSettingsDangerActions"></div>
+            </section>
             <div class="editorActions">
                 <button type="button" class="editorCancelBtn">Close</button>
             </div>
@@ -2141,6 +2179,21 @@ function initializeGroupSettingsModal() {
     `;
 
     document.body.appendChild(groupSettingsOverlay);
+
+    // .groupLeaveBtn/.groupDeleteBtn are real static markup (their click
+    // wiring below runs at page load, same as every other top-level element
+    // lookup here) - moved into the danger-zone section above via
+    // appendChild, which reparents rather than clones, so the listeners
+    // already attached to them survive intact. Section A of the UI/UX
+    // rework: these move out of the permanent header into Group Settings,
+    // reusing solo Settings' .settingsDangerSection pattern exactly.
+    const dangerActions = groupSettingsOverlay.querySelector('.groupSettingsDangerActions');
+    if (dangerActions && groupLeaveBtn) {
+        dangerActions.appendChild(groupLeaveBtn);
+    }
+    if (dangerActions && groupDeleteBtn) {
+        dangerActions.appendChild(groupDeleteBtn);
+    }
 
     const privacySelect = groupSettingsOverlay.querySelector('.groupSettingsPrivacySelect');
     privacySelect.addEventListener('change', () => {
@@ -3864,13 +3917,20 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.inputContainer',
         title: 'Add a task',
-        text: 'Add your own tasks here, same as solo - matrix, difficulty, and deadline all carry over.'
+        text: 'Add your own tasks here, same as solo - matrix, difficulty, and deadline all carry over.',
+        beforeShow: () => switchGroupView('tasks')
+    },
+    {
+        selector: '.viewTabs',
+        title: 'Tasks and Team',
+        text: 'Tasks is where you work. Switch to Team any time to see everyone\'s progress, the leaderboard, and what\'s been finished recently.',
+        beforeShow: () => switchGroupView('tasks')
     },
     {
         selector: '.detailsToggleBtn',
         title: 'Prioritize',
         text: 'Set matrix, difficulty, deadline, and schedule for a new task.',
-        beforeShow: () => taskDetailsPanel?.classList.add('open')
+        beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); }
     },
     {
         selector: '.groupMemberScopeTabs',
@@ -3878,37 +3938,44 @@ const GROUP_TOUR_STEPS = [
         text: 'See everyone\'s tasks together, just your own, or drill into one teammate\'s.',
         // Hidden for a solo group (see renderGroupMemberScopeTabs) - skip
         // this step rather than highlighting a hidden, zero-size element.
-        isRelevant: () => (getSelectedGroup()?.memberIds || []).length > 1
+        isRelevant: () => (getSelectedGroup()?.memberIds || []).length > 1,
+        beforeShow: () => switchGroupView('tasks')
     },
     {
         selector: '.deadlineViewTabs',
         title: 'Filter by deadline',
-        text: 'Jump to what\'s overdue, due today, this week, or already done - across whoever\'s selected above.'
+        text: 'Jump to what\'s overdue, due today, this week, or already done - across whoever\'s selected above.',
+        beforeShow: () => switchGroupView('tasks')
     },
     {
         selector: '.memberRoster',
         title: 'Team progress',
-        text: 'See everyone\'s progress and current focus. Click a card to filter to their tasks, or suggest a task for them.'
+        text: 'See everyone\'s progress and current focus. Click a card to filter to their tasks, or suggest a task for them.',
+        beforeShow: () => switchGroupView('team')
     },
     {
         selector: '.groupHistoryOpenBtn',
         title: 'Recently finished',
-        text: 'Open a running log of what the team has been completing.'
+        text: 'Open a running log of what the team has been completing.',
+        beforeShow: () => switchGroupView('team')
     },
     {
         selector: '.groupBrowseAllLink',
         title: 'Managing multiple groups',
-        text: 'See every group you\'re in, with each one\'s members, from here.'
+        text: 'See every group you\'re in, with each one\'s members, from here.',
+        beforeShow: () => switchGroupView('tasks')
     },
     {
         selector: '.groupAlertToggleBtn',
         title: 'Popup alerts',
-        text: 'Turn this on to get a desktop notification when one of YOUR tasks in this group is due soon or overdue.'
+        text: 'Turn this on to get a desktop notification when one of YOUR tasks in this group is due soon or overdue.',
+        beforeShow: () => switchGroupView('tasks')
     },
     {
         selector: '.brainDumpToggleBtn',
         title: 'Meet Dusty',
-        text: 'Tap Dusty any time to brain-dump what\'s going on - she can also suggest a task to a teammate or comment on one of their tasks if you ask her to, always showing you exactly what she\'d send before anything actually goes out.'
+        text: 'Tap Dusty any time to brain-dump what\'s going on - she can also suggest a task to a teammate or comment on one of their tasks if you ask her to, always showing you exactly what she\'d send before anything actually goes out.',
+        beforeShow: () => switchGroupView('tasks')
     }
 ];
 

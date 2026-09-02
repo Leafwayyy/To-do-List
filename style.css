@@ -2960,6 +2960,18 @@ body::after{
     min-height: 0;
 }
 
+/* Group's Team view (member roster, leaderboard, "Recently finished" trigger)
+   - previously .sideColumn's own content, now its own full-width view/tab
+   instead of sharing a column with the task list. Replicates .sideColumn's
+   own flex/gap (style.css ~2841) minus its 100px margin-top, which existed
+   only to vertically line the column up next to mainColumn's header - not
+   meaningful now that this is a standalone view. */
+.viewPanel[data-view-panel="team"]{
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
 /* Prioritize panel layout: avoid flat full-width stack */
 .mainColumn .taskDetailsPanel.open{
     padding: 10px;

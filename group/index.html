@@ -123,7 +123,12 @@
             </div>
 
             <div class="groupDashboard hidden">
-                <div class="appShell">
+                <div class="viewTabs" role="tablist" aria-label="Group dashboard view">
+                    <button class="viewTab active" type="button" data-view="tasks" role="tab" aria-selected="true">Tasks</button>
+                    <button class="viewTab" type="button" data-view="team" role="tab" aria-selected="false">Team</button>
+                </div>
+
+                <div class="viewPanel" data-view-panel="tasks">
                     <section class="mainColumn">
                         <div class="groupDashboardHeader">
                             <p class="groupInviteRow">Invite code: <span class="groupInviteCode"></span>
@@ -132,8 +137,6 @@
                             <div class="groupDashboardHeaderActions">
                                 <button type="button" class="groupAlertToggleBtn hidden">Popup alerts: Off</button>
                                 <button type="button" class="groupSettingsBtn hidden"><i class="fa-solid fa-gear"></i> Group settings<span class="groupSettingsCountBadge"></span></button>
-                                <button type="button" class="groupLeaveBtn hidden">Leave group</button>
-                                <button type="button" class="groupDeleteBtn hidden">Delete group</button>
                             </div>
                         </div>
 
@@ -237,29 +240,29 @@
 
                         <ul class="tasks groupTasksList"></ul>
                     </section>
+                </div>
 
-                    <aside class="sideColumn">
-                        <div class="memberRoster"></div>
-                        <p class="memberRosterInviteHint hidden">Working alone for now - share the invite code above to add teammates.</p>
+                <div class="viewPanel hidden" data-view-panel="team">
+                    <div class="memberRoster"></div>
+                    <p class="memberRosterInviteHint hidden">Working alone for now - share the invite code above to add teammates.</p>
 
-                        <div class="groupLeaderboardPanel">
-                            <div class="groupLeaderboardHeader">
-                                <p class="groupLeaderboardTitle">Leaderboard</p>
-                                <div class="leaderboardTabs" aria-label="Leaderboard range">
-                                    <button type="button" class="leaderboardTabBtn active" data-range="week">This week</button>
-                                    <button type="button" class="leaderboardTabBtn" data-range="month">This month</button>
-                                    <button type="button" class="leaderboardTabBtn" data-range="all">All time</button>
-                                </div>
+                    <div class="groupLeaderboardPanel">
+                        <div class="groupLeaderboardHeader">
+                            <p class="groupLeaderboardTitle">Leaderboard</p>
+                            <div class="leaderboardTabs" aria-label="Leaderboard range">
+                                <button type="button" class="leaderboardTabBtn active" data-range="week">This week</button>
+                                <button type="button" class="leaderboardTabBtn" data-range="month">This month</button>
+                                <button type="button" class="leaderboardTabBtn" data-range="all">All time</button>
                             </div>
-                            <p class="leaderboardTeaser hidden">Leaderboard fills in once a teammate joins and you've both finished a task or two.</p>
-                            <ol class="leaderboardList"></ol>
                         </div>
+                        <p class="leaderboardTeaser hidden">Leaderboard fills in once a teammate joins and you've both finished a task or two.</p>
+                        <ol class="leaderboardList"></ol>
+                    </div>
 
-                        <button type="button" class="groupHistoryOpenBtn" aria-haspopup="dialog">
-                            <span class="groupHistoryOpenLabel"><i class="fa-solid fa-clock-rotate-left"></i> Recently finished<span class="historyUnreadDot hidden" aria-label="Unread"></span></span>
-                            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-                        </button>
-                    </aside>
+                    <button type="button" class="groupHistoryOpenBtn" aria-haspopup="dialog">
+                        <span class="groupHistoryOpenLabel"><i class="fa-solid fa-clock-rotate-left"></i> Recently finished<span class="historyUnreadDot hidden" aria-label="Unread"></span></span>
+                        <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                    </button>
                 </div>
             </div>
         </div>
@@ -338,7 +341,7 @@
     <script src="../brain-dump.js?v=20260831q"></script>
     <script src="../auth-gate.js?v=20260830a"></script>
     <script src="groups-data.js?v=20260830c"></script>
-    <script src="group.js?v=20260831h"></script>
+    <script src="group.js?v=20260902a"></script>
     <script type="module" src="../firebase-init.js?v=20260831a"></script>
     <script src="../settings.js?v=20260830g"></script>
 </body>
