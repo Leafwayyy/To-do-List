@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260831m">
+    <link rel="stylesheet" href="style.css?v=20260902a">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#050225">
@@ -17,8 +17,8 @@
         .authConsentRow {
             display: flex;
             align-items: flex-start;
-            gap: 8px;
-            font-size: 0.82rem;
+            gap: var(--space-2, 8px);
+            font-size: var(--text-sm, 12px);
             line-height: 1.4;
             color: rgba(243, 240, 234, 0.75);
             cursor: pointer;
@@ -26,10 +26,10 @@
         .authConsentRow input { margin-top: 3px; }
         .authConsentRow a, .authGoogleConsentNote a { color: #b58bff; }
         .authGoogleConsentNote {
-            font-size: 0.78rem;
+            font-size: var(--text-sm, 12px);
             text-align: center;
             color: rgba(243, 240, 234, 0.6);
-            margin: 8px 0 0;
+            margin: var(--space-2, 8px) 0 0;
         }
     </style>
 </head>
@@ -42,7 +42,7 @@
 
     <div class="userBadge hidden">
         <a class="groupNavLink" href="group/browse.html">Groups</a>
-        <button class="helpTourBtn" type="button" title="Restart the tutorial"><i class="fa-solid fa-question"></i></button>
+        <button class="helpTourBtn" type="button" title="Restart the tutorial"><i class="fa-solid fa-question"></i> Tutorial</button>
         <img class="userBadgeAvatar hidden" alt="">
         <span class="userBadgeName"></span>
         <button class="userSignOutBtn" type="button" title="Sign out">Sign out</button>
@@ -54,7 +54,13 @@
          portrait/animations/hint are injected by brain-dump.js at startup. -->
     <button class="brainDumpToggleBtn" type="button"></button>
 
+    <div class="viewTabs" role="tablist" aria-label="Dashboard view">
+        <button class="viewTab active" type="button" data-view="tasks" role="tab" aria-selected="true">Tasks</button>
+        <button class="viewTab" type="button" data-view="activity" role="tab" aria-selected="false">Activity</button>
+    </div>
+
     <div class="container">
+        <div class="viewPanel" data-view-panel="tasks">
         <div class="appShell">
             <section class="mainColumn">
                 <h1 class="title">To-Do List</h1>
@@ -195,29 +201,6 @@
             </section>
 
             <aside class="sideColumn">
-                <div class="activityPanel" aria-label="Daily activity chart">
-                    <div class="activityHeader">
-                        <p class="activityTitle">Daily Activity</p>
-                        <p class="activitySummary">Today: 0 | This week: 0 | 0 active days in last 6 months</p>
-                    </div>
-                    <div class="activityGridWrap">
-                        <div class="activityMonthRow" aria-hidden="true"></div>
-                        <div class="activityBody">
-                            <div class="activityDayLabels" aria-hidden="true"></div>
-                            <div class="activityGrid" role="img" aria-label="Activity heatmap"></div>
-                        </div>
-                    </div>
-                    <div class="activityLegend">
-                        <span>Less</span>
-                        <span class="heatCell level-0"></span>
-                        <span class="heatCell level-1"></span>
-                        <span class="heatCell level-2"></span>
-                        <span class="heatCell level-3"></span>
-                        <span class="heatCell level-4"></span>
-                        <span>More</span>
-                    </div>
-                </div>
-
                 <div class="priorityControls">
                     <div class="priorityHeaderRow">
                         <label class="priorityToggleLabel" for="priorityToggle">
@@ -234,6 +217,32 @@
                     <p class="priorityModeHint">Manual mode: drag to reorder anytime.</p>
                 </div>
             </aside>
+        </div>
+        </div>
+
+        <div class="viewPanel hidden" data-view-panel="activity">
+            <div class="activityPanel" aria-label="Daily activity chart">
+                <div class="activityHeader">
+                    <p class="activityTitle">Daily Activity</p>
+                    <p class="activitySummary">Today: 0 | This week: 0 | 0 active days in last 6 months</p>
+                </div>
+                <div class="activityGridWrap">
+                    <div class="activityMonthRow" aria-hidden="true"></div>
+                    <div class="activityBody">
+                        <div class="activityDayLabels" aria-hidden="true"></div>
+                        <div class="activityGrid" role="img" aria-label="Activity heatmap"></div>
+                    </div>
+                </div>
+                <div class="activityLegend">
+                    <span>Less</span>
+                    <span class="heatCell level-0"></span>
+                    <span class="heatCell level-1"></span>
+                    <span class="heatCell level-2"></span>
+                    <span class="heatCell level-3"></span>
+                    <span class="heatCell level-4"></span>
+                    <span>More</span>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -332,7 +341,7 @@
     <script src="task-shared.js?v=20260831e"></script>
     <script src="brain-dump.js?v=20260831q"></script>
     <script src="auth-gate.js?v=20260830a"></script>
-    <script src="script.js?v=20260831f"></script>
+    <script src="script.js?v=20260902a"></script>
     <script type="module" src="firebase-init.js?v=20260831a"></script>
     <script src="settings.js?v=20260830g"></script>
 

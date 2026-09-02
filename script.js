@@ -26,6 +26,8 @@ const nextTaskTitle = document.querySelector('.nextTaskTitle');
 const nextTaskReasons = document.querySelector('.nextTaskReasons');
 const mainColumn = document.querySelector('.mainColumn');
 const sideColumn = document.querySelector('.sideColumn');
+const viewTabButtons = Array.from(document.querySelectorAll('.viewTab'));
+const viewPanels = Array.from(document.querySelectorAll('.viewPanel'));
 const priorityControlsPanel = document.querySelector('.priorityControls');
 const activityMonthRow = document.querySelector('.activityMonthRow');
 const activityDayLabels = document.querySelector('.activityDayLabels');
@@ -140,44 +142,56 @@ const TOUR_STEPS = [
     {
         selector: '.inputContainer',
         title: 'Add a task quickly',
-        text: 'Type your task here, then press + or Enter to add it. Try typing a time too, like "tomorrow 3pm" - it\'s picked up automatically.'
+        text: 'Type your task here, then press + or Enter to add it. Try typing a time too, like "tomorrow 3pm" - it\'s picked up automatically.',
+        beforeShow: () => switchSoloView('tasks')
+    },
+    {
+        selector: '.viewTabs',
+        title: 'Tasks and Activity',
+        text: 'Everything you\'re working on lives under Tasks. Switch to Activity any time to see your completion history.',
+        beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.detailsToggleBtn',
         title: 'Open smart options',
         text: 'Use Prioritize to set matrix, difficulty, estimate, and deadline.',
-        beforeShow: () => setDetailsPanelOpen(true)
+        beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
     {
         selector: '.deadlineContainer',
         title: 'Deadline vs. schedule',
         text: 'Deadline is when it\'s due. Schedule is when you actually plan to work on it - two different things, both optional.',
-        beforeShow: () => setDetailsPanelOpen(true)
+        beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
     {
         selector: '.priorityControls',
         title: 'Choose sorting mode',
-        text: 'Auto-sort keeps tasks ranked. Sort once now gives a one-time smart order.'
+        text: 'Auto-sort keeps tasks ranked. Sort once now gives a one-time smart order.',
+        beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.taskViews',
         title: 'Switch views',
-        text: 'Jump straight to what\'s overdue, due today, this week, or already done.'
+        text: 'Jump straight to what\'s overdue, due today, this week, or already done.',
+        beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.activityPanel',
         title: 'Track completed work',
-        text: 'Tap any day in Daily Activity to see completion history details.'
+        text: 'Tap any day in Daily Activity to see completion history details.',
+        beforeShow: () => switchSoloView('activity')
     },
     {
         selector: '.groupNavLink',
         title: 'Working with a team?',
-        text: 'Click Group up here to create a shared workspace - everyone\'s tasks, progress, and deadlines in one place.'
+        text: 'Click Group up here to create a shared workspace - everyone\'s tasks, progress, and deadlines in one place.',
+        beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.brainDumpToggleBtn',
         title: 'Meet Dusty',
-        text: 'Tap Dusty any time to brain-dump what\'s on your mind - type it all out, attach a photo or file if that\'s easier, and she\'ll turn it into real tasks for you to review before anything gets added.'
+        text: 'Tap Dusty any time to brain-dump what\'s on your mind - type it all out, attach a photo or file if that\'s easier, and she\'ll turn it into real tasks for you to review before anything gets added.',
+        beforeShow: () => switchSoloView('tasks')
     }
 ];
 
@@ -420,30 +434,44 @@ AuthGate.init({
 });
 
 function syncPriorityControlsPlacement() {
-    if (!priorityControlsPanel || !mainColumn || !sideColumn || !tasksList || !activityPanel) {
+    // Since the navigation rework (section A), Activity is its own full-width
+    // view/tab, not a sideColumn neighbor swapped in/out by breakpoint - the
+    // old mobile/desktop branches here both just re-inserted .activityPanel
+    // into .sideColumn on every render, which would have silently pulled it
+    // back into the Tasks view on each call. .priorityControls now simply
+    // stays put in .sideColumn (see .sideColumn .priorityControls{position:
+    // static} in style.css), so there's nothing left to reposition here.
+    if (!priorityControlsPanel || !mainColumn || !sideColumn || !tasksList) {
         return;
     }
+}
 
-    const isMobile = MOBILE_LAYOUT_QUERY.matches;
+// Navigation (section A of the UI/UX rework): Tasks vs. Activity. The tour's
+// beforeShow hooks call this directly to self-correct onto whichever view a
+// step's target lives in, regardless of step order or a manual tab click
+// mid-tour - see TOUR_STEPS below.
+function switchSoloView(view) {
+    viewTabButtons.forEach((button) => {
+        const isActive = button.dataset.view === view;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
 
-    if (isMobile) {
-        if (activityPanel.parentElement !== sideColumn || activityPanel !== sideColumn.firstElementChild) {
-            sideColumn.insertBefore(activityPanel, sideColumn.firstElementChild);
-        }
+    viewPanels.forEach((panel) => {
+        panel.classList.toggle('hidden', panel.dataset.viewPanel !== view);
+    });
 
-        if (priorityControlsPanel.parentElement !== sideColumn || priorityControlsPanel.previousElementSibling !== activityPanel) {
-            sideColumn.insertBefore(priorityControlsPanel, activityPanel.nextElementSibling);
-        }
-    } else {
-        if (activityPanel.parentElement !== sideColumn || activityPanel !== sideColumn.firstElementChild) {
-            sideColumn.insertBefore(activityPanel, sideColumn.firstElementChild);
-        }
-
-        if (priorityControlsPanel.parentElement !== sideColumn || priorityControlsPanel !== sideColumn.lastElementChild) {
-            sideColumn.appendChild(priorityControlsPanel);
-        }
+    if (view === 'activity') {
+        renderActivityHeatmap();
     }
 }
+
+viewTabButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+        playClickSound();
+        switchSoloView(button.dataset.view || 'tasks');
+    });
+});
 
 function updateQuickAddHint() {
     if (!quickAddHint) {

@@ -1511,7 +1511,7 @@ body{
     display: none;
     justify-content: center;
     align-items: center;
-    padding: 20px;
+    padding: var(--space-5);
     z-index: 20;
 }
 
@@ -1523,24 +1523,24 @@ body{
     width: min(460px, 95vw);
     background: rgba(247, 252, 255, 0.95);
     border: 2px solid rgba(74, 146, 246, 0.5);
-    border-radius: 16px;
+    border-radius: var(--radius-lg);
     box-shadow: 0 20px 44px rgba(28, 67, 128, 0.3);
-    padding: 18px;
+    padding: var(--space-4);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .taskEditorCard h2{
-    font-size: 23px;
+    font-size: var(--text-xl);
     color: #1f2d4a;
 }
 
 .taskEditorCard label{
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    font-size: 12px;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
     font-weight: 700;
     color: #273451;
 }
@@ -1550,13 +1550,14 @@ body{
 .editorDeadlineInput{
     width: 100%;
     height: 44px;
-    padding: 0 10px;
+    padding: 0 var(--space-2);
     border: 2px solid rgba(91, 152, 255, 0.45);
-    border-radius: 10px;
+    border-radius: var(--radius-sm);
     outline: none;
     background: #ffffff;
     color: #1a1a1a;
     font-weight: 500;
+    font-size: var(--text-base);
     transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
@@ -1565,18 +1566,19 @@ body{
 .editorDurationInput{
     width: 100%;
     height: 44px;
-    padding: 0 10px;
+    padding: 0 var(--space-2);
     border: 2px solid rgba(91, 152, 255, 0.45);
-    border-radius: 10px;
+    border-radius: var(--radius-sm);
     outline: none;
     background: #ffffff;
     color: #1a1a1a;
     font-weight: 500;
+    font-size: var(--text-base);
 }
 
 .editorEffortRow{
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .editorDurationInput.hidden{
@@ -1621,9 +1623,9 @@ body{
 .editorDeadlineWrap{
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     cursor: pointer;
-    border-radius: 10px;
+    border-radius: var(--radius-sm);
     transition: box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
@@ -1636,7 +1638,7 @@ body{
     width: 40px;
     min-width: 40px;
     height: 40px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     border: 2px solid #8ec6ff;
     background: #243343;
     cursor: pointer;
@@ -1651,17 +1653,18 @@ body{
 .editorActions{
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
+    gap: var(--space-3);
 }
 
 .editorCancelBtn,
 .editorSaveBtn{
     height: 38px;
-    padding: 0 14px;
-    border-radius: 10px;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-sm);
     border: 2px solid transparent;
     cursor: pointer;
     font-weight: 700;
+    font-size: var(--text-sm);
 }
 
 .editorCancelBtn{
@@ -1674,6 +1677,13 @@ body{
     background: #2f8fff;
     border-color: #58a4ff;
     color: #ffffff;
+}
+
+.groupWelcomeIntro{
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    color: #4d617f;
+    margin: -4px 0 0;
 }
 
 @media (max-width: 620px){
@@ -1729,517 +1739,30 @@ body{
     }
 }
 
-/* Premium dark aesthetic overrides */
-:root{
-    --lux-bg-1: #080a10;
-    --lux-bg-2: #0f1420;
-    --lux-panel: rgba(13, 18, 30, 0.82);
-    --lux-panel-soft: rgba(19, 26, 40, 0.72);
-    --lux-border: rgba(216, 183, 120, 0.42);
-    --lux-border-soft: rgba(216, 183, 120, 0.24);
-    --lux-text: #f3f0ea;
-    --lux-muted: #b8b3a7;
-    --lux-accent: #d7b778;
-    --lux-accent-2: #8ec5ff;
-}
-
-body{
-    font-family: 'Inter', sans-serif;
-    color: var(--lux-text);
-    background:
-        radial-gradient(1100px 560px at 12% 8%, rgba(215, 183, 120, 0.14), transparent 60%),
-        radial-gradient(900px 520px at 88% 92%, rgba(87, 126, 190, 0.17), transparent 62%),
-        linear-gradient(160deg, var(--lux-bg-1), var(--lux-bg-2));
-}
-
-.container{
-    background: linear-gradient(170deg, rgba(19, 25, 38, 0.9), rgba(9, 14, 24, 0.9));
-    border: 1px solid var(--lux-border);
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-
-.title{
-    font-family: 'Playfair Display', serif;
-    color: #f6f2ea;
-    font-weight: 700;
-    letter-spacing: 0.4px;
-}
-
-.activityTitle,
-.motivatorText{
-    font-family: 'Playfair Display', serif;
-    color: #f2ebe0;
-}
-
-.activitySummary,
-.quickAddHint,
-.optionsHint,
-.priorityModeHint{
-    color: var(--lux-muted);
-}
-
-.motivatorContainer,
-.activityPanel,
-.taskDetailsPanel.open,
-.urgencyAlert,
-.priorityControls{
-    background: var(--lux-panel-soft);
-    border-color: var(--lux-border-soft);
-}
-
-.progressBarContainer{
-    background: rgba(7, 11, 20, 0.95);
-    border-color: rgba(142, 197, 255, 0.5);
-}
-
-.progressBar{
-    background: linear-gradient(90deg, #6da6e8, #d7b778 85%);
-}
-
-.taskAmountContainer,
-.addBtn,
-.calendarBtn,
-.taskButtons i,
-.checkBtn i{
-    background: #0c131f;
-    border-color: rgba(142, 197, 255, 0.5);
-}
-
-.taskAmount,
-.addBtn i,
-.calendarBtn i,
-.taskButtons i,
-.detailsToggleBtn,
-.sortOnceBtn,
-.alertToggleBtn{
-    color: #d6e7ff;
-}
-
-.taskInput,
-.matrixSelect,
-.difficultySelect,
-.durationInput,
-.deadlineInput,
-.editorTextInput,
-.editorMatrixSelect,
-.editorTaskTypeSelect,
-.editorDifficultySelect,
-.editorDurationInput,
-.editorDeadlineInput{
-    background: rgba(14, 21, 33, 0.93);
-    color: var(--lux-text);
-    border-color: rgba(142, 197, 255, 0.38);
-}
-
-.taskInput::placeholder,
-.durationInput::placeholder,
-.editorTextInput::placeholder,
-.editorDurationInput::placeholder{
-    color: rgba(184, 179, 167, 0.74);
-}
-
-.matrixSelect option,
-.difficultySelect option,
-.editorMatrixSelect option{
-    background: #121b2a;
-    color: #f1ebe0;
-}
-
-.typePill,
-.durationChip,
-.detailsToggleBtn,
-.sortOnceBtn,
-.alertToggleBtn,
-.taskViewBtn,
-.deadlinePresetBtn{
-    background: rgba(18, 28, 43, 0.88);
-    color: #dbe9fb;
-    border-color: rgba(142, 197, 255, 0.3);
-}
-
-.typePill.active,
-.durationChip.active,
-.taskViewBtn.active,
-.detailsToggleBtn[aria-expanded="true"]{
-    background: linear-gradient(100deg, rgba(215, 183, 120, 0.88), rgba(114, 161, 224, 0.9));
-    border-color: rgba(232, 213, 178, 0.7);
-    color: #0a111b;
-}
-
-.tasks li{
-    background: rgba(16, 23, 35, 0.88);
-    border-color: rgba(142, 197, 255, 0.28);
-}
-
-.taskText{
-    color: var(--lux-text);
-}
-
-.emptyTasksMsg{
-    background: rgba(16, 25, 39, 0.8);
-    border-color: rgba(142, 197, 255, 0.28);
-    color: var(--lux-muted);
-}
-
-.editorTaskTypeSelect,
-.editorDifficultySelect,
-.editorDurationInput,
-.editorCancelBtn,
-.editorSaveBtn,
-.editorCalendarBtn{
-    font-family: 'Inter', sans-serif;
-}
-
-.editorTaskTypeSelect,
-.editorDifficultySelect,
-.editorDurationInput,
-.editorTextInput,
-.editorMatrixSelect,
-.editorDeadlineInput{
-    background: rgba(14, 21, 33, 0.96);
-    color: var(--lux-text);
-}
-
-.editorCancelBtn{
-    background: rgba(20, 30, 45, 0.95);
-    border-color: rgba(142, 197, 255, 0.34);
-    color: #dce8fb;
-}
-
-.editorSaveBtn{
-    background: linear-gradient(96deg, rgba(215, 183, 120, 0.9), rgba(113, 161, 225, 0.92));
-    border-color: rgba(230, 211, 173, 0.8);
-    color: #0a111b;
-}
-
-/* Readability + animated gradient orbs tune */
-:root{
-    --lux-bg-1: #070b14;
-    --lux-bg-2: #111a2a;
-    --lux-panel: rgba(16, 24, 38, 0.9);
-    --lux-panel-soft: rgba(19, 29, 46, 0.84);
-    --lux-border: rgba(143, 191, 255, 0.45);
-    --lux-border-soft: rgba(143, 191, 255, 0.3);
-    --lux-text: #f7fbff;
-    --lux-muted: #d6e3f5;
-}
-
-body{
-    position: relative;
-    overflow-x: hidden;
-    background: linear-gradient(160deg, var(--lux-bg-1), var(--lux-bg-2));
-}
-
-body::before,
-body::after{
-    content: '';
-    position: fixed;
-    inset: auto;
-    width: 74vmax;
-    height: 74vmax;
-    border-radius: 50%;
-    filter: blur(70px);
-    pointer-events: none;
-    z-index: 0;
-    opacity: 0.42;
-    will-change: transform;
-}
-
-body::before{
-    top: -24vmax;
-    left: -24vmax;
-    background:
-        radial-gradient(circle at 28% 30%, rgba(245, 247, 252, 0.9), rgba(194, 201, 214, 0.42) 38%, rgba(0, 0, 0, 0) 64%),
-        radial-gradient(circle at 70% 58%, rgba(205, 211, 223, 0.82), rgba(141, 149, 166, 0.34) 36%, rgba(0, 0, 0, 0) 66%);
-    animation: orbFloatA 28s ease-in-out infinite alternate;
-}
-
-body::after{
-    right: -24vmax;
-    bottom: -24vmax;
-    background:
-        radial-gradient(circle at 35% 42%, rgba(234, 239, 247, 0.88), rgba(178, 186, 200, 0.4) 37%, rgba(0, 0, 0, 0) 66%),
-        radial-gradient(circle at 74% 26%, rgba(212, 219, 231, 0.78), rgba(131, 140, 157, 0.3) 34%, rgba(0, 0, 0, 0) 67%);
-    animation: orbFloatB 32s ease-in-out infinite alternate;
-}
-
-@keyframes orbFloatA {
-    0% { transform: translate3d(0, 0, 0) scale(1); }
-    25% { transform: translate3d(12vmax, 6vmax, 0) scale(1.06); }
-    50% { transform: translate3d(20vmax, 18vmax, 0) scale(1.12); }
-    75% { transform: translate3d(4vmax, 28vmax, 0) scale(0.98); }
-    100% { transform: translate3d(-8vmax, 16vmax, 0) scale(0.92); }
-}
-
-@keyframes orbFloatB {
-    0% { transform: translate3d(0, 0, 0) scale(1); }
-    25% { transform: translate3d(-14vmax, -5vmax, 0) scale(1.07); }
-    50% { transform: translate3d(-24vmax, -18vmax, 0) scale(1.11); }
-    75% { transform: translate3d(-8vmax, -30vmax, 0) scale(1); }
-    100% { transform: translate3d(6vmax, -16vmax, 0) scale(0.93); }
-}
-
-.container{
-    position: relative;
-    z-index: 1;
-    background: linear-gradient(170deg, rgba(14, 22, 36, 0.93), rgba(9, 14, 24, 0.93));
-    border-color: rgba(148, 199, 255, 0.45);
-}
-
-.activitySummary,
-.quickAddHint,
-.optionsHint,
-.priorityModeHint,
-.activityDayLabel,
-.activityMonthLabel,
-.urgencyAlertText,
-.priorityToggleLabel span{
-    color: #dbe8fa;
-}
-
-.taskInput,
-.matrixSelect,
-.difficultySelect,
-.durationInput,
-.deadlineInput,
-.editorTextInput,
-.editorMatrixSelect,
-.editorTaskTypeSelect,
-.editorDifficultySelect,
-.editorDurationInput,
-.editorDeadlineInput,
-.taskViewBtn,
-.typePill,
-.durationChip,
-.detailsToggleBtn,
-.sortOnceBtn,
-.alertToggleBtn,
-.deadlinePresetBtn{
-    border-color: rgba(138, 194, 255, 0.52);
-    color: #eef5ff;
-}
-
-.taskInput::placeholder,
-.durationInput::placeholder,
-.editorTextInput::placeholder,
-.editorDurationInput::placeholder{
-    color: rgba(214, 230, 247, 0.78);
-}
-
-.tasks li{
-    background: rgba(15, 23, 38, 0.94);
-    border-color: rgba(138, 194, 255, 0.4);
-}
-
-.matrixBadge,
-.effortBadge,
-.difficultyBadge,
-.deadlineBadge,
-.countdownBadge{
-    border-color: rgba(255, 255, 255, 0.14);
-}
-
-.checkBtn i,
-.taskButtons i,
-.calendarBtn,
-.addBtn{
-    border-color: rgba(138, 194, 255, 0.66);
-}
-
-/* Final monochrome minimalism refinement */
-:root{
-    --mono-bg-1: #101214;
-    --mono-bg-2: #1a1d22;
-    --mono-surface: rgba(17, 20, 25, 0.9);
-    --mono-surface-soft: rgba(22, 26, 33, 0.86);
-    --mono-border: rgba(192, 196, 204, 0.34);
-    --mono-border-strong: rgba(214, 218, 226, 0.48);
-    --mono-text: #eceff4;
-    --mono-muted: #c7ced9;
-}
-
-body{
-    color: var(--mono-text);
-    background: linear-gradient(155deg, var(--mono-bg-1), var(--mono-bg-2));
-}
-
-body::before{
-    background: radial-gradient(circle at 30% 30%, rgba(245, 247, 252, 0.38), rgba(188, 194, 206, 0.22) 44%, rgba(0, 0, 0, 0) 74%);
-    opacity: 0.22;
-    animation: orbFloatA 30s ease-in-out infinite alternate;
-}
-
-body::after{
-    background: radial-gradient(circle at 40% 40%, rgba(222, 227, 236, 0.34), rgba(156, 164, 180, 0.18) 46%, rgba(0, 0, 0, 0) 76%);
-    opacity: 0.2;
-    animation: orbFloatB 34s ease-in-out infinite alternate;
-}
-
-.container{
-    background: linear-gradient(170deg, rgba(18, 22, 28, 0.94), rgba(12, 15, 20, 0.94));
-    border-color: var(--mono-border-strong);
-    box-shadow: 0 26px 62px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-
-.title,
-.activityTitle,
-.motivatorText,
-.taskText,
-.taskAmount,
-.priorityToggleLabel span,
-.detailsToggleBtn,
-.sortOnceBtn,
-.alertToggleBtn,
-.taskViewBtn,
-.typePill,
-.durationChip,
-.deadlinePresetBtn,
-.addBtn i,
-.calendarBtn i,
-.taskButtons i{
-    color: var(--mono-text);
-}
-
-.activitySummary,
-.quickAddHint,
-.optionsHint,
-.priorityModeHint,
-.activityDayLabel,
-.activityMonthLabel,
-.urgencyAlertText{
-    color: var(--mono-muted);
-}
-
-.motivatorContainer,
-.activityPanel,
-.taskDetailsPanel.open,
-.urgencyAlert,
-.priorityControls,
-.tasks li{
-    background: var(--mono-surface-soft);
-    border-color: var(--mono-border);
-}
-
-.taskInput,
-.matrixSelect,
-.difficultySelect,
-.durationInput,
-.deadlineInput,
-.editorTextInput,
-.editorMatrixSelect,
-.editorTaskTypeSelect,
-.editorDifficultySelect,
-.editorDurationInput,
-.editorDeadlineInput,
-.typePill,
-.durationChip,
-.detailsToggleBtn,
-.sortOnceBtn,
-.alertToggleBtn,
-.taskViewBtn,
-.deadlinePresetBtn{
-    background: var(--mono-surface);
-    border-color: var(--mono-border);
-    color: var(--mono-text);
-}
-
-.taskInput::placeholder,
-.durationInput::placeholder,
-.editorTextInput::placeholder,
-.editorDurationInput::placeholder{
-    color: rgba(199, 206, 217, 0.76);
-}
-
-.matrixSelect:hover,
-.difficultySelect:hover,
-.deadlineInput:hover,
-.typePill:hover,
-.durationChip:hover,
-.detailsToggleBtn:hover,
-.sortOnceBtn:hover:not(:disabled),
-.alertToggleBtn:hover,
-.taskViewBtn:hover,
-.deadlinePresetBtn:hover{
-    background: rgba(35, 40, 49, 0.96);
-    border-color: var(--mono-border-strong);
-    color: #ffffff;
-}
-
-.matrixSelect:focus,
-.matrixSelect:focus-visible,
-.difficultySelect:focus,
-.difficultySelect:focus-visible,
-.deadlineInput:focus,
-.deadlineInput:focus-visible,
-.taskInput:focus,
-.taskInput:focus-visible,
-.editorTextInput:focus,
-.editorMatrixSelect:focus,
-.editorDeadlineInput:focus,
-.editorTaskTypeSelect:focus,
-.editorDifficultySelect:focus,
-.editorDurationInput:focus{
-    background: rgba(35, 40, 49, 0.98);
-    color: #ffffff;
-    border-color: rgba(238, 241, 247, 0.66);
-    box-shadow: 0 0 0 3px rgba(238, 241, 247, 0.14);
-}
-
-.typePill.active,
-.durationChip.active,
-.taskViewBtn.active,
-.detailsToggleBtn[aria-expanded="true"],
-.sortOnceBtn:active,
-.alertToggleBtn.enabled{
-    background: linear-gradient(120deg, #f0f2f5, #d8dde6);
-    border-color: #f1f4f8;
-    color: #12151a;
-}
-
-.addBtn,
-.calendarBtn,
-.taskButtons i,
-.checkBtn i,
-.taskAmountContainer,
-.editorCalendarBtn{
-    background: #13171d;
-    border-color: var(--mono-border-strong);
-}
-
-.taskButtons i:hover,
-.checkBtn i:hover,
-.calendarBtn:hover,
-.addBtn:hover,
-.editorCalendarBtn:hover{
-    background: #21262f;
-    color: #ffffff;
-}
-
-.matrixSelect option,
-.difficultySelect option,
-.editorMatrixSelect option{
-    background: #171b22;
-    color: #edf1f6;
-}
-
-/* Keep semantic color cues for status badges */
-.matrix-do{ background: #ffd8d3; border-color: #ffb5ab; color: #7f1f17; }
-.matrix-schedule{ background: #dde7ff; border-color: #becdfa; color: #2c3d7c; }
-.matrix-delegate{ background: #ffe8c9; border-color: #f6c78a; color: #815005; }
-.matrix-eliminate{ background: #dbe8df; border-color: #bfd3c5; color: #2e5540; }
-
-.difficulty-1{ background: #dbf1df; border-color: #bce0c2; color: #275e32; }
-.difficulty-2{ background: #d8ebff; border-color: #b7d8f5; color: #1f527c; }
-.difficulty-3{ background: #fff0cd; border-color: #efd59c; color: #7e5a13; }
-.difficulty-4{ background: #ffdfc8; border-color: #f0bfa0; color: #7b3c16; }
-.difficulty-5{ background: #ffd6d6; border-color: #f2b1b1; color: #7f2121; }
-
-.deadline-none, .countdown-none{ background: #e4e8ef; border-color: #c9d1dd; color: #405470; }
-.deadline-normal, .countdown-normal{ background: #dcedff; border-color: #b9d5f5; color: #244f83; }
-.deadline-soon, .countdown-soon{ background: #ffe9c9; border-color: #f2c78b; color: #7e4f0c; }
-.deadline-critical, .countdown-critical{ background: #ffd9bf; border-color: #f0b187; color: #86400f; }
-.deadline-overdue, .countdown-overdue{ background: #ffd2d2; border-color: #efabab; color: #8a1e1e; }
-
+/*
+ * DESIGN SYSTEM — the only values new CSS should use.
+ * Added as part of the UI/UX rework (see plan.md). Every font-size, padding/margin/gap,
+ * border-radius, and semantic color from here on should reference one of these tokens
+ * instead of a new one-off literal. This list is how the app avoided ending up with
+ * 18 different font sizes and 240 spacing values, 50% off the 4px grid, again.
+ *
+ * Type scale (8 steps, dashboards get tighter sizes than a landing page would):
+ *   --text-2xs 10px  timestamps, tiny counts, fine print
+ *   --text-xs  11px  badge labels, secondary meta text
+ *   --text-sm  12px  default UI text: buttons, form labels, most body copy
+ *   --text-base 14px task text itself, primary readable content
+ *   --text-md  16px  card/section titles, modal headers
+ *   --text-lg  20px  dashboard section headers
+ *   --text-xl  24px  page-level headers
+ *   --text-2xl 32px  app title, auth brand
+ *
+ * Spacing scale (standard 4pt system): --space-1 through --space-8.
+ * Radius tiers: --radius-sm (inputs/chips/badges), --radius-md (cards/panels/rows),
+ *   --radius-lg (modals/overlays), --radius-pill (tabs/pill buttons, 999px),
+ *   --radius-circle (avatars/icon buttons, 50%).
+ * Semantic color: --color-danger/--color-warning/--color-success/--color-info,
+ *   for meaning (delete, overdue, success, focus), not decoration.
+ */
 /* Premium violet gradient mode */
 :root{
     --violet-bg-1: #050225;
@@ -2253,6 +1776,45 @@ body::after{
     --violet-muted: #d7d0ff;
     --violet-accent: #b58bff;
     --violet-accent-2: #7f86ff;
+
+    /* Type scale */
+    --text-2xs: 10px;
+    --text-xs: 11px;
+    --text-sm: 12px;
+    --text-base: 14px;
+    --text-md: 16px;
+    --text-lg: 20px;
+    --text-xl: 24px;
+    --text-2xl: 32px;
+
+    /* Spacing scale (4pt system) */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-7: 32px;
+    --space-8: 40px;
+    --space-9: 48px;
+
+    /* Radius tiers */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-pill: 999px;
+    --radius-circle: 50%;
+
+    /* Semantic color (meaning, not decoration) */
+    --color-danger: #ff6b6b;
+    --color-danger-strong: #e03131;
+    --color-danger-soft: rgba(255, 107, 107, 0.16);
+    --color-warning: #ffb84d;
+    --color-warning-soft: rgba(255, 184, 77, 0.16);
+    --color-success: #4dd699;
+    --color-success-soft: rgba(77, 214, 153, 0.16);
+    --color-info: #7f86ff;
+    --color-info-soft: rgba(127, 134, 255, 0.16);
 }
 
 html{
@@ -2289,12 +1851,23 @@ html::after{
 }
 
 body{
+    position: relative;
+    overflow-x: hidden;
     color: var(--violet-text);
     background: linear-gradient(150deg, var(--violet-bg-1), var(--violet-bg-2), var(--violet-bg-3));
 }
 
 body::before,
 body::after{
+    content: '';
+    position: fixed;
+    width: 74vmax;
+    height: 74vmax;
+    border-radius: 50%;
+    filter: blur(70px);
+    pointer-events: none;
+    z-index: 0;
+    will-change: transform;
     opacity: 0.48;
 }
 
@@ -2328,7 +1901,25 @@ body::after{
     100% { transform: translate3d(8vmax, -22vmax, 0) scale(0.93); }
 }
 
+@keyframes orbFloatA {
+    0% { transform: translate3d(0, 0, 0) scale(1); }
+    25% { transform: translate3d(12vmax, 6vmax, 0) scale(1.06); }
+    50% { transform: translate3d(20vmax, 18vmax, 0) scale(1.12); }
+    75% { transform: translate3d(4vmax, 28vmax, 0) scale(0.98); }
+    100% { transform: translate3d(-8vmax, 16vmax, 0) scale(0.92); }
+}
+
+@keyframes orbFloatB {
+    0% { transform: translate3d(0, 0, 0) scale(1); }
+    25% { transform: translate3d(-14vmax, -5vmax, 0) scale(1.07); }
+    50% { transform: translate3d(-24vmax, -18vmax, 0) scale(1.11); }
+    75% { transform: translate3d(-8vmax, -30vmax, 0) scale(1); }
+    100% { transform: translate3d(6vmax, -16vmax, 0) scale(0.93); }
+}
+
 .container{
+    position: relative;
+    z-index: 1;
     background: linear-gradient(170deg, rgba(22, 14, 62, 0.9), rgba(12, 8, 44, 0.9));
     border-color: var(--violet-border);
     box-shadow: 0 28px 68px rgba(4, 3, 24, 0.56), inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -2937,7 +2528,7 @@ body::after{
 
 .taskEditorCard .editorCancelBtn,
 .taskEditorCard .editorSaveBtn{
-    border-radius: 12px;
+    border-radius: var(--radius-sm);
     border: 2px solid rgba(194, 178, 255, 0.58);
     transition: transform 0.16s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -3316,6 +2907,57 @@ body::after{
         margin-top: 0;
         min-height: 0;
     }
+}
+
+/* Navigation: view tabs (section A of the UI/UX rework). Reuses .taskViewBtn's
+   pill visual language (--radius-pill, same border/active-gradient pattern)
+   since it's the same "pick one of a few views" interaction, just one level
+   up - Jakob's Law: don't invent a second tab pattern the eye has to learn. */
+.viewTabs{
+    display: flex;
+    gap: var(--space-2);
+    width: 92%;
+    margin: 14px 0 4px;
+    z-index: 1;
+    position: relative;
+}
+
+.viewTab{
+    border: 2px solid var(--violet-border-soft, rgba(170, 152, 255, 0.28));
+    background: linear-gradient(145deg, rgba(39, 27, 92, 0.9), rgba(27, 18, 72, 0.9));
+    color: var(--violet-text, #f6f4ff);
+    border-radius: var(--radius-pill);
+    padding: var(--space-2) var(--space-5);
+    font-size: var(--text-sm);
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.viewTab:hover{
+    border-color: rgba(205, 194, 255, 0.62);
+    background: rgba(42, 30, 100, 0.96);
+    color: #ffffff;
+}
+
+.viewTab.active{
+    border-color: rgba(232, 225, 255, 0.8);
+    background: linear-gradient(120deg, rgba(193, 152, 255, 0.98), rgba(132, 140, 255, 0.98));
+    color: #fdfcff;
+}
+
+.viewPanel{
+    width: 100%;
+}
+
+.viewPanel.hidden{
+    display: none;
+}
+
+.viewPanel[data-view-panel="activity"] .activityPanel{
+    width: 100%;
+    margin-top: 0;
+    min-height: 0;
 }
 
 /* Prioritize panel layout: avoid flat full-width stack */
@@ -4274,7 +3916,7 @@ body.authChecking .authLoadingScreen{
     z-index: 1;
     width: 40px;
     height: 40px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     border: 3px solid rgba(170, 152, 255, 0.25);
     border-top-color: var(--violet-accent, #b58bff);
     animation: authSpinnerSpin 0.9s linear infinite;
@@ -4297,9 +3939,9 @@ body.authChecking .authLoadingScreen{
     z-index: 40;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    border-radius: 999px;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-pill);
     background: rgba(255, 255, 255, 0.5);
     border: 2px solid rgba(103, 159, 255, 0.6);
     backdrop-filter: blur(8px);
@@ -4312,7 +3954,7 @@ body.authChecking .authLoadingScreen{
 .userBadgeAvatar{
     width: 26px;
     height: 26px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     object-fit: cover;
 }
 
@@ -4321,7 +3963,7 @@ body.authChecking .authLoadingScreen{
 }
 
 .userBadgeName{
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 700;
     color: #1e1e1e;
     max-width: 140px;
@@ -4333,9 +3975,9 @@ body.authChecking .authLoadingScreen{
 .groupNavLink{
     border: 1px solid rgba(103, 159, 255, 0.6);
     background: rgba(255, 255, 255, 0.6);
-    border-radius: 999px;
-    padding: 4px 10px;
-    font-size: 11px;
+    border-radius: var(--radius-pill);
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
     font-weight: 700;
     color: #2f557f;
     text-decoration: none;
@@ -4348,9 +3990,9 @@ body.authChecking .authLoadingScreen{
 .userSignOutBtn{
     border: 1px solid rgba(103, 159, 255, 0.6);
     background: rgba(255, 255, 255, 0.6);
-    border-radius: 999px;
-    padding: 4px 10px;
-    font-size: 11px;
+    border-radius: var(--radius-pill);
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
     font-weight: 700;
     color: #2f557f;
     cursor: pointer;
@@ -4382,7 +4024,7 @@ body.authGateActive .authOverlay{
     position: absolute;
     width: 65vmax;
     height: 65vmax;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     filter: blur(70px);
     opacity: 0.8;
     pointer-events: none;
@@ -4421,7 +4063,7 @@ body.authGateActive .authOverlay{
     transform: translate(-50%, -50%);
     width: min(620px, 100vw);
     height: min(620px, 100vw);
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: radial-gradient(circle, rgba(198, 168, 255, 0.6) 0%, rgba(143, 111, 232, 0.42) 26%, rgba(127, 134, 255, 0.3) 52%, transparent 74%);
     filter: blur(45px);
     animation: authGlowPulse 4.5s ease-in-out infinite;
@@ -4448,18 +4090,18 @@ body.authGateActive .authOverlay{
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 14px;
+    gap: var(--space-4);
     flex: 0 0 auto;
 }
 
 .authLogo{
     width: 76px;
     height: 76px;
-    border-radius: 22px;
+    border-radius: var(--radius-lg);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 32px;
+    font-size: var(--text-2xl);
     background: linear-gradient(135deg, var(--violet-accent, #b58bff), var(--violet-accent-2, #7f86ff));
     color: #120b30;
     box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);
@@ -4467,7 +4109,7 @@ body.authGateActive .authOverlay{
 
 .authBrandTitle{
     font-family: 'Playfair Display', serif;
-    font-size: clamp(34px, 6vw, 48px);
+    font-size: clamp(var(--text-2xl), 6vw, 48px);
     font-weight: 700;
     color: #f7f4ff;
     letter-spacing: 0.3px;
@@ -4487,18 +4129,18 @@ body.authGateActive .authOverlay{
     width: min(340px, 90vw);
     background: rgba(247, 252, 255, 0.95);
     border: 2px solid rgba(74, 146, 246, 0.5);
-    border-radius: 18px;
+    border-radius: var(--radius-lg);
     box-shadow: 0 24px 54px rgba(28, 67, 128, 0.32);
-    padding: 22px;
+    padding: var(--space-6);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
     text-align: center;
 }
 
 .authGoogleBtn{
     height: 44px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     border: 2px solid rgba(103, 159, 255, 0.7);
     background: #ffffff;
     color: #1f2d4a;
@@ -4507,7 +4149,7 @@ body.authGateActive .authOverlay{
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: var(--space-3);
 }
 
 .authGoogleBtn:hover{
@@ -4515,19 +4157,19 @@ body.authGateActive .authOverlay{
 }
 
 .authGoogleBtn i{
-    font-size: 16px;
+    font-size: var(--text-md);
     color: #4285f4;
 }
 
 .authDivider{
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-3);
     color: #8a99b3;
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 700;
     text-transform: uppercase;
-    margin: 4px 0;
+    margin: var(--space-1) 0;
 }
 
 .authDivider::before,
@@ -4541,18 +4183,18 @@ body.authGateActive .authOverlay{
 .authEmailForm{
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--space-3);
 }
 
 .authEmailInput,
 .authPasswordInput{
     height: 44px;
-    padding: 0 14px;
-    border-radius: 10px;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-sm);
     border: 2px solid rgba(103, 159, 255, 0.5);
     background: #ffffff;
     color: #1e1e1e;
-    font-size: 14px;
+    font-size: var(--text-base);
     outline: none;
 }
 
@@ -4563,7 +4205,7 @@ body.authGateActive .authOverlay{
 }
 
 .authErrorText{
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 700;
     color: #b3261e;
     text-align: left;
@@ -4574,7 +4216,7 @@ body.authGateActive .authOverlay{
 }
 
 .authInfoText{
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 700;
     color: #1f7a3f;
     text-align: left;
@@ -4590,7 +4232,7 @@ body.authGateActive .authOverlay{
     background: transparent;
     border: none;
     color: #2f8fff;
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 700;
     cursor: pointer;
 }
@@ -4606,7 +4248,7 @@ body.authGateActive .authOverlay{
 
 .authSubmitBtn{
     height: 44px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     border: 2px solid #58a4ff;
     background: #2f8fff;
     color: #ffffff;
@@ -4625,7 +4267,7 @@ body.authGateActive .authOverlay{
 
 .authModeRow{
     margin-top: 2px;
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: #4d617f;
 }
 
@@ -4638,7 +4280,7 @@ body.authGateActive .authOverlay{
     border: none;
     padding: 0;
     color: #2f8fff;
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 700;
     cursor: pointer;
 }
@@ -4893,17 +4535,18 @@ body.authGateActive .authOverlay{
 }
 
 .helpTourBtn{
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
+    height: 32px;
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-sm);
     border: 1px solid rgba(142, 197, 255, 0.34);
     background: rgba(20, 30, 45, 0.95);
     color: #dce8fb;
-    font-size: 10px;
+    font-size: var(--text-sm);
+    font-weight: 700;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    justify-content: center;
+    gap: var(--space-2);
 }
 
 /* Group page only (see group.js's renderApp) - there's no group tour to
@@ -5718,8 +5361,8 @@ body.authGateActive .authOverlay{
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
-    border-radius: 8px;
+    font-size: var(--text-base);
+    border-radius: var(--radius-sm);
 }
 
 .authPasswordToggleBtn:hover{
@@ -5730,7 +5373,7 @@ body.authGateActive .authOverlay{
 .authPasswordStrength{
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-1);
     margin-top: -4px;
 }
 
@@ -5740,7 +5383,7 @@ body.authGateActive .authOverlay{
 
 .authPasswordStrengthBar{
     height: 5px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: rgba(255, 255, 255, 0.12);
     overflow: hidden;
 }
@@ -5749,7 +5392,7 @@ body.authGateActive .authOverlay{
     display: block;
     height: 100%;
     width: 0%;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     transition: width 0.2s ease, background 0.2s ease;
     background: #ff5c5c;
 }
@@ -5760,7 +5403,7 @@ body.authGateActive .authOverlay{
 .authPasswordStrengthFill.strength-4{ background: #57d17b; }
 
 .authPasswordStrengthLabel{
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 700;
     text-align: left;
     color: rgba(215, 208, 255, 0.75);
