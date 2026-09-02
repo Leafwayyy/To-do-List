@@ -183,6 +183,10 @@
             .settingsMemoryEmpty.hidden { display: none; }
             .settingsMemoryCount.hidden { display: none; }
             .settingsMemoryAddStatus.hidden { display: none; }
+            /* Same per-class reasoning as above - stays hidden on the group
+               pages, where there's nothing to move into it (see buildOverlay's
+               alertToggleBtn/difficultyVisibilityRow reparenting). */
+            .settingsAlertsSection.hidden { display: none; }
             .settingsMemoryAddRow { display: flex; gap: 8px; margin-bottom: 4px; }
             .settingsMemoryAddInput {
                 flex: 1;
@@ -283,6 +287,8 @@
                     </label>
                 </section>
 
+                <section class="settingsSection settingsAlertsSection hidden"></section>
+
                 <section class="settingsSection">
                     <h3>Your data</h3>
                     <p class="settingsHint">Download everything you've added as a JSON file.</p>
@@ -346,6 +352,28 @@
                 console.error('Could not save sound setting:', error);
             }
         });
+
+        // Section A of the UI/UX rework: popup alerts and the difficulty-chip
+        // toggle move out of solo's old sideColumn and into Settings, since
+        // they're standing preferences, not controls that change what's on
+        // screen right now. Solo-only (both null on the group pages, which
+        // have their own separate .groupAlertToggleBtn and no difficulty
+        // toggle at all) - real static markup, reparented via appendChild
+        // (which moves rather than clones, so script.js's own click/change
+        // listeners on them survive intact) rather than recreated here.
+        const alertToggleBtn = document.querySelector('.alertToggleBtn');
+        const difficultyVisibilityRow = document.querySelector('.metaVisibilityRow');
+        if (alertToggleBtn || difficultyVisibilityRow) {
+            const alertsSection = node.querySelector('.settingsAlertsSection');
+            alertsSection.classList.remove('hidden');
+            alertsSection.insertAdjacentHTML('afterbegin', '<h3>Alerts &amp; display</h3>');
+            if (alertToggleBtn) {
+                alertsSection.appendChild(alertToggleBtn);
+            }
+            if (difficultyVisibilityRow) {
+                alertsSection.appendChild(difficultyVisibilityRow);
+            }
+        }
 
         return node;
     }
@@ -778,6 +806,13 @@
     function init() {
         injectStyles();
         injectTrigger();
+        // Built eagerly, not lazily on first open, since .alertToggleBtn/
+        // .difficultyVisibilityToggle (solo only - both null on group pages)
+        // get reparented into it below and neither starts hidden in its old
+        // sideColumn spot - waiting for a lazy first-open would leave them
+        // visible in the old location the whole time until Settings was
+        // opened once. Same fix as group.js's initializeGroupSettingsModal.
+        overlay = buildOverlay();
 
         window.ToDoAuth.onAuthChange((user) => {
             currentUser = user;

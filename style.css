@@ -729,6 +729,39 @@ body{
     display: none;
 }
 
+/* Now living in Settings (section A of the UI/UX rework - see settings.js's
+   buildOverlay), so it's unconditionally visible there rather than only
+   ≤900px the way it was in its old sideColumn spot - Settings itself is
+   reachable regardless of viewport. Matches .settingsToggleRow's own plain-
+   native-checkbox pattern (settings.js) rather than importing the old
+   sideColumn's bespoke pill-switch look, since consistency with its new
+   neighbor (the Mute toggle, right above it) matters more here than
+   preserving the old spot's own one-off styling. .settingsCard itself is
+   dark/violet (settings.js's injected styles), not light - the old
+   sideColumn version's #4d617f-family colors would have been unreadable
+   against it. */
+.settingsAlertsSection .metaVisibilityRow{
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--violet-muted, #d7d0ff);
+    cursor: pointer;
+}
+
+.settingsAlertsSection .metaVisibilityRow input{
+    accent-color: var(--violet-accent, #b58bff);
+    cursor: pointer;
+}
+
+/* .alertToggleBtn's base rule (above) has margin-left:auto, meant to push it
+   to the far edge of .priorityHeaderRow's flex row - meaningless (and here,
+   actively wrong) in .settingsAlertsSection's simple vertical stack. */
+.settingsAlertsSection .alertToggleBtn{
+    margin-left: 0;
+    margin-bottom: var(--space-2);
+}
+
 .taskViews{
     width: 92%;
     margin-top: 10px;
@@ -3300,8 +3333,7 @@ body::after{
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         grid-template-areas:
-            "toggle sort"
-            "toggle alert";
+            "toggle sort";
         align-items: start;
         column-gap: 10px;
         row-gap: 8px;
@@ -3321,61 +3353,17 @@ body::after{
         justify-self: end;
     }
 
-    .mainColumn .alertToggleBtn,
-    .sideColumn .alertToggleBtn{
-        grid-area: alert;
-        justify-self: end;
-    }
-
     .mainColumn .priorityModeHint,
     .sideColumn .priorityModeHint{
         margin-top: 0;
     }
 
-    .mainColumn .metaVisibilityRow,
-    .sideColumn .metaVisibilityRow{
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 12px;
-        color: rgba(236, 229, 255, 0.94);
-    }
-
-    .mainColumn .metaVisibilityRow input,
-    .sideColumn .metaVisibilityRow input{
-        appearance: none;
-        width: 38px;
-        height: 22px;
-        border-radius: 999px;
-        border: 1px solid rgba(195, 178, 255, 0.7);
-        background: rgba(67, 51, 132, 0.72);
-        position: relative;
-        cursor: pointer;
-        transition: background-color 0.2s ease;
-    }
-
-    .mainColumn .metaVisibilityRow input::after,
-    .sideColumn .metaVisibilityRow input::after{
-        content: '';
-        position: absolute;
-        top: 2px;
-        left: 2px;
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        background: #efe9ff;
-        transition: transform 0.2s ease;
-    }
-
-    .mainColumn .metaVisibilityRow input:checked,
-    .sideColumn .metaVisibilityRow input:checked{
-        background: linear-gradient(130deg, rgba(179, 150, 255, 0.95), rgba(129, 141, 255, 0.94));
-    }
-
-    .mainColumn .metaVisibilityRow input:checked::after,
-    .sideColumn .metaVisibilityRow input:checked::after{
-        transform: translateX(16px);
-    }
+    /* .alertToggleBtn and .metaVisibilityRow used to live in this same grid
+       (see the removed "alert" grid-area above) - both now live in Settings
+       instead (section A of the UI/UX rework, see settings.js's
+       buildOverlay and the unconditional .settingsAlertsSection rules near
+       .metaVisibilityRow's base rule, not gated to this breakpoint since
+       Settings is reachable regardless of viewport width). */
 
     .sideColumn .activitySummary{
         white-space: normal;
