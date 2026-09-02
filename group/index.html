@@ -11,7 +11,7 @@
     <!-- Same stylesheet as the solo app, loaded once, the normal way - no
          second build/bundle for this page, so there's nothing for its rules
          to collide with. -->
-    <link rel="stylesheet" href="../style.css?v=20260902m">
+    <link rel="stylesheet" href="../style.css?v=20260902n">
 </head>
 <body class="authChecking">
 
@@ -124,8 +124,10 @@
 
             <div class="groupDashboard hidden">
                 <div class="viewTabs" role="tablist" aria-label="Group dashboard view">
-                    <button class="viewTab active" type="button" data-view="tasks" role="tab" aria-selected="true">Tasks</button>
-                    <button class="viewTab" type="button" data-view="team" role="tab" aria-selected="false">Team</button>
+                    <button class="viewTab active" type="button" data-view="tasks" role="tab" aria-selected="true"><i class="fa-solid fa-list-check" aria-hidden="true"></i> Tasks</button>
+                    <button class="viewTab" type="button" data-view="team" role="tab" aria-selected="false"><i class="fa-solid fa-people-group" aria-hidden="true"></i> Team</button>
+                    <button class="viewTab" type="button" data-view="leaderboard" role="tab" aria-selected="false"><i class="fa-solid fa-trophy" aria-hidden="true"></i> Leaderboard</button>
+                    <button class="viewTab" type="button" data-view="activity" role="tab" aria-selected="false"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Activity<span class="historyUnreadDot hidden" aria-label="Unread"></span></button>
                 </div>
 
                 <div class="viewPanel" data-view-panel="tasks">
@@ -240,6 +242,12 @@
                         <p class="taskViewsLabel whoseTasksLabel">Whose tasks</p>
                         <div class="taskViews groupMemberScopeTabs" aria-label="Whose tasks"></div>
 
+                        <!-- Only rendered when whose-tasks has a specific teammate
+                             selected (not Everyone/You) - suggesting a task now
+                             lives here, contextual to viewing that person's tasks,
+                             instead of a button on every roster card in Team. -->
+                        <div class="suggestForMemberBanner hidden"></div>
+
                         <p class="taskViewsLabel">Filter by deadline</p>
                         <div class="taskViews deadlineViewTabs" aria-label="Task views">
                             <button class="taskViewBtn active" data-view="all">All</button>
@@ -257,10 +265,16 @@
                     </section>
                 </div>
 
+                <!-- Team: just the roster - who's in the group, their role, and
+                     (owner/admin only) kick/promote controls. Leaderboard and
+                     Activity used to live here too; each is its own tab now so
+                     this one does a single thing. -->
                 <div class="viewPanel hidden" data-view-panel="team">
                     <div class="memberRoster"></div>
                     <p class="memberRosterInviteHint hidden">Working alone for now - share the invite code above to add teammates.</p>
+                </div>
 
+                <div class="viewPanel hidden" data-view-panel="leaderboard">
                     <div class="groupLeaderboardPanel">
                         <div class="groupLeaderboardHeader">
                             <p class="groupLeaderboardTitle">Leaderboard</p>
@@ -273,26 +287,19 @@
                         <p class="leaderboardTeaser hidden">Leaderboard fills in once a teammate joins and you've both finished a task or two.</p>
                         <ol class="leaderboardList"></ol>
                     </div>
+                </div>
 
-                    <button type="button" class="groupHistoryOpenBtn" aria-haspopup="dialog">
-                        <span class="groupHistoryOpenLabel"><i class="fa-solid fa-clock-rotate-left"></i> Recently finished<span class="historyUnreadDot hidden" aria-label="Unread"></span></span>
-                        <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-                    </button>
+                <!-- Activity: the completion log itself, inline - previously a
+                     modal opened from a button inside Team; now its own tab,
+                     always showing whatever renderGroupHistory has already
+                     rendered rather than something you have to open. -->
+                <div class="viewPanel hidden" data-view-panel="activity">
+                    <div class="groupHistoryPanel">
+                        <p class="groupHistoryPanelTitle">Recently finished</p>
+                        <div class="groupHistoryList"></div>
+                    </div>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <div class="groupHistoryOverlay hidden" aria-hidden="true">
-        <div class="groupHistoryModalCard" role="dialog" aria-modal="true" aria-label="Recently finished">
-            <div class="groupHistoryModalHeader">
-                <p class="groupHistoryModalTitle">Recently finished</p>
-                <button type="button" class="groupHistoryCloseBtn" aria-label="Close">Close</button>
-            </div>
-            <!-- Its own scrollable grid, capped in height (style.css) so even a
-                 full 50-entry history log stays contained inside the modal
-                 instead of growing the card past the viewport. -->
-            <div class="groupHistoryList"></div>
         </div>
     </div>
 
@@ -356,7 +363,7 @@
     <script src="../brain-dump.js?v=20260902a"></script>
     <script src="../auth-gate.js?v=20260830a"></script>
     <script src="groups-data.js?v=20260830c"></script>
-    <script src="group.js?v=20260902i"></script>
+    <script src="group.js?v=20260902j"></script>
     <script type="module" src="../firebase-init.js?v=20260831a"></script>
     <script src="../settings.js?v=20260902b"></script>
 </body>

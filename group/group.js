@@ -326,6 +326,18 @@ function switchGroupView(view) {
     groupViewPanels.forEach((panel) => {
         panel.classList.toggle('hidden', panel.dataset.viewPanel !== view);
     });
+
+    // Activity used to be a modal, marked "viewed" on open (openGroupHistoryModal,
+    // now removed) - it's a plain tab now, so switching to it is the
+    // equivalent moment to mark the group's history as seen and clear the
+    // unread dot immediately, rather than waiting on the next renderApp().
+    if (view === 'activity') {
+        const group = getSelectedGroup();
+        if (group) {
+            setHistoryLastViewedAt(group.id, new Date().toISOString());
+            groupHistoryUnreadDot?.classList.add('hidden');
+        }
+    }
 }
 
 groupViewTabButtons.forEach((button) => {
@@ -370,10 +382,10 @@ const leaderboardMemberModalTitle = document.querySelector('.leaderboardMemberMo
 const leaderboardMemberCloseBtn = document.querySelector('.leaderboardMemberCloseBtn');
 const leaderboardMemberList = document.querySelector('.leaderboardMemberList');
 const groupHistoryList = document.querySelector('.groupHistoryList');
-const groupHistoryOpenBtn = document.querySelector('.groupHistoryOpenBtn');
+// Activity is now its own always-visible tab (see the viewTabs restructure),
+// not a modal opened from a trigger button - the unread dot lives on the
+// tab itself now (still .historyUnreadDot, just relocated in index.html).
 const groupHistoryUnreadDot = document.querySelector('.historyUnreadDot');
-const groupHistoryOverlay = document.querySelector('.groupHistoryOverlay');
-const groupHistoryCloseBtn = document.querySelector('.groupHistoryCloseBtn');
 const suggestionsForYouPanel = document.querySelector('.suggestionsForYouPanel');
 const brainDumpToggleBtn = document.querySelector('.brainDumpToggleBtn');
 const groupAlertToggleBtn = document.querySelector('.groupAlertToggleBtn');
@@ -1815,8 +1827,50 @@ function setActiveMemberScope(scope) {
         renderGroupMemberScopeTabs(group);
         renderMemberRoster(group, getMyRoleInGroup(group));
         renderGroupHistory(group);
+        renderSuggestForMemberBanner(group);
     }
     renderGroupTasks();
+}
+
+// Suggesting a task is contextual to the Tasks tab now (not a button on
+// every roster card in Team) - only rendered once whose-tasks actually has
+// a specific teammate selected, matching how the user described wanting
+// this: "switch between whose tasks and if you go on a specific person's
+// you can suggest task there."
+const suggestForMemberBanner = document.querySelector('.suggestForMemberBanner');
+
+function renderSuggestForMemberBanner(group) {
+    if (!suggestForMemberBanner) {
+        return;
+    }
+    suggestForMemberBanner.innerHTML = '';
+
+    const isSpecificMember = activeMemberScope !== 'all' && activeMemberScope !== currentUser?.uid;
+    if (!group || !isSpecificMember) {
+        suggestForMemberBanner.classList.add('hidden');
+        return;
+    }
+
+    const memberIds = group.memberIds || [];
+    const memberNames = group.memberNames || [];
+    const index = memberIds.indexOf(activeMemberScope);
+    const name = resolveMemberName(activeMemberScope, memberNames[index], groupTasks);
+
+    const text = document.createElement('span');
+    text.textContent = `Viewing ${name}'s tasks.`;
+    suggestForMemberBanner.appendChild(text);
+
+    const suggestBtn = document.createElement('button');
+    suggestBtn.type = 'button';
+    suggestBtn.classList.add('suggestForMemberBtn');
+    suggestBtn.innerHTML = '<i class="fa-solid fa-lightbulb"></i> Suggest a task';
+    suggestBtn.addEventListener('click', () => {
+        playClickSound();
+        openSuggestTaskModal(group.id, activeMemberScope, name);
+    });
+    suggestForMemberBanner.appendChild(suggestBtn);
+
+    suggestForMemberBanner.classList.remove('hidden');
 }
 
 // Same "last viewed vs. server timestamp" shape as the comments unread dot
@@ -1891,13 +1945,11 @@ function renderGroupHistory(group) {
         ? groupHistoryEntries
         : groupHistoryEntries.filter((entry) => entry.ownerId === activeMemberScope);
 
-    // Lives inside the .groupHistoryModalCard now (see index.html), opened
-    // on demand from the sidebar's .groupHistoryOpenBtn rather than sitting
-    // permanently on the page - so showing the full 50-entry log it's
-    // already subscribed to (rather than the old 12-item slice) doesn't
-    // grow the dashboard itself even for a group with a lot of history; the
-    // modal card and this list are both height-capped and scroll
-    // internally instead (style.css).
+    // Lives inline in the Activity tab now (see index.html) rather than a
+    // modal - showing the full 50-entry log it's already subscribed to
+    // (rather than an older, shorter slice) doesn't grow the dashboard
+    // itself, since .groupHistoryPanel/.groupHistoryList are height-capped
+    // and scroll internally instead (style.css).
     const finished = scopedEntries;
 
     if (finished.length === 0) {
@@ -1928,44 +1980,10 @@ function renderGroupHistory(group) {
     });
 }
 
-// Opened on demand from the sidebar rather than sitting permanently on the
-// page - same overlay/backdrop-click-to-close pattern as taskEditorOverlay.
-function openGroupHistoryModal(group) {
-    if (!groupHistoryOverlay) {
-        return;
-    }
-    if (group) {
-        setHistoryLastViewedAt(group.id, new Date().toISOString());
-        // Immediate feedback rather than waiting on the next renderApp().
-        groupHistoryUnreadDot?.classList.add('hidden');
-    }
-    groupHistoryOverlay.classList.remove('hidden');
-    groupHistoryOverlay.setAttribute('aria-hidden', 'false');
-}
-
-function closeGroupHistoryModal() {
-    if (!groupHistoryOverlay) {
-        return;
-    }
-    groupHistoryOverlay.classList.add('hidden');
-    groupHistoryOverlay.setAttribute('aria-hidden', 'true');
-}
-
-groupHistoryOpenBtn?.addEventListener('click', () => {
-    playClickSound();
-    openGroupHistoryModal(getSelectedGroup());
-});
-
-groupHistoryCloseBtn?.addEventListener('click', () => {
-    playClickSound();
-    closeGroupHistoryModal();
-});
-
-groupHistoryOverlay?.addEventListener('click', (event) => {
-    if (event.target === groupHistoryOverlay) {
-        closeGroupHistoryModal();
-    }
-});
+// Activity is a plain always-rendered tab now (see switchGroupView's
+// 'activity' branch above, which handles marking history as viewed) - the
+// modal open/close functions and their overlay/button wiring that used to
+// live here are gone along with .groupHistoryOverlay itself.
 
 // Pending suggestions a teammate made for YOU specifically (see the
 // "Suggest a task" button on each roster card) - accept to create the real
@@ -2663,18 +2681,12 @@ function renderMemberRoster(group, { isOwner = false, isAdmin = false } = {}) {
             memberCard.appendChild(focusLine);
         }
 
-        if (card.memberId !== currentUser?.uid) {
-            const suggestBtn = document.createElement('button');
-            suggestBtn.type = 'button';
-            suggestBtn.classList.add('memberCardSuggestBtn');
-            suggestBtn.innerHTML = '<i class="fa-solid fa-lightbulb"></i> Suggest a task';
-            suggestBtn.addEventListener('click', (event) => {
-                event.stopPropagation();
-                playClickSound();
-                openSuggestTaskModal(group.id, card.memberId, card.name);
-            });
-            memberCard.appendChild(suggestBtn);
-        }
+        // Suggest a task no longer lives here - Team is roster-only now
+        // (progress, role, kick/promote). Suggesting for someone is
+        // contextual to the Tasks tab instead, shown once their "whose
+        // tasks" scope is actually selected there (see
+        // renderSuggestForMemberBanner) - clicking this card still switches
+        // that scope (below), it just doesn't also carry its own action.
 
         // Moderation controls - never on your own card or the owner's.
         // Kick: owner can remove anyone; an admin can only remove a plain
@@ -3113,6 +3125,7 @@ function renderApp() {
         renderMemberRoster(group, { isOwner, isAdmin });
         renderGroupLeaderboard(group);
         renderGroupHistory(group);
+        renderSuggestForMemberBanner(group);
         renderSuggestionsForYou(group.id);
         renderGroupTasks();
         // The 6-button deadline-filter row isn't worth much with barely any
@@ -4098,8 +4111,8 @@ const GROUP_TOUR_STEPS = [
     },
     {
         selector: '.viewTabs',
-        title: 'Tasks and Team',
-        text: 'Tasks is where you work. Switch to Team any time to see everyone\'s progress, the leaderboard, and what\'s been finished recently.',
+        title: 'Four places, one job each',
+        text: 'Tasks is where you work. Team shows everyone and their roles. Leaderboard ranks completions. Activity is a running log of what just got finished.',
         beforeShow: () => switchGroupView('tasks')
     },
     {
@@ -4111,7 +4124,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.groupMemberScopeTabs',
         title: 'Whose tasks',
-        text: 'See everyone\'s tasks together, just your own, or drill into one teammate\'s.',
+        text: 'See everyone\'s tasks together, just your own, or drill into one teammate\'s - select them and a Suggest a task button appears right here.',
         // Hidden for a solo group (see renderGroupMemberScopeTabs) - skip
         // this step rather than highlighting a hidden, zero-size element.
         isRelevant: () => (getSelectedGroup()?.memberIds || []).length > 1,
@@ -4125,15 +4138,21 @@ const GROUP_TOUR_STEPS = [
     },
     {
         selector: '.memberRoster',
-        title: 'Team progress',
-        text: 'See everyone\'s progress and current focus. Click a card to filter to their tasks, or suggest a task for them.',
+        title: 'Team',
+        text: 'Everyone in the group, their role, and their current progress. Click a card to switch Tasks over to just their work.',
         beforeShow: () => switchGroupView('team')
     },
     {
-        selector: '.groupHistoryOpenBtn',
-        title: 'Recently finished',
-        text: 'Open a running log of what the team has been completing.',
-        beforeShow: () => switchGroupView('team')
+        selector: '.groupLeaderboardPanel',
+        title: 'Leaderboard',
+        text: 'Ranked by completions - switch between this week, this month, and all time.',
+        beforeShow: () => switchGroupView('leaderboard')
+    },
+    {
+        selector: '.groupHistoryPanel',
+        title: 'Activity',
+        text: 'A running log of what the team has been finishing, newest first.',
+        beforeShow: () => switchGroupView('activity')
     },
     {
         selector: '.groupBrowseAllLink',

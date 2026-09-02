@@ -3057,6 +3057,7 @@ body::after{
    up - Jakob's Law: don't invent a second tab pattern the eye has to learn. */
 .viewTabs{
     display: flex;
+    flex-wrap: wrap;
     gap: var(--space-2);
     /* Base: fills whatever normal-flow width its actual parent provides -
        correct for group's .viewTabs, which sits nested inside
@@ -3078,6 +3079,9 @@ body > .viewTabs{
 }
 
 .viewTab{
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
     border: 2px solid var(--violet-border-soft, rgba(170, 152, 255, 0.28));
     background: linear-gradient(145deg, rgba(39, 27, 92, 0.9), rgba(27, 18, 72, 0.9));
     color: var(--violet-text, #f6f4ff);
@@ -6346,22 +6350,45 @@ body.authGateActive .authOverlay{
     box-shadow: 0 0 0 1px var(--violet-accent) inset;
 }
 
-.memberCardSuggestBtn{
+/* Suggesting a task moved from a per-roster-card button (Team is roster-
+   only now) into this contextual banner in the Tasks view, shown only
+   once whose-tasks has a specific teammate selected - see
+   renderSuggestForMemberBanner in group.js. */
+.suggestForMemberBanner{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    width: 92%;
+    margin-top: -4px;
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface-soft);
+    color: var(--violet-muted);
+    font-size: var(--text-sm);
+}
+
+.suggestForMemberBanner.hidden{
+    display: none;
+}
+
+.suggestForMemberBtn{
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin-top: 8px;
+    flex: 0 0 auto;
     padding: 4px 10px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     border: 1px solid var(--violet-border-soft);
     background: rgba(255, 255, 255, 0.06);
     color: var(--violet-muted);
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 700;
     cursor: pointer;
 }
 
-.memberCardSuggestBtn:hover{
+.suggestForMemberBtn:hover{
     color: var(--violet-accent);
     border-color: var(--violet-accent);
 }
@@ -6671,64 +6698,11 @@ body.authGateActive .authOverlay{
     font-size: 20px;
 }
 
-/* A small clickable trigger in the sidebar (not a permanently-open panel) -
-   opens the .groupHistoryOverlay modal below. Keeps the sidebar compact
-   regardless of how much history a group has racked up, since the list
-   itself only ever renders while the modal is open. */
-.groupHistoryOpenBtn{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    width: 100%;
-    padding: 12px 14px;
-    border-radius: 12px;
-    border: 1px solid var(--violet-border-soft);
-    background: var(--violet-surface-soft);
-    color: var(--violet-text);
-    font-size: 13px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: background-color 0.15s ease, border-color 0.15s ease;
-}
-
-.groupHistoryOpenBtn:hover{
-    background: var(--violet-surface);
-    border-color: var(--violet-accent);
-}
-
-.groupHistoryOpenBtn i:last-child{
-    color: var(--violet-muted);
-    font-size: 12px;
-}
-
-.groupHistoryOpenLabel{
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.groupHistoryOverlay{
-    position: fixed;
-    inset: 0;
-    z-index: 1400;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-    background: rgba(7, 4, 30, 0.62);
-    backdrop-filter: blur(3px);
-}
-
-.groupHistoryOverlay.hidden{
-    display: none;
-}
-
-.groupHistoryModalCard{
-    width: min(640px, 96vw);
-    max-height: min(80vh, 640px);
-    display: flex;
-    flex-direction: column;
+/* Activity is its own always-visible tab now (not a modal opened from a
+   trigger button - see the viewTabs restructure and switchGroupView's
+   'activity' branch in group.js), so .groupHistoryPanel is just a plain
+   card sitting directly in that view, not an overlay. */
+.groupHistoryPanel{
     border-radius: var(--radius-lg);
     border: 1px solid rgba(205, 194, 255, 0.56);
     background: linear-gradient(165deg, rgba(43, 30, 105, 0.97), rgba(24, 16, 72, 0.98));
@@ -6736,40 +6710,22 @@ body.authGateActive .authOverlay{
     padding: 16px;
 }
 
-.groupHistoryModalHeader{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 12px;
-}
-
-.groupHistoryModalTitle{
-    margin: 0;
-    font-size: 16px;
+.groupHistoryPanelTitle{
+    margin: 0 0 12px;
+    font-size: var(--text-md);
     font-weight: 800;
     color: #f6f2ff;
 }
 
-.groupHistoryCloseBtn{
-    border: 1px solid rgba(205, 194, 255, 0.64);
-    border-radius: 999px;
-    height: 30px;
-    padding: 0 12px;
-    background: rgba(91, 72, 170, 0.5);
-    color: #f2edff;
-    font-weight: 700;
-    cursor: pointer;
-}
-
-/* The modal card itself is height-capped above, and this list scrolls
-   internally within it - so even a group with a long completion history
-   never grows the card past the viewport. */
+/* Height-capped and scrolls internally, same reasoning the old modal card
+   had - a group with a long completion history shouldn't grow the whole
+   tab past the viewport. */
 .groupHistoryList{
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     align-content: start;
     gap: 10px;
+    max-height: min(60vh, 520px);
     overflow-y: auto;
     padding-right: 4px;
 }
@@ -6809,8 +6765,10 @@ body.authGateActive .authOverlay{
 }
 
 /* Leaderboard member modal - opened by clicking a row in the leaderboard,
-   same overlay/card visual language as .groupHistoryOverlay above, just a
-   single-person, single-column list instead of a grid. */
+   a drill-down detail view (one person's completed tasks) rather than one
+   of the four main tabs, so it stays a modal - unlike .groupHistoryPanel
+   above, which used to be this same overlay pattern before Activity became
+   its own tab. */
 .leaderboardMemberOverlay{
     position: fixed;
     inset: 0;
@@ -7125,10 +7083,17 @@ body.authGateActive .authOverlay{
 .historyUnreadDot{
     width: 8px;
     height: 8px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: #ff5a5a;
     box-shadow: 0 0 0 2px rgba(255, 90, 90, 0.25);
     flex: 0 0 auto;
+}
+
+/* Now sitting inline inside the Activity tab itself (viewTabs restructure),
+   not a sidebar trigger button - a little breathing room from the label
+   text it directly follows. */
+.viewTab .historyUnreadDot{
+    margin-left: 2px;
 }
 
 .historyUnreadDot.hidden{
