@@ -2363,14 +2363,30 @@ function renderGroupMemberScopeTabs(group) {
     groupMemberScopeTabs.innerHTML = '';
     const memberNames = group.memberNames || [];
 
-    const makeTab = (scope, label) => {
+    // Avatar chips (section E): a small circular initial avatar plus name,
+    // instead of plain text pills identical in shape to the deadline-filter
+    // row right below it (Law of Similarity - two visually-identical rows
+    // currently read as one longer list). "Everyone" gets a person-group
+    // icon in the same avatar slot rather than a single-letter initial,
+    // since it represents a set of members, not one.
+    const makeTab = (scope, label, avatarContent) => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.classList.add('taskViewBtn', 'groupScopeTabBtn');
         if (activeMemberScope === scope) {
             btn.classList.add('active');
         }
-        btn.textContent = label;
+
+        const avatar = document.createElement('span');
+        avatar.classList.add('scopeTabAvatar');
+        avatar.setAttribute('aria-hidden', 'true');
+        avatar.innerHTML = avatarContent;
+        btn.appendChild(avatar);
+
+        const text = document.createElement('span');
+        text.textContent = label;
+        btn.appendChild(text);
+
         btn.addEventListener('click', () => {
             playClickSound();
             setActiveMemberScope(scope);
@@ -2378,12 +2394,13 @@ function renderGroupMemberScopeTabs(group) {
         groupMemberScopeTabs.appendChild(btn);
     };
 
-    makeTab('all', 'Everyone');
+    makeTab('all', 'Everyone', '<i class="fa-solid fa-people-group"></i>');
 
     memberIds.forEach((memberId, index) => {
         const isYou = memberId === currentUser?.uid;
         const label = isYou ? 'Me' : resolveMemberName(memberId, memberNames[index], groupTasks);
-        makeTab(memberId, label);
+        const initial = (label || '?').trim().charAt(0).toUpperCase() || '?';
+        makeTab(memberId, label, initial);
     });
 }
 

@@ -3101,6 +3101,39 @@ body > .viewTabs{
     color: #fdfcff;
 }
 
+/* Avatar chips for group's member-scope tabs (section E): reuses .taskViewBtn
+   for the pill shape/color, adding icon+text layout and a small circular
+   initial avatar so this row reads as a person-picker, a genuinely
+   different control type from the plain-text deadline-filter row right
+   below it (Law of Similarity). */
+.groupScopeTabBtn{
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding-left: 5px;
+}
+
+.scopeTabAvatar{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: var(--radius-circle);
+    background: rgba(255, 255, 255, 0.35);
+    font-size: 9px;
+    font-weight: 800;
+    flex-shrink: 0;
+}
+
+.groupScopeTabBtn.active .scopeTabAvatar{
+    background: rgba(255, 255, 255, 0.55);
+}
+
+.scopeTabAvatar i{
+    font-size: 9px;
+}
+
 .viewPanel{
     width: 100%;
 }
