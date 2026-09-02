@@ -2106,6 +2106,18 @@ function editTask(taskId) {
 
     updateEditorDurationInputVisibility();
 
+    // More options starts expanded when the task being edited already has
+    // any of estimate/deadline/schedule set, so editing never hides already-
+    // configured data behind a collapsed toggle - only a genuinely blank
+    // task gets the Hick's-Law-simplified collapsed default.
+    const editorMoreToggleBtn = taskEditorOverlay.querySelector('.editorMoreToggleBtn');
+    const editorMoreOptions = taskEditorOverlay.querySelector('.editorMoreOptions');
+    const hasExtraDetails = Boolean(task.estimateMinutes) || Boolean(task.dueAt) || Boolean(task.scheduledAt);
+    if (editorMoreOptions && editorMoreToggleBtn) {
+        editorMoreOptions.classList.toggle('open', hasExtraDetails);
+        editorMoreToggleBtn.setAttribute('aria-expanded', String(hasExtraDetails));
+    }
+
     taskEditorOverlay.classList.add('open');
     editorTextInput.focus();
     editorTextInput.select();
@@ -2121,53 +2133,66 @@ function initializeTaskEditor() {
                 Task
                 <input type="text" class="editorTextInput" maxlength="240">
             </label>
-            <label>
-                Task Matrix
-                <select class="editorMatrixSelect">
-                    <option value="do">Task Matrix: Important & Urgent</option>
-                    <option value="schedule">Task Matrix: Important</option>
-                    <option value="delegate">Task Matrix: Urgent</option>
-                    <option value="eliminate">Task Matrix: None</option>
-                </select>
-            </label>
-            <label>
-                Task Type
-                <div class="editorEffortRow">
-                    <select class="editorTaskTypeSelect">
-                        <option value="timeboxed">Estimate time</option>
-                        <option value="open">No time estimate</option>
+            <div class="detailsGridPrimary editorPrimaryGrid">
+                <label class="detailsFieldGroup">
+                    Task Matrix
+                    <select class="editorMatrixSelect">
+                        <option value="do">Task Matrix: Important & Urgent</option>
+                        <option value="schedule">Task Matrix: Important</option>
+                        <option value="delegate">Task Matrix: Urgent</option>
+                        <option value="eliminate">Task Matrix: None</option>
                     </select>
-                    <input type="number" class="editorDurationInput" min="5" step="5" placeholder="Minutes">
-                </div>
-            </label>
-            <label>
-                Difficulty
-                <select class="editorDifficultySelect">
-                    <option value="1">1 (Very Easy)</option>
-                    <option value="2">2 (Easy)</option>
-                    <option value="3" selected>3 (Medium)</option>
-                    <option value="4">4 (Hard)</option>
-                    <option value="5">5 (Very Hard)</option>
-                </select>
-            </label>
-            <label>
-                Deadline
-                <div class="editorDeadlineWrap">
-                    <input type="datetime-local" class="editorDeadlineInput">
-                    <button type="button" class="editorCalendarBtn" aria-label="Open edit deadline calendar">
-                        <i class="fa-regular fa-calendar"></i>
-                    </button>
-                </div>
-            </label>
-            <label>
-                Schedule (when you'll actually do it)
-                <div class="editorDeadlineWrap editorScheduleWrap">
-                    <input type="datetime-local" class="editorDeadlineInput editorScheduleInput">
-                    <button type="button" class="editorCalendarBtn editorScheduleCalendarBtn" aria-label="Open edit schedule calendar">
-                        <i class="fa-solid fa-clock"></i>
-                    </button>
-                </div>
-            </label>
+                    <p class="detailsFieldSubtitle">How urgent, how important</p>
+                </label>
+                <label class="detailsFieldGroup">
+                    Difficulty
+                    <select class="editorDifficultySelect">
+                        <option value="1">1 (Very Easy)</option>
+                        <option value="2">2 (Easy)</option>
+                        <option value="3" selected>3 (Medium)</option>
+                        <option value="4">4 (Hard)</option>
+                        <option value="5">5 (Very Hard)</option>
+                    </select>
+                    <p class="detailsFieldSubtitle">How hard this will be</p>
+                </label>
+            </div>
+
+            <button type="button" class="detailsMoreToggleBtn editorMoreToggleBtn" aria-expanded="false" aria-controls="editorMoreOptions">
+                <span>More options: estimate, deadline, schedule</span>
+                <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+            </button>
+
+            <div class="detailsMoreOptions editorMoreOptions" id="editorMoreOptions">
+                <label>
+                    Task Type
+                    <div class="editorEffortRow">
+                        <select class="editorTaskTypeSelect">
+                            <option value="timeboxed">Estimate time</option>
+                            <option value="open">No time estimate</option>
+                        </select>
+                        <input type="number" class="editorDurationInput" min="5" step="5" placeholder="Minutes">
+                    </div>
+                </label>
+                <label>
+                    Deadline
+                    <div class="editorDeadlineWrap">
+                        <input type="datetime-local" class="editorDeadlineInput">
+                        <button type="button" class="editorCalendarBtn" aria-label="Open edit deadline calendar">
+                            <i class="fa-solid fa-calendar"></i>
+                        </button>
+                    </div>
+                </label>
+                <label>
+                    Schedule (when you'll actually do it)
+                    <div class="editorDeadlineWrap editorScheduleWrap">
+                        <input type="datetime-local" class="editorDeadlineInput editorScheduleInput">
+                        <button type="button" class="editorCalendarBtn editorScheduleCalendarBtn" aria-label="Open edit schedule calendar">
+                            <i class="fa-solid fa-clock"></i>
+                        </button>
+                    </div>
+                </label>
+            </div>
+
             <div class="editorActions">
                 <button type="button" class="editorCancelBtn">Cancel</button>
                 <button type="button" class="editorSaveBtn">Save</button>
@@ -2191,6 +2216,21 @@ function initializeTaskEditor() {
     const editorCancelBtn = taskEditorOverlay.querySelector('.editorCancelBtn');
     sanitizeNumberInputAsPositiveInteger(editorDurationInput);
     const editorSaveBtn = taskEditorOverlay.querySelector('.editorSaveBtn');
+    const editorMoreToggleBtn = taskEditorOverlay.querySelector('.editorMoreToggleBtn');
+    const editorMoreOptions = taskEditorOverlay.querySelector('.editorMoreOptions');
+
+    // Same two-tier disclosure as the inline Prioritize panel (section V,
+    // matching C's Hick's Law fix so editing a task and creating one feel
+    // like the same system) - estimate/deadline/schedule collapsed behind
+    // "More options" until asked for.
+    if (editorMoreToggleBtn && editorMoreOptions) {
+        editorMoreToggleBtn.addEventListener('click', () => {
+            playClickSound();
+            const isOpen = !editorMoreOptions.classList.contains('open');
+            editorMoreOptions.classList.toggle('open', isOpen);
+            editorMoreToggleBtn.setAttribute('aria-expanded', String(isOpen));
+        });
+    }
 
     if (editorTaskTypeSelect) {
         editorTaskTypeSelect.addEventListener('change', () => {

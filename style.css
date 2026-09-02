@@ -6420,11 +6420,25 @@ body.authGateActive .authOverlay{
     flex: 0 1 100%;
 }
 
+/* Section W: given real visual weight, since "who this is for" is the one
+   piece of context this form has that the task editor/Prioritize panel
+   don't - previously no more prominent than any other field despite being
+   the whole point of this specific modal. */
 .suggestForLabel{
-    margin: -8px 0 4px;
-    font-size: 12px;
-    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: -4px 0 4px;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-pill);
+    background: var(--color-info-soft, rgba(127, 134, 255, 0.16));
+    font-size: var(--text-md);
+    font-weight: 800;
     color: var(--violet-accent);
+}
+
+.suggestForLabel i{
+    font-size: var(--text-sm);
 }
 
 .suggestionRowFrom{
