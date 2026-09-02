@@ -334,7 +334,19 @@ taskInput.addEventListener('input', () => {
         clearTimeout(quickAddHintTimeoutId);
     }
     quickAddHintTimeoutId = setTimeout(updateQuickAddHint, 150);
+    updateAddBtnState();
 });
+
+// Section B: a real disabled state instead of a silent no-op/alert() when
+// the input is empty - previously the only feedback for clicking + with
+// nothing typed was a jarring alert() from inside addTaskFromInputs, which
+// read as broken rather than "nothing to submit yet." Pressing Enter on an
+// empty input still falls through to that alert() as a rare-case fallback,
+// since keydown submission bypasses a disabled button entirely - this only
+// closes the "the button looked clickable but visibly did nothing" gap.
+function updateAddBtnState() {
+    addBtn.disabled = taskInput.value.trim() === '';
+}
 
 deadlineInput.addEventListener('input', updateQuickAddHint);
 
@@ -408,6 +420,7 @@ function startApp() {
     setTaskTypePillState('open');
     updateDurationInputVisibility();
     setDetailsPanelOpen(false);
+    updateAddBtnState();
     renderOnboardingHint();
     updateAlertToggleButton();
     renderActivityHeatmap();
@@ -570,6 +583,7 @@ function addTaskFromInputs() {
     tasks.push(newTask);
 
     taskInput.value = '';
+    updateAddBtnState();
     matrixSelect.value = 'schedule';
     setTaskTypePillState('open');
     durationInput.value = '';

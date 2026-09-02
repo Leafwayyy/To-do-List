@@ -3570,6 +3570,17 @@ function updateQuickAddHint() {
 taskInput?.addEventListener('input', updateQuickAddHint);
 deadlineInput?.addEventListener('input', updateQuickAddHint);
 
+// Section B: a real disabled state instead of a silent no-op when the input
+// is empty - same reasoning as solo's updateAddBtnState (script.js).
+function updateAddBtnState() {
+    if (!addBtn || !taskInput) {
+        return;
+    }
+    addBtn.disabled = taskInput.value.trim() === '';
+}
+taskInput?.addEventListener('input', updateAddBtnState);
+updateAddBtnState();
+
 // Time-estimate pills (mirrors solo's typePill/durationChip wiring exactly).
 function getSelectedTaskType() {
     const activePill = typePills.find((pill) => pill.classList.contains('active'));
@@ -3658,6 +3669,7 @@ function addTaskFromInputs() {
     }).catch((error) => console.error('Failed to add task:', error));
 
     taskInput.value = '';
+    updateAddBtnState();
     if (deadlineInput) {
         deadlineInput.value = '';
     }

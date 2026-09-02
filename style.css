@@ -151,11 +151,11 @@ body{
     padding: 15px 10px;
     border: none;
     outline: none;
-    border-radius: 10px;
+    border-radius: var(--radius-sm);
     background: rgba(255, 255, 255, 0.3);
     backdrop-filter: blur(10px);
     border: 2px solid rgba(103, 159, 255, 0.7);
-
+    font-size: var(--text-base);
 }
 
 .detailsToggleBtn{
@@ -163,9 +163,9 @@ body{
     border: 2px solid rgba(103, 159, 255, 0.65);
     background: rgba(238, 248, 255, 0.78);
     color: #2f557f;
-    border-radius: 999px;
-    padding: 0 14px;
-    font-size: 13px;
+    border-radius: var(--radius-pill);
+    padding: 0 var(--space-4);
+    font-size: var(--text-sm);
     font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
@@ -510,7 +510,7 @@ body{
     width: 35px;
     height: 35px;
     background: rgba(35, 35, 35, 1);
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     border: 3px solid rgb(155, 215, 255);
     display: flex;
     justify-content: center;
@@ -2218,6 +2218,37 @@ body::after{
 .editorCalendarBtn{
     background:
         linear-gradient(145deg, rgba(63, 46, 140, 0.94), rgba(36, 25, 95, 0.96));
+}
+
+/* Task input row (section B): + is the fast-add path and gets the clear
+   Von Restorff-effect standout - filled accent, not the same neutral dark
+   circle every other icon button (calendarBtn, checkBtn, taskButtons) uses.
+   Prioritize (.detailsToggleBtn) goes the opposite direction, ghost/outline,
+   so the eye lands on + first, Prioritize second. Both overrides need to
+   win over the shared-list rules above, hence sitting after them here. */
+.addBtn{
+    background: linear-gradient(135deg, var(--violet-accent, #b58bff), var(--violet-accent-2, #7f86ff));
+    border-color: rgba(232, 225, 255, 0.75);
+}
+
+.addBtn i{
+    color: #120b30;
+}
+
+.addBtn:hover{
+    background: linear-gradient(135deg, #c2a3ff, #939aff);
+    filter: brightness(1.04);
+}
+
+.addBtn:disabled{
+    opacity: 0.42;
+    cursor: not-allowed;
+    filter: none;
+    transform: none;
+}
+
+.detailsToggleBtn{
+    background: transparent;
 }
 
 .typePill.active,
