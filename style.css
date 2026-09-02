@@ -7,8 +7,9 @@
 body{
     font-family: 'Poppins', sans-serif;
     display: flex;
-    justify-content: center;
-    align-items: flex-start;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
     min-height: 100svh;
     padding: clamp(12px, 2.6vh, 24px) 0;
     background: linear-gradient(320deg, rgb(104, 255, 189), rgb(169, 228, 255), rgb(185, 198, 251), rgb(253, 255, 247));
@@ -2949,10 +2950,23 @@ body::after{
 .viewTabs{
     display: flex;
     gap: var(--space-2);
-    width: 92%;
+    /* Base: fills whatever normal-flow width its actual parent provides -
+       correct for group's .viewTabs, which sits nested inside
+       .groupDashboard/.container. Solo's is a direct child of body instead
+       (a sibling of .container, not a descendant of it), so it needs the
+       separate body > .viewTabs override below to match .container's own
+       width rather than overflow/undersize against the viewport. */
+    width: 100%;
     margin: 14px 0 4px;
     z-index: 1;
     position: relative;
+}
+
+/* Solo only (see the comment above) - matches .container's own final width
+   (min(1280px, 97vw), set later in this file) so the tab bar's edges line
+   up with the panel below it instead of sizing against the full viewport. */
+body > .viewTabs{
+    width: min(1280px, 97vw);
 }
 
 .viewTab{
@@ -3886,7 +3900,9 @@ body::after{
 
 /* Sign-in gate + signed-in user badge */
 body.authGateActive .container,
-body.authChecking .container{
+body.authChecking .container,
+body.authGateActive > .viewTabs,
+body.authChecking > .viewTabs{
     display: none;
 }
 
