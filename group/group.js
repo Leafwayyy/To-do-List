@@ -347,7 +347,17 @@ const groupDeleteBtn = document.querySelector('.groupDeleteBtn');
 // classList calls in renderApp()), which can happen well before the user
 // ever opens Settings, so the move has to be done before that, not after.
 // initializeGroupSettingsModal (defined further down) is function-hoisted,
-// so calling it here is safe despite running before its own definition.
+// so calling it here is safe - BUT it reads/writes groupSettingsOverlay and
+// groupSettingsGroupId, which are let (not function-hoisted the same way:
+// a let is only accessible after its own declaration line actually runs,
+// throwing a ReferenceError if read/written any earlier - the "temporal
+// dead zone"). Both need to be declared here, ahead of this call, not down
+// near the rest of the group-settings-modal code where they used to sit -
+// that gap is exactly what broke every group.js top-level statement after
+// this point (a thrown, uncaught ReferenceError halts the whole script)
+// the first time this eager-init fix shipped.
+let groupSettingsOverlay = null;
+let groupSettingsGroupId = null;
 initializeGroupSettingsModal();
 const memberRoster = document.querySelector('.memberRoster');
 const leaderboardList = document.querySelector('.leaderboardList');
@@ -2154,8 +2164,9 @@ function submitSuggestTaskModal() {
 // .taskEditorCard styling, toggled via the .open class. No member/role list
 // duplicated in here - kick/promote controls already live on the roster
 // cards, which are the one place members are listed.
-let groupSettingsOverlay = null;
-let groupSettingsGroupId = null;
+// (groupSettingsOverlay/groupSettingsGroupId themselves are declared much
+// earlier now, right before the eager initializeGroupSettingsModal() call -
+// see the comment there for why.)
 
 function initializeGroupSettingsModal() {
     if (groupSettingsOverlay) {
