@@ -3034,12 +3034,65 @@ body > .viewTabs{
     align-items: start;
 }
 
-.mainColumn .taskDetailsPanel .matrixSelect{
-    grid-column: 1;
+/* Two-tier disclosure (section C, Hick's Law): Matrix and Difficulty are the
+   only two fields that actually drive auto-sort order, so they're the ones
+   visible the instant the panel opens - .detailsFieldGroup wraps each
+   select with its own plain-language subtitle. Everything else (estimate,
+   deadline, schedule) sits behind .detailsMoreToggleBtn below. .matrixSelect/
+   .difficultySelect are no longer direct grid items themselves (their
+   wrapping .detailsFieldGroup is), so they no longer need explicit
+   grid-column - .detailsGridPrimary's 2-column template auto-places its two
+   .detailsFieldGroup children into column 1 and 2 on its own. */
+.detailsFieldGroup{
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
 }
 
-.mainColumn .taskDetailsPanel .difficultySelect{
-    grid-column: 2;
+.detailsFieldSubtitle{
+    margin: 0;
+    font-size: var(--text-2xs);
+    color: var(--violet-muted, #d7d0ff);
+    opacity: 0.85;
+}
+
+.detailsMoreToggleBtn{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--violet-border-soft, rgba(170, 152, 255, 0.28));
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--violet-muted, #d7d0ff);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.detailsMoreToggleBtn:hover{
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--violet-text, #f6f4ff);
+}
+
+.detailsMoreToggleBtn i{
+    transition: transform 0.2s ease;
+}
+
+.detailsMoreToggleBtn[aria-expanded="true"] i{
+    transform: rotate(180deg);
+}
+
+.detailsMoreOptions{
+    display: none;
+    margin-top: var(--space-3);
+}
+
+.detailsMoreOptions.open{
+    display: block;
 }
 
 .mainColumn .taskDetailsPanel .effortContainer,
@@ -3081,8 +3134,7 @@ body > .viewTabs{
         grid-template-columns: 1fr;
     }
 
-    .mainColumn .taskDetailsPanel .matrixSelect,
-    .mainColumn .taskDetailsPanel .difficultySelect,
+    .mainColumn .taskDetailsPanel .detailsFieldGroup,
     .mainColumn .taskDetailsPanel .effortContainer,
     .mainColumn .taskDetailsPanel .deadlineContainer{
         grid-column: 1;

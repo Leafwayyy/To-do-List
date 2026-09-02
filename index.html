@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260902c">
+    <link rel="stylesheet" href="style.css?v=20260902d">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#050225">
@@ -107,63 +107,78 @@
 
                 <div class="taskDetailsPanel" id="taskDetailsPanel">
                     <p class="detailsHelp">Priority and difficulty help the app decide what should be done first.</p>
-                    <div class="detailsGrid">
-                        <select class="matrixSelect" aria-label="Priority type">
-                            <option value="do">Task Matrix: Important &amp; Urgent</option>
-                            <option value="schedule" selected>Task Matrix: Important</option>
-                            <option value="delegate">Task Matrix: Urgent</option>
-                            <option value="eliminate">Task Matrix: None</option>
-                        </select>
+                    <div class="detailsGrid detailsGridPrimary">
+                        <div class="detailsFieldGroup">
+                            <select class="matrixSelect" aria-label="Priority type">
+                                <option value="do">Task Matrix: Important &amp; Urgent</option>
+                                <option value="schedule" selected>Task Matrix: Important</option>
+                                <option value="delegate">Task Matrix: Urgent</option>
+                                <option value="eliminate">Task Matrix: None</option>
+                            </select>
+                            <p class="detailsFieldSubtitle">How urgent, how important</p>
+                        </div>
 
-                        <select class="difficultySelect" aria-label="Difficulty">
-                            <option value="1">Difficulty: 1 (Very Easy)</option>
-                            <option value="2">Difficulty: 2 (Easy)</option>
-                            <option value="3" selected>Difficulty: 3 (Medium)</option>
-                            <option value="4">Difficulty: 4 (Hard)</option>
-                            <option value="5">Difficulty: 5 (Very Hard)</option>
-                        </select>
+                        <div class="detailsFieldGroup">
+                            <select class="difficultySelect" aria-label="Difficulty">
+                                <option value="1">Difficulty: 1 (Very Easy)</option>
+                                <option value="2">Difficulty: 2 (Easy)</option>
+                                <option value="3" selected>Difficulty: 3 (Medium)</option>
+                                <option value="4">Difficulty: 4 (Hard)</option>
+                                <option value="5">Difficulty: 5 (Very Hard)</option>
+                            </select>
+                            <p class="detailsFieldSubtitle">How hard this will be</p>
+                        </div>
+                    </div>
 
-                        <div class="effortContainer">
-                            <div class="taskTypePills" aria-label="Time estimate optional">
-                                <button type="button" class="typePill active" data-type="open" data-tip="No time estimate. Use this when you are not sure how long it will take.">No time estimate</button>
-                                <button type="button" class="typePill" data-type="timeboxed" data-tip="Set an estimated time in minutes so planning is more accurate.">Estimate time</button>
-                            </div>
-                            <div class="durationWrap">
-                                <input type="number" class="durationInput hidden" min="5" step="5" placeholder="Mins" aria-label="Estimated minutes">
-                                <div class="durationChips">
-                                    <button type="button" class="durationChip" data-minutes="15">15m</button>
-                                    <button type="button" class="durationChip" data-minutes="30">30m</button>
-                                    <button type="button" class="durationChip" data-minutes="45">45m</button>
-                                    <button type="button" class="durationChip" data-minutes="60">60m</button>
+                    <button type="button" class="detailsMoreToggleBtn" aria-expanded="false" aria-controls="detailsMoreOptions">
+                        <span>More options: estimate, deadline, schedule</span>
+                        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                    </button>
+
+                    <div class="detailsMoreOptions" id="detailsMoreOptions">
+                        <div class="detailsGrid">
+                            <div class="effortContainer">
+                                <div class="taskTypePills" aria-label="Time estimate optional">
+                                    <button type="button" class="typePill active" data-type="open" data-tip="No time estimate. Use this when you are not sure how long it will take.">No time estimate</button>
+                                    <button type="button" class="typePill" data-type="timeboxed" data-tip="Set an estimated time in minutes so planning is more accurate.">Estimate time</button>
+                                </div>
+                                <div class="durationWrap">
+                                    <input type="number" class="durationInput hidden" min="5" step="5" placeholder="Mins" aria-label="Estimated minutes">
+                                    <div class="durationChips">
+                                        <button type="button" class="durationChip" data-minutes="15">15m</button>
+                                        <button type="button" class="durationChip" data-minutes="30">30m</button>
+                                        <button type="button" class="durationChip" data-minutes="45">45m</button>
+                                        <button type="button" class="durationChip" data-minutes="60">60m</button>
+                                    </div>
                                 </div>
                             </div>
+
+                            <div class="deadlineContainer">
+                                <span class="deadlineTag"><i class="fa-solid fa-calendar"></i> Deadline</span>
+                                <input type="datetime-local" class="deadlineInput" aria-label="Deadline" title="Set deadline date and time" placeholder="Set date and time">
+                            </div>
+
+                            <div class="deadlineContainer scheduleContainer">
+                                <span class="deadlineTag scheduleTag"><i class="fa-solid fa-clock"></i> Schedule</span>
+                                <input type="datetime-local" class="deadlineInput scheduleInput" aria-label="Scheduled time" title="Set when you'll actually work on this" placeholder="When will you do this?">
+                            </div>
                         </div>
 
-                        <div class="deadlineContainer">
-                            <span class="deadlineTag"><i class="fa-regular fa-calendar"></i> Deadline</span>
-                            <input type="datetime-local" class="deadlineInput" aria-label="Deadline" title="Set deadline date and time" placeholder="Set date and time">
+                        <div class="deadlinePresets" aria-label="Quick deadline presets">
+                            <button class="deadlinePresetBtn" data-preset="hour2">In 2 hours</button>
+                            <button class="deadlinePresetBtn" data-preset="hour6">In 6 hours</button>
+                            <button class="deadlinePresetBtn" data-preset="eod">End of day</button>
+                            <button class="deadlinePresetBtn" data-preset="tomorrow">Tomorrow 9 AM</button>
+                            <button class="deadlinePresetBtn" data-preset="clear">No deadline</button>
                         </div>
 
-                        <div class="deadlineContainer scheduleContainer">
-                            <span class="deadlineTag scheduleTag"><i class="fa-solid fa-clock"></i> Schedule</span>
-                            <input type="datetime-local" class="deadlineInput scheduleInput" aria-label="Scheduled time" title="Set when you'll actually work on this" placeholder="When will you do this?">
+                        <div class="schedulePresets" aria-label="Quick schedule presets">
+                            <button class="deadlinePresetBtn schedulePresetBtn" data-preset="morning">This morning</button>
+                            <button class="deadlinePresetBtn schedulePresetBtn" data-preset="afternoon">This afternoon</button>
+                            <button class="deadlinePresetBtn schedulePresetBtn" data-preset="evening">This evening</button>
+                            <button class="deadlinePresetBtn schedulePresetBtn" data-preset="tomorrowMorning">Tomorrow morning</button>
+                            <button class="deadlinePresetBtn schedulePresetBtn" data-preset="clear">No schedule</button>
                         </div>
-                    </div>
-
-                    <div class="deadlinePresets" aria-label="Quick deadline presets">
-                        <button class="deadlinePresetBtn" data-preset="hour2">In 2 hours</button>
-                        <button class="deadlinePresetBtn" data-preset="hour6">In 6 hours</button>
-                        <button class="deadlinePresetBtn" data-preset="eod">End of day</button>
-                        <button class="deadlinePresetBtn" data-preset="tomorrow">Tomorrow 9 AM</button>
-                        <button class="deadlinePresetBtn" data-preset="clear">No deadline</button>
-                    </div>
-
-                    <div class="schedulePresets" aria-label="Quick schedule presets">
-                        <button class="deadlinePresetBtn schedulePresetBtn" data-preset="morning">This morning</button>
-                        <button class="deadlinePresetBtn schedulePresetBtn" data-preset="afternoon">This afternoon</button>
-                        <button class="deadlinePresetBtn schedulePresetBtn" data-preset="evening">This evening</button>
-                        <button class="deadlinePresetBtn schedulePresetBtn" data-preset="tomorrowMorning">Tomorrow morning</button>
-                        <button class="deadlinePresetBtn schedulePresetBtn" data-preset="clear">No schedule</button>
                     </div>
                 </div>
 
@@ -341,7 +356,7 @@
     <script src="task-shared.js?v=20260831e"></script>
     <script src="brain-dump.js?v=20260831q"></script>
     <script src="auth-gate.js?v=20260830a"></script>
-    <script src="script.js?v=20260902a"></script>
+    <script src="script.js?v=20260902b"></script>
     <script type="module" src="firebase-init.js?v=20260831a"></script>
     <script src="settings.js?v=20260902a"></script>
 

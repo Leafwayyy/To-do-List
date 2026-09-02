@@ -3,6 +3,8 @@ const quickAddHint = document.querySelector('.quickAddHint');
 const matrixSelect = document.querySelector('.matrixSelect');
 const detailsToggleBtn = document.querySelector('.detailsToggleBtn');
 const taskDetailsPanel = document.querySelector('.taskDetailsPanel');
+const detailsMoreToggleBtn = document.querySelector('.detailsMoreToggleBtn');
+const detailsMoreOptions = document.querySelector('.detailsMoreOptions');
 const typePills = Array.from(document.querySelectorAll('.typePill'));
 const durationChips = Array.from(document.querySelectorAll('.durationChip'));
 const durationInput = document.querySelector('.durationInput');
@@ -154,14 +156,17 @@ const TOUR_STEPS = [
     {
         selector: '.detailsToggleBtn',
         title: 'Open smart options',
-        text: 'Use Prioritize to set matrix, difficulty, estimate, and deadline.',
+        text: 'Use Prioritize to set matrix and difficulty - the two that matter most for sort order. More options underneath adds estimate, deadline, and schedule.',
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
     {
         selector: '.deadlineContainer',
         title: 'Deadline vs. schedule',
         text: 'Deadline is when it\'s due. Schedule is when you actually plan to work on it - two different things, both optional.',
-        beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
+        // Both fields live behind "More options" now (Hick's Law, section
+        // C) - open that too, not just the outer panel, or this step would
+        // highlight a display:none element with nothing visible to point at.
+        beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); setDetailsMoreOptionsOpen(true); }
     },
     {
         selector: '.priorityControls',
@@ -231,14 +236,23 @@ if (difficultySelect) {
     difficultySelect.addEventListener('change', playClickSound);
 }
 
+if (detailsMoreToggleBtn) {
+    detailsMoreToggleBtn.addEventListener('click', () => {
+        playClickSound();
+        setDetailsMoreOptionsOpen(!detailsMoreOptions?.classList.contains('open'));
+    });
+}
+
 deadlineContainer.addEventListener('click', (event) => {
     setDetailsPanelOpen(true);
+    setDetailsMoreOptionsOpen(true);
     showDeadlinePresets();
     openCalendar();
 });
 
 deadlineInput.addEventListener('focus', () => {
     setDetailsPanelOpen(true);
+    setDetailsMoreOptionsOpen(true);
     showDeadlinePresets();
 });
 
@@ -249,6 +263,7 @@ deadlineInput.addEventListener('blur', () => {
 if (scheduleContainer) {
     scheduleContainer.addEventListener('click', () => {
         setDetailsPanelOpen(true);
+        setDetailsMoreOptionsOpen(true);
         showSchedulePresets();
         openSchedulePicker();
     });
@@ -257,6 +272,7 @@ if (scheduleContainer) {
 if (scheduleInput) {
     scheduleInput.addEventListener('focus', () => {
         setDetailsPanelOpen(true);
+        setDetailsMoreOptionsOpen(true);
         showSchedulePresets();
     });
 
@@ -852,7 +868,26 @@ function setDetailsPanelOpen(isOpen) {
     if (!isOpen) {
         hideDeadlinePresets();
         hideSchedulePresets();
+        // Collapsed again next time Prioritize opens, same reasoning as the
+        // preset rows above - starts back at just the two fields that
+        // matter most (Hick's Law) rather than remembering an expanded
+        // state from a previous, unrelated task.
+        setDetailsMoreOptionsOpen(false);
     }
+}
+
+// Two-tier disclosure (section C): estimate/deadline/schedule stay collapsed
+// behind "More options" until asked for, so opening Prioritize only ever
+// surfaces the two fields (matrix, difficulty) that actually drive auto-sort
+// order. deadlineContainer/scheduleContainer's own click/focus handlers
+// (below) need the fields visible to focus them, so they call this too, not
+// just setDetailsPanelOpen.
+function setDetailsMoreOptionsOpen(isOpen) {
+    if (!detailsMoreOptions || !detailsMoreToggleBtn) {
+        return;
+    }
+    detailsMoreOptions.classList.toggle('open', isOpen);
+    detailsMoreToggleBtn.setAttribute('aria-expanded', String(isOpen));
 }
 
 function showDeadlinePresets() {

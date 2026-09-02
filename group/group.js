@@ -384,6 +384,8 @@ const taskInput = document.querySelector('.taskInput');
 const detailsToggleBtn = document.querySelector('.detailsToggleBtn');
 const addBtn = document.querySelector('.addBtn');
 const taskDetailsPanel = document.querySelector('.taskDetailsPanel');
+const detailsMoreToggleBtn = document.querySelector('.detailsMoreToggleBtn');
+const detailsMoreOptions = document.querySelector('.detailsMoreOptions');
 const matrixSelect = document.querySelector('.matrixSelect');
 const difficultySelect = document.querySelector('.difficultySelect');
 const deadlineContainer = document.querySelector('.deadlineContainer:not(.scheduleContainer)');
@@ -3484,6 +3486,32 @@ if (detailsToggleBtn && taskDetailsPanel) {
         const isOpen = !taskDetailsPanel.classList.contains('open');
         taskDetailsPanel.classList.toggle('open', isOpen);
         detailsToggleBtn.setAttribute('aria-expanded', String(isOpen));
+        if (!isOpen) {
+            // Collapsed again next time Prioritize opens - same two-tier
+            // disclosure reasoning as solo's setDetailsPanelOpen (section C,
+            // Hick's Law): starts back at just matrix/difficulty rather than
+            // remembering an expanded state from a previous task.
+            setDetailsMoreOptionsOpen(false);
+        }
+    });
+}
+
+// Two-tier disclosure (section C): estimate/deadline/schedule stay collapsed
+// behind "More options" until asked for - same pattern as solo's
+// setDetailsMoreOptionsOpen (script.js), duplicated here rather than shared
+// since the two files don't share any other UI-state functions either.
+function setDetailsMoreOptionsOpen(isOpen) {
+    if (!detailsMoreOptions || !detailsMoreToggleBtn) {
+        return;
+    }
+    detailsMoreOptions.classList.toggle('open', isOpen);
+    detailsMoreToggleBtn.setAttribute('aria-expanded', String(isOpen));
+}
+
+if (detailsMoreToggleBtn) {
+    detailsMoreToggleBtn.addEventListener('click', () => {
+        playClickSound();
+        setDetailsMoreOptionsOpen(!detailsMoreOptions?.classList.contains('open'));
     });
 }
 
@@ -3494,6 +3522,7 @@ if (deadlineContainer && deadlineInput) {
     deadlineContainer.addEventListener('click', () => {
         playClickSound();
         taskDetailsPanel?.classList.add('open');
+        setDetailsMoreOptionsOpen(true);
         if (typeof deadlineInput.showPicker === 'function') {
             deadlineInput.showPicker();
         } else {
@@ -3506,6 +3535,7 @@ if (scheduleContainer && scheduleInput) {
     scheduleContainer.addEventListener('click', () => {
         playClickSound();
         taskDetailsPanel?.classList.add('open');
+        setDetailsMoreOptionsOpen(true);
         if (typeof scheduleInput.showPicker === 'function') {
             scheduleInput.showPicker();
         } else {
@@ -3929,7 +3959,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.detailsToggleBtn',
         title: 'Prioritize',
-        text: 'Set matrix, difficulty, deadline, and schedule for a new task.',
+        text: 'Set matrix and difficulty for a new task - the two that matter most for sort order. More options underneath adds estimate, deadline, and schedule.',
         beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); }
     },
     {
