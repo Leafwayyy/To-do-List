@@ -34,6 +34,27 @@ The Prioritize panel is the one place in the whole app that's collapsed by defau
 
 ---
 
+## Navigation restructuring: splitting the single page into views
+
+The biggest lever in this whole plan, bigger than any individual fix above, and a direct answer to "too many things on one page." Right now, both `index.html` and `group/index.html` render everything at once: task input, filters, task list, activity heatmap, and every side panel, all in one continuous page. Section-by-section collapsing (0.5 above) helps, but real navigation is the more durable fix, and applies Hick's Law and Tesler's Law at the whole-page level rather than one panel at a time.
+
+**Proposed split, for review before building:**
+
+Solo:
+- **Tasks** (default view). Task input, filters, task list. What most visits are actually for.
+- **Activity** (separate view). Heatmap and streak stats. Currently permanent side-column real estate for something checked occasionally, not every visit.
+- Priority controls (auto-sort, popup alerts, difficulty-visibility toggle) fold into Settings, where they already conceptually belong, instead of a third floating side-column block.
+
+Group adds:
+- **Team** (separate view). Member roster, leaderboard, suggestions-for-you. Currently the single biggest density jump in the whole app (2.3 above).
+- Recently Finished stays as its own overlay, already effectively separate.
+
+**Shape of the navigation itself:** a lightweight tab bar (2 to 3 tabs), reusing the app's existing pill/tab visual language already established for task-view filters, rather than introducing a brand-new nav pattern. Jakob's Law again: reuse what the app already taught the user, don't add a second nav convention on top of the first. A same-page tab-switch (show/hide sections via JS, the same mechanism the task-view filters already use) fits the app's existing architecture far better than real page routing would, and avoids a much bigger rebuild for the same result.
+
+This touches page structure on both dashboards and is worth its own dedicated planning pass before any code changes, given the scale.
+
+---
+
 ## 1. Solo Dashboard
 
 ### 1.1 Task input row and Prioritize panel
@@ -104,17 +125,29 @@ This is, by the audit's own count, one of the clearer surfaces already: plain-En
 
 ## Cross-cutting (applies everywhere, not one surface)
 
-- **`[Craft: Typography]` Medium.** Audit the full app for actual font-size count in use. Dashboards should stay under about a 24px range per the skill's own guidance; worth an explicit pass counting every distinct size currently in play across badges, headers, body text, and button labels.
-- **`[Craft: Icons]` Medium.** Confirm every icon (Font Awesome, used throughout) is pulled consistently as either all-solid or a deliberate solid/regular split with a real reason (e.g. filled means active state), not an accidental mix.
-- **`[Craft: Color]` Medium.** Confirm the app's badge colors (matrix categories, difficulty levels, deadline urgency) form one coherent semantic system rather than colors chosen independently per feature as each was built across the session, a real risk given how incrementally this app grew.
+- **`[Craft: Typography]`, `[Craft: Icons]`, `[Craft: Color]`.** Confirmed with real numbers, not just flagged as worth checking; see Code-level findings below.
 - **`[Law: Aesthetic-Usability Effect]` Low, reassuring, not urgent.** The "clicky and cool, felt like a game" feedback is this law in action; the app's existing sound/animation polish is already buying real goodwill. Worth protecting deliberately while making the fixes above, not something to strip out in the name of "simplifying."
+
+---
+
+## Code-level findings
+
+Real numbers pulled directly from `style.css` and the HTML files with grep/PowerShell, not impressions, checked against the skill's craft checklist.
+
+- **`[Craft: Typography]` Confirmed, High.** 18 distinct font-size values in use (8px through 36px, covering nearly every integer from 8 to 18), across 185 total `font-size` declarations. The skill caps landing pages at about 6 sizes total and keeps dashboards even tighter. This isn't a deliberate type scale, it grew organically feature by feature across the session.
+- **`[Craft: Grids & spacing]` Confirmed, High.** 240 padding/margin/gap declarations checked; 121 of them (50%) are not a multiple of 4px. No consistent spacing system is actually being followed, despite the skill's explicit 4-point-system guidance.
+- **`[Craft: Inconsistent components]` Confirmed, Medium.** 14 distinct border-radius values in use for rounded rectangles alone (999px pills and 50% circles aside, which are legitimately different shapes, not a scale problem). Should realistically be 2 to 3 tiers, not 12-plus near-random values.
+- **`[Craft: Color]` Confirmed, Medium to High.** 33 CSS custom properties already exist for the violet palette (`--violet-accent`, `--violet-muted`, and others), a real token system is genuinely in place. But hardcoded violet-family `rgba(...)` literals appear almost exactly as often (154 times) as the actual custom properties get used (151 times). Roughly half the app's own color system bypasses the tokens that already exist, most likely because new components were written with copy-pasted rgba values across the many feature additions this session instead of reusing the established variables.
+- **`[Craft: Icons]` Confirmed, Medium.** The Deadline field icon (`fa-regular fa-calendar`, outline style) and the Schedule field icon (`fa-solid fa-clock`, filled style) sit directly next to each other as two parallel, equally-weighted fields, but use two different icon styles with no semantic reason for the difference. Small, easy, high-visibility fix: pick one style and apply it to both.
+- **`[Craft: Shadows]` Worth a look, Low to Medium, not clearly wrong.** Most shadows in the app are appropriately subtle (0.14 to 0.35 opacity glows on focus rings and buttons). The handful of full-modal shadows (task editor, settings, auth card) run stronger, 0.45 to 0.56 opacity at large blur radii, which the skill flags as commonly overdone. This may be intentionally tiered since modals should read as more elevated than cards; worth a deliberate check rather than an assumed fix.
+- **`[Craft: Feedback & States]` Confirmed as a strength, not a mistake.** 67 `:focus`/`:focus-visible` rules already exist in the stylesheet. Keyboard-accessibility groundwork here is genuinely already better than average. A redesign should preserve this, not regress it.
 
 ---
 
 ## Suggested order
 
-1. **0.1 to 0.5** first. These are the ones with a direct line to actual reported confusion.
-2. **2.3 and 1.3** (collapse the side columns). Single biggest density reduction available, on both dashboards.
-3. **2.2** (differentiate the two group filter rows). Second biggest group-specific fix.
-4. Cross-cutting audits (typography count, icon consistency, color system). Do these as one pass once the structural fixes above are settled, since structural changes will shift what needs auditing anyway.
+1. **Navigation restructuring** first. The biggest single lever, and it changes what several fixes below even need to be, since a fix like "collapse the side column" becomes "move it to its own view" once real navigation exists.
+2. **0.1 to 0.5** next. Direct line to actual reported confusion, mostly independent of the navigation work so they can happen in parallel.
+3. **2.2** (differentiate the two group filter rows). Biggest remaining group-specific fix once Team has its own view.
+4. **Code-level findings**: font-size scale, spacing system, border-radius tiers, color-token adoption, the deadline/schedule icon mismatch. Best done as one focused pass once the structural changes above are settled, since moving things into new views will touch a lot of this CSS anyway.
 5. Everything tagged Low. Polish once the above is done, not before.
