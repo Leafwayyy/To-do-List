@@ -61,7 +61,6 @@
 
     <div class="container">
         <div class="viewPanel" data-view-panel="tasks">
-        <div class="appShell">
             <section class="mainColumn">
                 <h1 class="title">To-Do List</h1>
 
@@ -195,6 +194,25 @@
                     </div>
                 </div>
 
+                <div class="priorityControls">
+                    <div class="priorityHeaderRow">
+                        <label class="priorityToggleLabel" for="priorityToggle">
+                            <input type="checkbox" class="priorityToggle" id="priorityToggle">
+                            <span>Auto-sort list</span>
+                        </label>
+                        <button class="sortOnceBtn" type="button" title="Apply a one-time smart sort by urgency, priority, and effort">Sort once now</button>
+                        <!-- .alertToggleBtn/.metaVisibilityRow stay real static markup here (script.js
+                             wires them unconditionally at load) but are reparented into Settings by
+                             settings.js's buildOverlay, right after this - see the comment there. -->
+                        <button class="alertToggleBtn" type="button">Popup alerts: Off</button>
+                    </div>
+                    <label class="metaVisibilityRow" for="difficultyVisibilityToggle">
+                        <input type="checkbox" class="difficultyVisibilityToggle" id="difficultyVisibilityToggle" checked>
+                        <span>Show difficulty chip on tasks</span>
+                    </label>
+                    <p class="priorityModeHint">Manual mode: drag to reorder anytime.</p>
+                </div>
+
                 <p class="taskViewsLabel">Filter by deadline</p>
                 <div class="taskViews" aria-label="Task views">
                     <button class="taskViewBtn active" data-view="all">All</button>
@@ -214,25 +232,6 @@
 
                 </ul>
             </section>
-
-            <aside class="sideColumn">
-                <div class="priorityControls">
-                    <div class="priorityHeaderRow">
-                        <label class="priorityToggleLabel" for="priorityToggle">
-                            <input type="checkbox" class="priorityToggle" id="priorityToggle">
-                            <span>Auto-sort list</span>
-                        </label>
-                        <button class="sortOnceBtn" type="button" title="Apply a one-time smart sort by urgency, priority, and effort">Sort once now</button>
-                        <button class="alertToggleBtn" type="button">Popup alerts: Off</button>
-                    </div>
-                    <label class="metaVisibilityRow" for="difficultyVisibilityToggle">
-                        <input type="checkbox" class="difficultyVisibilityToggle" id="difficultyVisibilityToggle" checked>
-                        <span>Show difficulty chip on tasks</span>
-                    </label>
-                    <p class="priorityModeHint">Manual mode: drag to reorder anytime.</p>
-                </div>
-            </aside>
-        </div>
         </div>
 
         <div class="viewPanel hidden" data-view-panel="activity">
@@ -356,7 +355,7 @@
     <script src="task-shared.js?v=20260831e"></script>
     <script src="brain-dump.js?v=20260831q"></script>
     <script src="auth-gate.js?v=20260830a"></script>
-    <script src="script.js?v=20260902d"></script>
+    <script src="script.js?v=20260902e"></script>
     <script type="module" src="firebase-init.js?v=20260831a"></script>
     <script src="settings.js?v=20260902a"></script>
 

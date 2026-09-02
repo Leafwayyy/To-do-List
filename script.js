@@ -27,10 +27,8 @@ const nextTaskPanel = document.querySelector('.nextTaskPanel');
 const nextTaskTitle = document.querySelector('.nextTaskTitle');
 const nextTaskReasons = document.querySelector('.nextTaskReasons');
 const mainColumn = document.querySelector('.mainColumn');
-const sideColumn = document.querySelector('.sideColumn');
 const viewTabButtons = Array.from(document.querySelectorAll('.viewTab'));
 const viewPanels = Array.from(document.querySelectorAll('.viewPanel'));
-const priorityControlsPanel = document.querySelector('.priorityControls');
 const activityMonthRow = document.querySelector('.activityMonthRow');
 const activityDayLabels = document.querySelector('.activityDayLabels');
 const activityGrid = document.querySelector('.activityGrid');
@@ -390,12 +388,10 @@ document.addEventListener('keydown', onGlobalKeyDown);
 
 if (typeof MOBILE_LAYOUT_QUERY.addEventListener === 'function') {
     MOBILE_LAYOUT_QUERY.addEventListener('change', () => {
-        syncPriorityControlsPlacement();
         renderTasks();
     });
 } else if (typeof MOBILE_LAYOUT_QUERY.addListener === 'function') {
     MOBILE_LAYOUT_QUERY.addListener(() => {
-        syncPriorityControlsPlacement();
         renderTasks();
     });
 }
@@ -411,8 +407,6 @@ function startApp() {
         return;
     }
     appStarted = true;
-
-    syncPriorityControlsPlacement();
 
     loadSettings();
     loadActivityCounts();
@@ -461,19 +455,6 @@ AuthGate.init({
         isLegacyTourAccount = false;
     }
 });
-
-function syncPriorityControlsPlacement() {
-    // Since the navigation rework (section A), Activity is its own full-width
-    // view/tab, not a sideColumn neighbor swapped in/out by breakpoint - the
-    // old mobile/desktop branches here both just re-inserted .activityPanel
-    // into .sideColumn on every render, which would have silently pulled it
-    // back into the Tasks view on each call. .priorityControls now simply
-    // stays put in .sideColumn (see .sideColumn .priorityControls{position:
-    // static} in style.css), so there's nothing left to reposition here.
-    if (!priorityControlsPanel || !mainColumn || !sideColumn || !tasksList) {
-        return;
-    }
-}
 
 // Navigation (section A of the UI/UX rework): Tasks vs. Activity. The tour's
 // beforeShow hooks call this directly to self-correct onto whichever view a
@@ -974,7 +955,6 @@ function syncDurationChipState() {
 }
 
 function renderTasks() {
-    syncPriorityControlsPlacement();
     tasksList.innerHTML = '';
     const visibleTasks = getVisibleTasks();
 
