@@ -3138,10 +3138,6 @@ body > .viewTabs{
     width: 100%;
 }
 
-.viewPanel.hidden{
-    display: none;
-}
-
 .viewPanel[data-view-panel="activity"] .activityPanel{
     width: 100%;
     margin-top: 0;
@@ -3158,6 +3154,21 @@ body > .viewTabs{
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
+}
+
+/* .viewPanel.hidden MUST be declared after every .viewPanel[data-view-panel=
+   "..."] display override above (not just alongside the base .viewPanel
+   rule) - [data-view-panel="team"]'s own display:flex has the exact same
+   specificity as .viewPanel.hidden's display:none (one class-equivalent
+   selector each), so whichever is later in the file wins regardless of
+   which element actually has the hidden class at runtime. Declaring this
+   first (its original position) meant the Team panel's own display:flex
+   permanently outranked .hidden by source order alone - it rendered
+   visible on every view, Tasks included, no matter what switchGroupView
+   actually toggled. Real bug, reported live: the roster/leaderboard/
+   history content was showing on both tabs simultaneously. */
+.viewPanel.hidden{
+    display: none;
 }
 
 /* Prioritize panel layout: avoid flat full-width stack */
