@@ -571,6 +571,25 @@ function createGroupTaskItem(groupId, task, isOwner) {
         taskMeta.appendChild(ownerBadge);
     }
 
+    // Deadline/countdown go first when a deadline exists (Serial Position
+    // Effect, section D): the most decision-relevant badge gets the primacy
+    // slot instead of being buried after matrix/difficulty/effort.
+    const deadlineStatus = getTaskDisplayDeadlineStatus(task);
+    taskItem.classList.add(`status-${deadlineStatus.urgencyLevel}`);
+
+    const deadlineBadge = document.createElement('span');
+    deadlineBadge.classList.add('deadlineBadge', deadlineStatus.deadlineClassName);
+    deadlineBadge.textContent = deadlineStatus.deadlineLabel;
+
+    const countdownBadge = document.createElement('span');
+    countdownBadge.classList.add('countdownBadge', deadlineStatus.countdownClassName);
+    countdownBadge.textContent = deadlineStatus.countdownLabel;
+
+    if (deadlineStatus.hasDeadline) {
+        taskMeta.appendChild(deadlineBadge);
+        taskMeta.appendChild(countdownBadge);
+    }
+
     const matrixValue = getValidMatrixValue(task.matrix);
     const matrixData = MATRIX_CONFIG[matrixValue];
     const matrixBadge = document.createElement('span');
@@ -608,18 +627,10 @@ function createGroupTaskItem(groupId, task, isOwner) {
         taskMeta.appendChild(subtaskProgressBadge);
     }
 
-    const deadlineStatus = getTaskDisplayDeadlineStatus(task);
-    taskItem.classList.add(`status-${deadlineStatus.urgencyLevel}`);
-
-    const deadlineBadge = document.createElement('span');
-    deadlineBadge.classList.add('deadlineBadge', deadlineStatus.deadlineClassName);
-    deadlineBadge.textContent = deadlineStatus.deadlineLabel;
-    taskMeta.appendChild(deadlineBadge);
-
-    const countdownBadge = document.createElement('span');
-    countdownBadge.classList.add('countdownBadge', deadlineStatus.countdownClassName);
-    countdownBadge.textContent = deadlineStatus.countdownLabel;
-    taskMeta.appendChild(countdownBadge);
+    if (!deadlineStatus.hasDeadline) {
+        taskMeta.appendChild(deadlineBadge);
+        taskMeta.appendChild(countdownBadge);
+    }
 
     taskContent.appendChild(taskTextSpan);
     taskContent.appendChild(taskMeta);
@@ -636,7 +647,7 @@ function createGroupTaskItem(groupId, task, isOwner) {
         const editBtn = document.createElement('button');
         editBtn.type = 'button';
         editBtn.classList.add('editBtn');
-        editBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+        editBtn.innerHTML = '<i class="fa-solid fa-pen"></i><span class="taskBtnLabel">Edit</span>';
         editBtn.setAttribute('aria-label', 'Edit task');
         editBtn.title = 'Edit task';
         editBtn.addEventListener('click', () => {
@@ -649,7 +660,7 @@ function createGroupTaskItem(groupId, task, isOwner) {
             const snoozeBtn = document.createElement('button');
             snoozeBtn.type = 'button';
             snoozeBtn.classList.add('snoozeBtn');
-            snoozeBtn.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i>';
+            snoozeBtn.innerHTML = '<i class="fa-solid fa-clock"></i><span class="taskBtnLabel">Snooze</span>';
             snoozeBtn.setAttribute('aria-label', 'Snooze / reschedule deadline');
             snoozeBtn.title = 'Snooze / reschedule deadline';
             snoozeBtn.addEventListener('click', () => {
@@ -662,7 +673,7 @@ function createGroupTaskItem(groupId, task, isOwner) {
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
         deleteBtn.classList.add('deleteBtn');
-        deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+        deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i><span class="taskBtnLabel">Delete</span>';
         deleteBtn.setAttribute('aria-label', 'Delete task');
         deleteBtn.title = 'Delete task';
         deleteBtn.addEventListener('click', () => {

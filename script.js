@@ -1144,6 +1144,15 @@ function createTaskItem(task) {
         taskMeta.appendChild(scheduleBadge);
     }
 
+    // Deadline/countdown go first when a deadline exists (Serial Position
+    // Effect, section D): the most decision-relevant badge gets the primacy
+    // slot instead of being buried after matrix/difficulty/effort.
+    const hasDeadline = deadlineStatus.hasDeadline;
+    if (hasDeadline) {
+        taskMeta.appendChild(deadlineBadge);
+        taskMeta.appendChild(countdownBadge);
+    }
+
     if (!(isMobile && matrixValue === 'schedule')) {
         taskMeta.appendChild(matrixBadge);
     }
@@ -1158,8 +1167,10 @@ function createTaskItem(task) {
         taskMeta.appendChild(effortBadge);
     }
 
-    taskMeta.appendChild(deadlineBadge);
-    taskMeta.appendChild(countdownBadge);
+    if (!hasDeadline) {
+        taskMeta.appendChild(deadlineBadge);
+        taskMeta.appendChild(countdownBadge);
+    }
 
     taskContent.appendChild(taskTextSpan);
     taskContent.appendChild(taskMeta);
@@ -1172,20 +1183,26 @@ function createTaskItem(task) {
 
     const editBtn = document.createElement('button');
     editBtn.classList.add('editBtn');
-    editBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+    editBtn.innerHTML = '<i class="fa-solid fa-pen"></i><span class="taskBtnLabel">Edit</span>';
     editBtn.setAttribute('aria-label', 'Edit task');
     editBtn.title = 'Edit task';
 
     const deleteBtn = document.createElement('button');
     deleteBtn.classList.add('deleteBtn');
-    deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+    deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i><span class="taskBtnLabel">Delete</span>';
     deleteBtn.setAttribute('aria-label', 'Delete task');
     deleteBtn.title = 'Delete task';
 
+    // Icon changed from fa-clock-rotate-left (a clock with a counter-
+    // clockwise arrow, which most simply reads as "undo"/"history", not
+    // "snooze" - Law of Prägnanz) to a plain fa-clock, plus this is the one
+    // task-row action that keeps a visible text label at every viewport
+    // width, not just ≤900px like Edit/Delete - the least universally-
+    // recognized of the three (section D/M finding).
     const canSnooze = Boolean(task.dueAt) && !task.completed;
     const snoozeBtn = document.createElement('button');
     snoozeBtn.classList.add('snoozeBtn');
-    snoozeBtn.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i>';
+    snoozeBtn.innerHTML = '<i class="fa-solid fa-clock"></i><span class="taskBtnLabel">Snooze</span>';
     snoozeBtn.setAttribute('aria-label', 'Snooze / reschedule deadline');
     snoozeBtn.title = 'Snooze / reschedule deadline';
 
