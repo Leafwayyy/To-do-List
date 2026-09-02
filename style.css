@@ -5050,6 +5050,17 @@ body.authGateActive .authOverlay{
     margin: -4px 0 0 32px;
 }
 
+/* width:100% forces this onto its own line within .brainDumpQuickReplies's
+   flex-wrap row, ahead of the chip buttons that follow it in the DOM,
+   rather than sitting inline next to the first chip (section J). */
+.brainDumpQuickReplyCue{
+    width: 100%;
+    margin: 0 0 2px;
+    font-size: var(--text-2xs);
+    color: var(--violet-muted, #d7d0ff);
+    opacity: 0.85;
+}
+
 .brainDumpQuickReplyChip{
     border: 1px solid rgba(178, 161, 255, 0.5);
     border-radius: 999px;
@@ -5120,6 +5131,23 @@ body.authGateActive .authOverlay{
     border-radius: 12px;
     border: 1px solid rgba(178, 161, 255, 0.4);
     background: rgba(255, 255, 255, 0.04);
+}
+
+/* Section J: only rendered when a reply mixed more than one review-card
+   type together (see the presentTypeCount check in sendMessage) - chunks
+   a mixed reply visually instead of leaving four card types to read as one
+   undifferentiated scroll. */
+.brainDumpReviewTypeLabel{
+    align-self: flex-start;
+    margin: 0;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    background: var(--color-info-soft, rgba(127, 134, 255, 0.16));
+    color: var(--violet-accent-2, #7f86ff);
+    font-size: var(--text-2xs);
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
 }
 
 .brainDumpTaskCard{
@@ -5377,10 +5405,14 @@ body.authGateActive .authOverlay{
     align-items: center;
     gap: 6px;
     padding: 3px 6px 3px 8px;
-    border-radius: 999px;
+    /* Already pill-shaped, which is the right look for a filename chip - the
+       token that actually matches its existing design is --radius-pill, not
+       a literal forcing onto --radius-sm just because the plan's radius
+       table lists "chips" there in the general case. */
+    border-radius: var(--radius-pill);
     background: rgba(255, 255, 255, 0.08);
     color: #dce8fb;
-    font-size: 11px;
+    font-size: var(--text-xs);
     max-width: 200px;
 }
 
@@ -5419,7 +5451,7 @@ body.authGateActive .authOverlay{
 .brainDumpRateStatus{
     flex: 0 0 auto;
     margin: 8px 0 0;
-    font-size: 11px;
+    font-size: var(--text-2xs);
     text-align: center;
     color: rgba(217, 206, 255, 0.65);
 }
@@ -5446,7 +5478,7 @@ body.authGateActive .authOverlay{
     flex: 0 0 auto;
     width: 34px;
     height: 34px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     border: 1px solid rgba(185, 167, 255, 0.4);
     background: rgba(255, 255, 255, 0.06);
     color: #e5dcff;
@@ -5479,12 +5511,12 @@ body.authGateActive .authOverlay{
     min-height: 34px;
     max-height: 160px;
     padding: 8px 12px;
-    border-radius: 14px;
+    border-radius: var(--radius-md);
     border: 1px solid rgba(185, 167, 255, 0.4);
     background: linear-gradient(145deg, rgba(53, 39, 120, 0.95), rgba(35, 24, 92, 0.96));
     color: #f7f3ff;
     font-family: inherit;
-    font-size: 13px;
+    font-size: var(--text-base);
     resize: none;
     overflow-y: auto;
 }

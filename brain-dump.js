@@ -422,6 +422,30 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     function appendQuickReplies(options) {
         const wrap = document.createElement('div');
         wrap.classList.add('brainDumpQuickReplies');
+
+        // Section J: a brief first-use cue clarifying these fill the input
+        // rather than send immediately - the one real ambiguity gap found
+        // in Dusty's chat. Shown once ever per browser, same
+        // localStorage-flag pattern as dustyIntroSeen above.
+        let quickReplyCueSeen = true;
+        try {
+            quickReplyCueSeen = localStorage.getItem('dustyQuickReplyCueSeen') === '1';
+        } catch {
+            // localStorage unavailable - default to "seen" so this doesn't
+            // reappear every message for someone who can't have it persist.
+        }
+        if (!quickReplyCueSeen) {
+            const cue = document.createElement('p');
+            cue.classList.add('brainDumpQuickReplyCue');
+            cue.textContent = 'Tap one to fill it in - you can still edit before sending.';
+            wrap.appendChild(cue);
+            try {
+                localStorage.setItem('dustyQuickReplyCueSeen', '1');
+            } catch {
+                // Non-fatal - worst case the cue just reappears next time.
+            }
+        }
+
         options.slice(0, 4).forEach((optionText) => {
             const trimmed = String(optionText || '').trim();
             if (!trimmed) {
@@ -711,13 +735,20 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         return { element: card, read, markAdded };
     }
 
-    function appendTaskReview(tasks) {
+    function appendTaskReview(tasks, typeLabel) {
         if (!tasks || tasks.length === 0) {
             return;
         }
 
         const section = document.createElement('div');
         section.classList.add('brainDumpTaskReview');
+
+        if (typeLabel) {
+            const label = document.createElement('p');
+            label.classList.add('brainDumpReviewTypeLabel');
+            label.textContent = typeLabel;
+            section.appendChild(label);
+        }
 
         const cards = tasks.map((draft) => {
             const { element, read } = createTaskReviewCard(draft);
@@ -776,9 +807,22 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     // shape as appendTaskReview above, factored out so those two don't
     // each duplicate the whole "read every card, filter to checked,
     // bulk-commit, show a result line" dance.
-    function appendReviewSection({ drafts, buildCard, commit, sectionClass, addBtnLabel, doneLabel }) {
+    function appendReviewSection({ drafts, buildCard, commit, sectionClass, addBtnLabel, doneLabel, typeLabel }) {
         const section = document.createElement('div');
         section.classList.add('brainDumpTaskReview', sectionClass);
+
+        // Section J: a type-label chip at the top, but only when the caller
+        // says this response mixed more than one review type together
+        // (tasks + suggestions + comments + memories all in one reply is a
+        // lot to parse as one undifferentiated scroll - Miller's Law). A
+        // response with just one type carries no label, since there's
+        // nothing to disambiguate.
+        if (typeLabel) {
+            const label = document.createElement('p');
+            label.classList.add('brainDumpReviewTypeLabel');
+            label.textContent = typeLabel;
+            section.appendChild(label);
+        }
 
         const cards = drafts.map((draft) => {
             const { element, read } = buildCard(draft);
@@ -1059,7 +1103,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         return { element: card, read };
     }
 
-    function appendSuggestionReview(suggestions) {
+    function appendSuggestionReview(suggestions, typeLabel) {
         if (!commitSuggestions || !suggestions || suggestions.length === 0) {
             return;
         }
@@ -1069,11 +1113,12 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             commit: commitSuggestions,
             sectionClass: 'brainDumpSuggestionReview',
             addBtnLabel: 'Send checked suggestions',
-            doneLabel: 'Sent'
+            doneLabel: 'Sent',
+            typeLabel
         });
     }
 
-    function appendCommentReview(comments) {
+    function appendCommentReview(comments, typeLabel) {
         if (!commitComments || !comments || comments.length === 0) {
             return;
         }
@@ -1083,7 +1128,8 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             commit: commitComments,
             sectionClass: 'brainDumpCommentReview',
             addBtnLabel: 'Post checked comments',
-            doneLabel: 'Posted'
+            doneLabel: 'Posted',
+            typeLabel
         });
     }
 
@@ -1167,7 +1213,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         return { element: card, read };
     }
 
-    function appendMemoryReview(memoryProposals) {
+    function appendMemoryReview(memoryProposals, typeLabel) {
         if (!memoryProposals || memoryProposals.length === 0) {
             return;
         }
@@ -1177,7 +1223,8 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             commit: commitMemories,
             sectionClass: 'brainDumpMemoryReview',
             addBtnLabel: 'Save checked memories',
-            doneLabel: 'Saved'
+            doneLabel: 'Saved',
+            typeLabel
         });
     }
 
@@ -1340,10 +1387,21 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
 
             appendAssistantBubble(data.reply || "Here's what I found:", data.quickReplies);
             history = [...history, { role: 'assistant', text: data.reply || '' }].slice(-BRAIN_DUMP_MAX_HISTORY_TURNS);
-            appendTaskReview(data.tasks);
-            appendSuggestionReview(data.teammateSuggestions);
-            appendCommentReview(data.teammateComments);
-            appendMemoryReview(data.memoryProposals);
+
+            // Section J: a type-label chip only when this reply actually
+            // mixed more than one kind of review card together - four
+            // different card types in one undifferentiated scroll is a lot
+            // to parse at once (Miller's Law), but a plain single-type
+            // reply (the common case) doesn't need a label pointing out
+            // what it obviously already is.
+            const presentTypeCount = [data.tasks, data.teammateSuggestions, data.teammateComments, data.memoryProposals]
+                .filter((list) => Array.isArray(list) && list.length > 0).length;
+            const labelFor = (label) => (presentTypeCount > 1 ? label : undefined);
+
+            appendTaskReview(data.tasks, labelFor('New tasks'));
+            appendSuggestionReview(data.teammateSuggestions, labelFor('Suggestions for teammates'));
+            appendCommentReview(data.teammateComments, labelFor('Comments'));
+            appendMemoryReview(data.memoryProposals, labelFor('Remembered facts'));
         } catch (error) {
             console.error('Brain dump request failed:', error);
             typingBubble.remove();
