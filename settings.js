@@ -34,6 +34,7 @@
     let emailText = null;
     let saveNameStatus = null;
     let muteToggle = null;
+    let exportStatus = null;
     let deleteBtn = null;
     let deleteStatus = null;
     let deleteArmed = false;
@@ -187,6 +188,8 @@
                pages, where there's nothing to move into it (see buildOverlay's
                alertToggleBtn/difficultyVisibilityRow reparenting). */
             .settingsAlertsSection.hidden { display: none; }
+            .settingsExportStatus.hidden { display: none; }
+            .settingsExportStatus { margin: 8px 0 0; }
             .settingsMemoryAddRow { display: flex; gap: 8px; margin-bottom: 4px; }
             .settingsMemoryAddInput {
                 flex: 1;
@@ -293,6 +296,7 @@
                     <h3>Your data</h3>
                     <p class="settingsHint">Download everything you've added as a JSON file.</p>
                     <button type="button" class="settingsExportBtn">Export my tasks</button>
+                    <p class="settingsExportStatus settingsHint hidden" aria-live="polite"></p>
                 </section>
 
                 <section class="settingsSection">
@@ -341,6 +345,7 @@
         nameInput = node.querySelector('.settingsNameInput');
         saveNameStatus = node.querySelector('.settingsSaveNameStatus');
         muteToggle = node.querySelector('.settingsMuteToggle');
+        exportStatus = node.querySelector('.settingsExportStatus');
         deleteBtn = node.querySelector('.settingsDeleteBtn');
         deleteStatus = node.querySelector('.settingsDeleteStatus');
         memoryManageCount = node.querySelector('.settingsMemoryManageCount');
@@ -665,6 +670,19 @@
         if (!currentUser) {
             return;
         }
+        // Section F: every action gets a confirmed visible response, not
+        // just a disabled-during-request state - this one had neither
+        // before (no success message, and its error handler was clearing
+        // .settingsDeleteStatus, an unrelated element from a different
+        // section entirely, instead of showing anything here at all).
+        const exportBtn = document.querySelector('.settingsExportBtn');
+        if (exportBtn) {
+            exportBtn.disabled = true;
+        }
+        if (exportStatus) {
+            exportStatus.textContent = 'Exporting...';
+            exportStatus.classList.remove('hidden');
+        }
         try {
             const { collection, getDocs } = window.ToDoAuth.firestore;
             const [tasksSnapshot, memorySnapshot] = await Promise.all([
@@ -689,9 +707,19 @@
             link.click();
             link.remove();
             URL.revokeObjectURL(url);
+            if (exportStatus) {
+                exportStatus.textContent = `Downloaded (${exportedTasks.length} task${exportedTasks.length === 1 ? '' : 's'}).`;
+            }
         } catch (error) {
             console.error('Failed to export tasks:', error);
-            deleteStatus.textContent = '';
+            if (exportStatus) {
+                exportStatus.textContent = 'Could not export. Try again.';
+                exportStatus.classList.remove('hidden');
+            }
+        } finally {
+            if (exportBtn) {
+                exportBtn.disabled = false;
+            }
         }
     }
 

@@ -2431,6 +2431,17 @@ function compareByPriority(taskA, taskB) {
         return statusA.deadlineTimestamp - statusB.deadlineTimestamp;
     }
 
+    // A genuine tie on everything above - fall back to whatever sequence
+    // they were entered/proposed in (manualOrder, now assigned distinctly
+    // per task even for an AI-created batch - see commitAiTasksSolo)
+    // rather than an arbitrary createdAt/id ordering. Two tasks proposed
+    // together by Dusty in one turn are usually already in a sensible
+    // real-world order (e.g. "buy the book" before "read the book").
+    const manualOrderDiff = (taskA.manualOrder || 0) - (taskB.manualOrder || 0);
+    if (manualOrderDiff !== 0) {
+        return manualOrderDiff;
+    }
+
     return compareByCreatedTime(taskA, taskB);
 }
 
@@ -2449,18 +2460,28 @@ function getPriorityScore(task) {
         const hoursLeft = Math.max(1, status.timeUntilMs / 3600000);
         score += Math.max(0, 260 - Math.min(260, hoursLeft));
 
-        // Heavy tasks with less time left should move up sooner.
-        const effortPressure = difficultyRank / hoursLeft;
-        score += Math.min(180, effortPressure * 140);
+        // Slack, not difficulty in isolation, is what should drive urgency
+        // here: how much runway is left versus how long this will actually
+        // take. A hard task with hours to spare doesn't need to jump the
+        // queue - it only should once there's genuinely not enough time
+        // left to do it comfortably, regardless of whether that's because
+        // it's hard or because the deadline is just close. Comfortable
+        // slack (12h+ of buffer beyond what's needed) contributes nothing;
+        // tight or negative slack ramps up fast, capped same as before.
+        const slackHours = hoursLeft - getEstimatedEffortHours(task);
+        score += Math.max(0, Math.min(200, (12 - slackHours) * 15));
     }
 
     score += matrixRank * 45;
-    score += difficultyRank * 20;
     score += typeRank * 6;
 
-    if (getValidTaskType(task.taskType) === 'timeboxed' && task.estimateMinutes) {
-        score += Math.min(30, task.estimateMinutes / 10);
-    }
+    // A separate, deliberately small nudge toward EASIER tasks - not the
+    // deadline-driven slack pressure above. When nothing is actually
+    // urgent yet, there's real value in clearing a quick task fast rather
+    // than defaulting to whichever is hardest just because it's hardest;
+    // the slack term above already dominates and overrides this the
+    // moment a hard task's own runway actually gets tight.
+    score += (6 - difficultyRank) * 3;
 
     const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
     if (subtasks.length > 0) {

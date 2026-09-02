@@ -6041,15 +6041,6 @@ body.authGateActive .authOverlay{
     display: none;
 }
 
-.groupSettingsRequestsTitle{
-    margin: 4px 0 0;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
-    color: rgba(217, 206, 255, 0.72);
-}
-
 .groupSettingsRequestsList{
     display: flex;
     flex-direction: column;
@@ -6158,14 +6149,25 @@ body.authGateActive .authOverlay{
     margin-bottom: 0;
 }
 
+/* Section X: gains a visible label - a title tooltip alone isn't reachable
+   on touch, the same discoverability gap already fixed for .helpTourBtn/
+   .brainDumpToggleBtn earlier in this rework. Low-frequency, owner-only,
+   so a small pill next to the title rather than reworking the title
+   itself into an inline-editable field (a real behavior change with its
+   own focus/blur/escape-to-cancel surface, not just a visual one). */
 .groupRenameBtn{
-    width: 32px;
     height: 32px;
+    padding: 0 var(--space-3);
     flex: 0 0 auto;
-    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    border-radius: var(--radius-pill);
     border: 1px solid var(--violet-border-soft);
     background: rgba(255, 255, 255, 0.06);
     color: var(--violet-muted);
+    font-size: var(--text-xs);
+    font-weight: 700;
     cursor: pointer;
 }
 

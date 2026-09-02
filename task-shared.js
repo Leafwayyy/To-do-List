@@ -72,6 +72,23 @@ function getDifficultyLabel(level) {
     return `D${normalizedLevel} (${difficulty.label})`;
 }
 
+// Rough hours-to-complete per difficulty rank (Very Easy..Very Hard), used
+// only as a fallback when a task has no explicit time estimate - most
+// tasks never get one, and "how long will this actually take" is exactly
+// the signal getPriorityScore/getGroupPriorityScore need to tell whether a
+// deadline still has comfortable room or is genuinely tight, instead of
+// treating difficulty as urgency all on its own regardless of how much
+// time is actually left.
+const DIFFICULTY_DEFAULT_EFFORT_HOURS = [0.25, 0.5, 1, 2, 4];
+
+function getEstimatedEffortHours(task) {
+    if (getValidTaskType(task.taskType) === 'timeboxed' && task.estimateMinutes) {
+        return Math.max(0.1, Number(task.estimateMinutes) / 60);
+    }
+    const rank = DIFFICULTY_CONFIG[getValidDifficultyLevel(task.difficulty)].rank;
+    return DIFFICULTY_DEFAULT_EFFORT_HOURS[rank - 1];
+}
+
 function isValidDateValue(value) {
     if (!value) {
         return false;

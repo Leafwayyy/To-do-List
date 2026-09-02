@@ -1675,11 +1675,23 @@ function getGroupPriorityScore(task) {
     } else if (status.hasDeadline) {
         const hoursLeft = Math.max(1, status.timeUntilMs / 3600000);
         score += Math.max(0, 260 - Math.min(260, hoursLeft));
-        score += Math.min(180, (difficultyRank / hoursLeft) * 140);
+
+        // Slack (how much runway is left versus how long this will
+        // actually take), not difficulty in isolation - see script.js's
+        // getPriorityScore for the full reasoning (identical logic, mirrored
+        // here). Comfortable slack contributes nothing; tight/negative
+        // slack ramps up fast.
+        const slackHours = hoursLeft - getEstimatedEffortHours(task);
+        score += Math.max(0, Math.min(200, (12 - slackHours) * 15));
     }
 
     score += matrixRank * 45;
-    score += difficultyRank * 20;
+
+    // Small, deliberate nudge toward EASIER tasks when nothing's actually
+    // urgent yet - not the deadline-driven slack pressure above, which
+    // already overrides this the moment a hard task's own runway gets
+    // tight.
+    score += (6 - difficultyRank) * 3;
 
     const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
     if (subtasks.length > 0) {
@@ -2259,19 +2271,21 @@ function initializeGroupSettingsModal() {
     groupSettingsOverlay.innerHTML = `
         <div class="taskEditorCard groupSettingsCard" role="dialog" aria-modal="true" aria-label="Group settings">
             <h2>Group Settings</h2>
-            <label class="groupSettingsPrivacyLabel">
-                Who can join?
-                <select class="groupSettingsPrivacySelect">
-                    <option value="open">Open - anyone with the code joins instantly</option>
-                    <option value="invite-only">Invite-only - code holders must be approved</option>
-                    <option value="closed">Closed - no new members for now</option>
-                </select>
-            </label>
-            <p class="groupSettingsPrivacyNote hidden">Only the group's owner can change this.</p>
-            <div class="groupSettingsRequestsSection">
-                <p class="groupSettingsRequestsTitle">Pending join requests</p>
+            <section class="settingsSection groupSettingsPrivacySection">
+                <h3>Who can join</h3>
+                <label class="groupSettingsPrivacyLabel">
+                    <select class="groupSettingsPrivacySelect">
+                        <option value="open">Open - anyone with the code joins instantly</option>
+                        <option value="invite-only">Invite-only - code holders must be approved</option>
+                        <option value="closed">Closed - no new members for now</option>
+                    </select>
+                </label>
+                <p class="groupSettingsPrivacyNote hidden">Only the group's owner can change this.</p>
+            </section>
+            <section class="settingsSection groupSettingsRequestsSection">
+                <h3>Pending join requests</h3>
                 <div class="groupSettingsRequestsList"></div>
-            </div>
+            </section>
             <section class="settingsSection settingsDangerSection groupSettingsDangerSection">
                 <h3>Leave or delete this group</h3>
                 <p class="settingsHint">Leaving removes you from this group. Deleting removes it - and every task in it - for everyone. Neither can be undone.</p>
