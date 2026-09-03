@@ -94,7 +94,7 @@
   <div class="page">
     <a class="backLink" href="index.html">&larr; Back to To-Do List</a>
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated August 31, 2026</p>
+    <p class="updated">Last updated September 3, 2026</p>
 
     <div class="card">
       <h2>What this covers</h2>
@@ -118,6 +118,7 @@
       <h2>AI features (Brain Dump / Dusty)</h2>
       <p>The Brain Dump chat (Dusty, the assistant you can open from the app) sends what you type, plus any image, PDF, or text file you attach, to <strong>Google's Gemini API</strong> to turn it into proposed tasks. This goes through a small server (a Cloudflare Worker) that we run ourselves, which checks that you're a real signed-in user of this app before forwarding anything, and does not store your message or attachment anywhere - it's passed through to Gemini and back, and forgotten. Chat history is kept only in your browser's memory for that session and clears on reload.</p>
       <p>Each time you chat with Dusty, she's also given a read-only snapshot of your current task list, both your personal list and every group you're in, so she can give relevant help and avoid suggesting things you're already tracking. Nothing about this snapshot is stored anywhere beyond that one request.</p>
+      <p>Dusty can also propose a change to a task you already have, for example updating its priority, difficulty, deadline, schedule, or marking it done, if you ask her to. Like everything else she drafts, a proposed edit is only ever applied once you review and confirm it - she never changes a task on her own.</p>
       <p>If you ask Dusty to suggest a task to a teammate or post a comment on one of their tasks, and you confirm it, it's posted under your own account exactly as if you'd typed it yourself - see "Who else sees it" below.</p>
       <p>Dusty can also propose remembering a short fact about you between chats (a preference, a constraint, something that keeps coming up) - this is only ever saved if you confirm it, is never shown to anyone but you, and is stored in your own account data in Cloud Firestore. You can view and delete anything Dusty has remembered at any time from Settings, and it's included if you export or delete your account.</p>
 
