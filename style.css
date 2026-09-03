@@ -1532,7 +1532,37 @@ body{
     align-items: center;
     gap: 10px;
     background: transparent;
-    
+
+}
+
+/* Real bug found by actually rendering a task row at 320-430px (not just
+   reading the CSS): .taskMain has min-width:0 so the flex algorithm is
+   free to shrink it toward zero once Edit/Snooze/Delete (all three with
+   visible text labels now) claim the width they need on the same row -
+   verified this collapses task text to one letter per line on a narrow
+   phone, since there was nowhere left for it to go. Unscoped (not
+   .mainColumn-prefixed) since solo and group build identical
+   .taskTopRow/.taskMain/.taskButtons markup and share this exact bug.
+   Fix: below the existing 560px "phone" tier, stop trying to fit both on
+   one row at all - task text gets the row to itself, the button cluster
+   drops to its own row underneath, right-aligned. More reliable than
+   chasing an exact pixel threshold, since task titles are arbitrary
+   length and three labeled buttons take a different amount of room
+   depending on which are present (Snooze only shows when a task has a
+   deadline). */
+@media (max-width: 560px){
+    .taskTopRow{
+        flex-wrap: wrap;
+    }
+
+    .taskMain{
+        min-width: 100%;
+    }
+
+    .taskButtons{
+        width: 100%;
+        justify-content: flex-end;
+    }
 }
 
 /* Edit/Snooze/Delete (section D): the shape/background/border that used to
@@ -1596,9 +1626,20 @@ body{
 }
 
 @media (max-width: 900px){
+    /* height bumped alongside width:auto - a real touch target needs both
+       dimensions at a sane minimum, not just a wide-enough pill that's
+       still only 30px tall. Width itself is NOT capped here on purpose:
+       .mainColumn .editBtn/.deleteBtn below used to hard-set width:42px
+       here too (a leftover from before these got a text label), which
+       silently won on specificity and crushed "Edit"/"Delete" into a
+       fixed 42px circle - the label overflowed/clipped past the button's
+       own edge instead of the pill actually growing to fit it. Verified
+       the collision directly (real button, real label, 375px viewport)
+       before removing it. */
     .editBtn,
     .deleteBtn{
         width: auto;
+        height: 42px;
         padding: 0 var(--space-3);
     }
 
@@ -3560,10 +3601,13 @@ body > .viewTabs{
         min-height: 40px;
     }
 
+    /* .editBtn/.deleteBtn deliberately excluded here - they get a text
+       label at this same breakpoint (see the width:auto rule above) and
+       must be free to size to their content, not forced back into a
+       fixed circle that clips the label. addBtn/checkBtn stay icon-only,
+       so a fixed circular touch target is correct for them. */
     .mainColumn .addBtn,
-    .mainColumn .checkBtn,
-    .mainColumn .editBtn,
-    .mainColumn .deleteBtn{
+    .mainColumn .checkBtn{
         width: 42px;
         height: 42px;
         min-width: 42px;
