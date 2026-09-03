@@ -154,16 +154,18 @@ const TOUR_STEPS = [
     {
         selector: '.detailsToggleBtn',
         title: 'Open smart options',
-        text: 'Use Prioritize to set matrix and difficulty - the two that matter most for sort order. More options underneath adds estimate, deadline, and schedule.',
+        text: 'Use Prioritize to set matrix, difficulty, and deadline - the three that matter most for sort order. More options underneath adds a time estimate and a separate schedule.',
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
     {
         selector: '.deadlineContainer',
         title: 'Deadline vs. schedule',
-        text: 'Deadline is when it\'s due. Schedule is when you actually plan to work on it - two different things, both optional.',
-        // Both fields live behind "More options" now (Hick's Law, section
-        // C) - open that too, not just the outer panel, or this step would
-        // highlight a display:none element with nothing visible to point at.
+        text: 'Deadline (right here) is when it\'s due. Schedule, under More options, is when you actually plan to work on it - two different things, both optional.',
+        // Deadline itself is a primary, always-visible field now (unlike
+        // Schedule, which still lives behind More options) - only the outer
+        // panel needs opening to see it. More options only opens here so
+        // Schedule is ALSO visible somewhere on screen while this step's
+        // text compares the two, not because Deadline needs it revealed.
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); setDetailsMoreOptionsOpen(true); }
     },
     {
@@ -241,16 +243,19 @@ if (detailsMoreToggleBtn) {
     });
 }
 
+// No setDetailsMoreOptionsOpen(true) here anymore - Deadline is a primary,
+// always-visible field now (not behind More options), so interacting with
+// it should never force Estimate/Schedule open too. Real bug caught by
+// code review: this was correct back when Deadline itself lived inside
+// More options and needed it expanded first to even be visible.
 deadlineContainer.addEventListener('click', (event) => {
     setDetailsPanelOpen(true);
-    setDetailsMoreOptionsOpen(true);
     showDeadlinePresets();
     openCalendar();
 });
 
 deadlineInput.addEventListener('focus', () => {
     setDetailsPanelOpen(true);
-    setDetailsMoreOptionsOpen(true);
     showDeadlinePresets();
 });
 
@@ -2244,7 +2249,13 @@ function editTask(taskId) {
     const editorTaskTypeSelect = taskEditorOverlay.querySelector('.editorTaskTypeSelect');
     const editorDurationInput = taskEditorOverlay.querySelector('.editorDurationInput');
     const editorDifficultySelect = taskEditorOverlay.querySelector('.editorDifficultySelect');
-    const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput');
+    // :not(.editorScheduleInput) - the schedule field also carries the bare
+    // .editorDeadlineInput class (editorDeadlineInput scheduleInput), so an
+    // unguarded selector only finds the deadline field by relying on DOM
+    // order (deadline currently comes first) - fragile given how often this
+    // exact area has been reordered. Same guard group.js's editor already
+    // uses; real latent bug caught by code review.
+    const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput:not(.editorScheduleInput)');
     const editorScheduleInput = taskEditorOverlay.querySelector('.editorScheduleInput');
 
     if (!editorTextInput || !editorMatrixSelect || !editorTaskTypeSelect || !editorDurationInput || !editorDifficultySelect || !editorDeadlineInput) {
@@ -2265,12 +2276,17 @@ function editTask(taskId) {
     updateEditorDurationInputVisibility();
 
     // More options starts expanded when the task being edited already has
-    // any of estimate/deadline/schedule set, so editing never hides already-
+    // an estimate or a schedule set, so editing never hides already-
     // configured data behind a collapsed toggle - only a genuinely blank
-    // task gets the Hick's-Law-simplified collapsed default.
+    // task gets the Hick's-Law-simplified collapsed default. dueAt is
+    // deliberately NOT part of this check anymore - Deadline moved to the
+    // always-visible primary tier, so it's no longer inside More Options at
+    // all; including it here would auto-expand Estimate/Schedule (empty)
+    // for a task that only has a deadline set, with nothing left in that
+    // section to actually reveal. Real bug caught by code review.
     const editorMoreToggleBtn = taskEditorOverlay.querySelector('.editorMoreToggleBtn');
     const editorMoreOptions = taskEditorOverlay.querySelector('.editorMoreOptions');
-    const hasExtraDetails = Boolean(task.estimateMinutes) || Boolean(task.dueAt) || Boolean(task.scheduledAt);
+    const hasExtraDetails = Boolean(task.estimateMinutes) || Boolean(task.scheduledAt);
     if (editorMoreOptions && editorMoreToggleBtn) {
         editorMoreOptions.classList.toggle('open', hasExtraDetails);
         editorMoreToggleBtn.setAttribute('aria-expanded', String(hasExtraDetails));
@@ -2370,9 +2386,19 @@ function initializeTaskEditor() {
     const editorTaskTypeSelect = taskEditorOverlay.querySelector('.editorTaskTypeSelect');
     const editorDifficultySelect = taskEditorOverlay.querySelector('.editorDifficultySelect');
     const editorDurationInput = taskEditorOverlay.querySelector('.editorDurationInput');
-    const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput');
-    const editorDeadlineWrap = taskEditorOverlay.querySelector('.editorDeadlineWrap');
-    const editorCalendarBtn = taskEditorOverlay.querySelector('.editorCalendarBtn');
+    // :not(.editorScheduleInput) - the schedule field also carries the bare
+    // .editorDeadlineInput class (editorDeadlineInput scheduleInput), so an
+    // unguarded selector only finds the deadline field by relying on DOM
+    // order (deadline currently comes first) - fragile given how often this
+    // exact area has been reordered. Same guard group.js's editor already
+    // uses; real latent bug caught by code review.
+    const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput:not(.editorScheduleInput)');
+    // Same DOM-order fragility as editorDeadlineInput above - both
+    // .editorDeadlineWrap and .editorCalendarBtn are also present, unguarded,
+    // on the schedule field's wrapper/button (editorDeadlineWrap
+    // editorScheduleWrap, editorCalendarBtn editorScheduleCalendarBtn).
+    const editorDeadlineWrap = taskEditorOverlay.querySelector('.editorDeadlineWrap:not(.editorScheduleWrap)');
+    const editorCalendarBtn = taskEditorOverlay.querySelector('.editorCalendarBtn:not(.editorScheduleCalendarBtn)');
     const editorScheduleInput = taskEditorOverlay.querySelector('.editorScheduleInput');
     const editorScheduleWrap = taskEditorOverlay.querySelector('.editorScheduleWrap');
     const editorScheduleCalendarBtn = taskEditorOverlay.querySelector('.editorScheduleCalendarBtn');
@@ -2528,7 +2554,13 @@ function saveTaskEditorChanges() {
     const editorTaskTypeSelect = taskEditorOverlay.querySelector('.editorTaskTypeSelect');
     const editorDurationInput = taskEditorOverlay.querySelector('.editorDurationInput');
     const editorDifficultySelect = taskEditorOverlay.querySelector('.editorDifficultySelect');
-    const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput');
+    // :not(.editorScheduleInput) - the schedule field also carries the bare
+    // .editorDeadlineInput class (editorDeadlineInput scheduleInput), so an
+    // unguarded selector only finds the deadline field by relying on DOM
+    // order (deadline currently comes first) - fragile given how often this
+    // exact area has been reordered. Same guard group.js's editor already
+    // uses; real latent bug caught by code review.
+    const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput:not(.editorScheduleInput)');
     const editorScheduleInput = taskEditorOverlay.querySelector('.editorScheduleInput');
 
     if (!editorTextInput || !editorMatrixSelect || !editorTaskTypeSelect || !editorDurationInput || !editorDifficultySelect || !editorDeadlineInput) {

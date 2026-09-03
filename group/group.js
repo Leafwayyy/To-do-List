@@ -1692,13 +1692,16 @@ function openGroupTaskEditor(groupId, task) {
     }
     updateEditorDurationInputVisibility();
 
-    // More options starts expanded when the task already has any of
-    // estimate/deadline/schedule set, so editing never hides already-
-    // configured data behind a collapsed toggle - same reasoning as solo's
-    // editTask (script.js).
+    // More options starts expanded when the task already has an estimate
+    // or a schedule set, so editing never hides already-configured data
+    // behind a collapsed toggle - same reasoning as solo's editTask
+    // (script.js). dueAt deliberately excluded - Deadline is the always-
+    // visible primary tier now, not inside More options, so a deadline-only
+    // task has nothing in that section worth auto-expanding for. Real bug
+    // caught by code review.
     const editorMoreToggleBtn = taskEditorOverlay.querySelector('.editorMoreToggleBtn');
     const editorMoreOptions = taskEditorOverlay.querySelector('.editorMoreOptions');
-    const hasExtraDetails = Boolean(task.estimateMinutes) || Boolean(task.dueAt) || Boolean(task.scheduledAt);
+    const hasExtraDetails = Boolean(task.estimateMinutes) || Boolean(task.scheduledAt);
     if (editorMoreOptions && editorMoreToggleBtn) {
         editorMoreOptions.classList.toggle('open', hasExtraDetails);
         editorMoreToggleBtn.setAttribute('aria-expanded', String(hasExtraDetails));
@@ -3781,11 +3784,15 @@ if (detailsMoreToggleBtn) {
 // Clicking anywhere in the deadline/schedule row opens its date picker, not
 // just the small icon (native datetime-local inputs otherwise only respond
 // to clicks on their own tiny icon).
+// No setDetailsMoreOptionsOpen(true) here - Deadline is a primary, always-
+// visible field now (unlike Schedule below, which still genuinely lives in
+// More options), so interacting with it should never force Estimate/
+// Schedule open too. Real bug caught by code review: leftover from when
+// Deadline itself lived inside More options.
 if (deadlineContainer && deadlineInput) {
     deadlineContainer.addEventListener('click', () => {
         playClickSound();
         taskDetailsPanel?.classList.add('open');
-        setDetailsMoreOptionsOpen(true);
         if (typeof deadlineInput.showPicker === 'function') {
             deadlineInput.showPicker();
         } else {
@@ -4301,7 +4308,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.detailsToggleBtn',
         title: 'Prioritize',
-        text: 'Set matrix and difficulty for a new task - the two that matter most for sort order. More options underneath adds estimate, deadline, and schedule.',
+        text: 'Set matrix, difficulty, and deadline for a new task - the three that matter most for sort order. More options underneath adds a time estimate and a separate schedule.',
         beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); }
     },
     {
