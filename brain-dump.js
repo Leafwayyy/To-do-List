@@ -259,7 +259,7 @@ function buildDustyAvatarMarkup(size) {
 // exactly as the AI (or the user's own edit) left it - NOTHING here is
 // trusted or sanitized; that's commitTasks' job, same as it would be for
 // any other task-creation entry point.
-function createBrainDumpController({ context, commitTasks, commitSuggestions, commitComments, getCurrentGroupId }) {
+function createBrainDumpController({ context, commitTasks, commitSuggestions, commitComments, commitTaskEdits, getCurrentGroupId }) {
     let overlay = null;
     let messagesEl = null;
     let attachmentsRowEl = null;
@@ -800,6 +800,199 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         section.appendChild(footer);
         messagesEl.appendChild(section);
         scrollToBottom();
+    }
+
+    // "Edit an existing task" draft - only ever populated when the user
+    // explicitly asked to change a specific task (see the EDITING EXISTING
+    // TASKS rule in the Worker's system instruction). Only whichever of
+    // matrix/difficulty/dueAt/scheduledAt/completed Gemini actually
+    // proposed changing get a control here - never a field the draft didn't
+    // touch, so confirming this can't silently reset something the user
+    // never asked about. taskId is the only thing that actually matters for
+    // the write; commitTaskEdits (script.js/group.js) independently
+    // re-checks it against the real, already-loaded task list before
+    // applying anything - never trusted blind, same discipline as
+    // commitComments/commitSuggestions.
+    function createTaskEditReviewCard(draft) {
+        const card = document.createElement('div');
+        card.classList.add('brainDumpTaskCard');
+
+        const header = document.createElement('div');
+        header.classList.add('brainDumpTaskCardHeader');
+
+        const checkboxLabel = document.createElement('label');
+        checkboxLabel.classList.add('brainDumpTaskCardCheck');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkboxLabel.appendChild(checkbox);
+        header.appendChild(checkboxLabel);
+
+        const applyOneBtn = document.createElement('button');
+        applyOneBtn.type = 'button';
+        applyOneBtn.classList.add('brainDumpTaskCardAddBtn');
+        applyOneBtn.textContent = 'Apply';
+        header.appendChild(applyOneBtn);
+
+        const fields = document.createElement('div');
+        fields.classList.add('brainDumpTaskCardFields');
+
+        const targetLabel = document.createElement('p');
+        targetLabel.classList.add('brainDumpTaskCardTarget');
+        targetLabel.textContent = `Editing: "${draft.taskPreview || 'this task'}"`;
+        fields.appendChild(targetLabel);
+
+        // Only a field genuinely present on the draft (including an
+        // explicit null, meaning "clear this") gets a row + a read()
+        // contribution - hasOwnProperty, not a truthiness check, so an
+        // explicit dueAt:null (clear the deadline) still gets its own row
+        // instead of being silently skipped like an omitted field would be.
+        const fieldReaders = {};
+
+        if (Object.prototype.hasOwnProperty.call(draft, 'matrix') && draft.matrix) {
+            const row = document.createElement('label');
+            row.classList.add('brainDumpTaskEditRow');
+            const labelSpan = document.createElement('span');
+            labelSpan.textContent = 'Matrix';
+            row.appendChild(labelSpan);
+            const select = document.createElement('select');
+            BRAIN_DUMP_MATRIX_OPTIONS.forEach((option) => {
+                const opt = document.createElement('option');
+                opt.value = option.value;
+                opt.textContent = option.label;
+                select.appendChild(opt);
+            });
+            select.value = BRAIN_DUMP_MATRIX_OPTIONS.some((o) => o.value === draft.matrix) ? draft.matrix : 'schedule';
+            row.appendChild(select);
+            fields.appendChild(row);
+            fieldReaders.matrix = () => select.value;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(draft, 'difficulty') && draft.difficulty) {
+            const row = document.createElement('label');
+            row.classList.add('brainDumpTaskEditRow');
+            const labelSpan = document.createElement('span');
+            labelSpan.textContent = 'Difficulty';
+            row.appendChild(labelSpan);
+            const select = document.createElement('select');
+            BRAIN_DUMP_DIFFICULTY_OPTIONS.forEach((option) => {
+                const opt = document.createElement('option');
+                opt.value = String(option.value);
+                opt.textContent = option.label;
+                select.appendChild(opt);
+            });
+            const parsedDifficulty = Number(draft.difficulty);
+            select.value = (Number.isInteger(parsedDifficulty) && parsedDifficulty >= 1 && parsedDifficulty <= 5)
+                ? String(parsedDifficulty)
+                : '3';
+            row.appendChild(select);
+            fields.appendChild(row);
+            fieldReaders.difficulty = () => select.value;
+        }
+
+        const addDateRow = (fieldKey, label) => {
+            if (!Object.prototype.hasOwnProperty.call(draft, fieldKey)) {
+                return;
+            }
+            const row = document.createElement('label');
+            row.classList.add('brainDumpTaskEditRow');
+            const labelSpan = document.createElement('span');
+            labelSpan.textContent = label;
+            row.appendChild(labelSpan);
+            const wrap = document.createElement('div');
+            wrap.classList.add('brainDumpTaskCardDeadlineWrap');
+            const input = document.createElement('input');
+            input.type = 'datetime-local';
+            input.classList.add('brainDumpTaskCardDeadline');
+            const value = draft[fieldKey];
+            if (value && !Number.isNaN(new Date(value).getTime())) {
+                input.value = brainDumpToDatetimeLocalValue(new Date(value));
+            }
+            wrap.appendChild(input);
+            const calendarBtn = document.createElement('button');
+            calendarBtn.type = 'button';
+            calendarBtn.classList.add('brainDumpTaskCardDeadlineBtn');
+            calendarBtn.setAttribute('aria-label', `Set ${label.toLowerCase()}`);
+            calendarBtn.innerHTML = '<i class="fa-solid fa-calendar"></i>';
+            calendarBtn.addEventListener('click', () => {
+                if (typeof input.showPicker === 'function') {
+                    input.showPicker();
+                } else {
+                    input.focus();
+                }
+            });
+            wrap.appendChild(calendarBtn);
+            row.appendChild(wrap);
+            fields.appendChild(row);
+            fieldReaders[fieldKey] = () => (input.value ? new Date(input.value).toISOString() : null);
+        };
+        addDateRow('dueAt', 'Deadline');
+        addDateRow('scheduledAt', 'Schedule');
+
+        if (Object.prototype.hasOwnProperty.call(draft, 'completed')) {
+            const row = document.createElement('label');
+            row.classList.add('brainDumpTaskEditRow', 'brainDumpTaskEditCompletedRow');
+            const completedCheckbox = document.createElement('input');
+            completedCheckbox.type = 'checkbox';
+            completedCheckbox.checked = Boolean(draft.completed);
+            row.appendChild(completedCheckbox);
+            const labelSpan = document.createElement('span');
+            labelSpan.textContent = 'Mark as completed';
+            row.appendChild(labelSpan);
+            fields.appendChild(row);
+            fieldReaders.completed = () => completedCheckbox.checked;
+        }
+
+        card.appendChild(header);
+        card.appendChild(fields);
+
+        const read = () => {
+            const result = { included: checkbox.checked, taskId: draft.taskId };
+            Object.keys(fieldReaders).forEach((key) => { result[key] = fieldReaders[key](); });
+            return result;
+        };
+
+        const markApplied = () => {
+            fields.querySelectorAll('input, select').forEach((el) => { el.disabled = true; });
+            checkbox.disabled = true;
+            checkbox.checked = false;
+            applyOneBtn.remove();
+            const appliedLabel = document.createElement('span');
+            appliedLabel.classList.add('brainDumpTaskCardAddedLabel');
+            appliedLabel.textContent = 'Applied';
+            header.appendChild(appliedLabel);
+        };
+
+        applyOneBtn.addEventListener('click', async () => {
+            const draftNow = read();
+            applyOneBtn.disabled = true;
+            applyOneBtn.textContent = 'Applying...';
+            try {
+                await commitTaskEdits([draftNow]);
+                markApplied();
+            } catch (error) {
+                console.error('Failed to apply brain-dump task edit:', error);
+                applyOneBtn.disabled = false;
+                applyOneBtn.textContent = 'Try again';
+            }
+        });
+
+        return { element: card, read };
+    }
+
+    function appendTaskEditReview(edits, typeLabel) {
+        if (!commitTaskEdits || !edits || edits.length === 0) {
+            return;
+        }
+        appendReviewSection({
+            drafts: edits,
+            buildCard: createTaskEditReviewCard,
+            commit: commitTaskEdits,
+            sectionClass: 'brainDumpTaskEditReview',
+            addBtnLabel: 'Apply checked changes',
+            doneLabel: 'Updated',
+            typeLabel
+        });
     }
 
     // Shared checkbox-then-bulk-confirm footer scaffolding for the two
@@ -1394,11 +1587,12 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             // to parse at once (Miller's Law), but a plain single-type
             // reply (the common case) doesn't need a label pointing out
             // what it obviously already is.
-            const presentTypeCount = [data.tasks, data.teammateSuggestions, data.teammateComments, data.memoryProposals]
+            const presentTypeCount = [data.tasks, data.teammateSuggestions, data.teammateComments, data.memoryProposals, data.taskEdits]
                 .filter((list) => Array.isArray(list) && list.length > 0).length;
             const labelFor = (label) => (presentTypeCount > 1 ? label : undefined);
 
             appendTaskReview(data.tasks, labelFor('New tasks'));
+            appendTaskEditReview(data.taskEdits, labelFor('Task changes'));
             appendSuggestionReview(data.teammateSuggestions, labelFor('Suggestions for teammates'));
             appendCommentReview(data.teammateComments, labelFor('Comments'));
             appendMemoryReview(data.memoryProposals, labelFor('Remembered facts'));

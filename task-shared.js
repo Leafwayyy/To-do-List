@@ -226,6 +226,73 @@ function getTaskDisplayDeadlineStatus(task) {
     return getDeadlineStatus(task.dueAt);
 }
 
+// The nearest deadline that should actually drive urgency for this task
+// right now: either the task's own dueAt, or an incomplete step's dueAt,
+// whichever is sooner. A completed step's deadline no longer counts - it's
+// done. null only when neither the task nor any incomplete step has one.
+// Returns { dueAt, fromStepId } rather than a bare string so callers can
+// tell whether the date came from a step (and phrase the countdown
+// accordingly) or from the task's own deadline.
+function getEffectiveDueAt(task) {
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    let best = null; // { time, fromStepId }
+
+    subtasks.forEach((subtask) => {
+        if (subtask.completed || !subtask.dueAt || !isValidDateValue(subtask.dueAt)) {
+            return;
+        }
+        const time = new Date(subtask.dueAt).getTime();
+        if (!best || time < best.time) {
+            best = { time, fromStepId: subtask.id };
+        }
+    });
+
+    if (task.dueAt && isValidDateValue(task.dueAt)) {
+        const time = new Date(task.dueAt).getTime();
+        if (!best || time < best.time) {
+            best = { time, fromStepId: null };
+        }
+    }
+
+    if (!best) {
+        return { dueAt: null, fromStepId: null };
+    }
+    return { dueAt: new Date(best.time).toISOString(), fromStepId: best.fromStepId };
+}
+
+// Like getTaskDisplayDeadlineStatus, but for URGENCY (sort order, the
+// countdown badge, the status-* row class) rather than the literal "Due
+// <date>" label - resolves against getEffectiveDueAt instead of the task's
+// own dueAt alone, so a task that isn't due for weeks still rises when one
+// of its steps needs to happen soon. fromStep on the returned object is the
+// id of whichever step supplied the date, or null when it was the task's
+// own deadline (or there's no deadline pressure at all) - callers use this
+// to phrase the countdown as "Next step: ..." instead of a plain countdown,
+// so it never reads as the task's own final deadline having moved.
+function getTaskUrgencyStatus(task) {
+    if (task.completed) {
+        return {
+            hasDeadline: false,
+            isOverdue: false,
+            deadlineTimestamp: Number.MAX_SAFE_INTEGER,
+            timeUntilMs: Number.MAX_SAFE_INTEGER,
+            urgencyLevel: 'normal',
+            deadlineLabel: 'Completed',
+            deadlineClassName: 'deadline-none',
+            countdownLabel: 'Timer stopped',
+            countdownClassName: 'countdown-none',
+            fromStep: null
+        };
+    }
+
+    const { dueAt, fromStepId } = getEffectiveDueAt(task);
+    const status = getDeadlineStatus(dueAt);
+    if (fromStepId && status.hasDeadline) {
+        return { ...status, countdownLabel: `Next step: ${status.countdownLabel}`, fromStep: fromStepId };
+    }
+    return { ...status, fromStep: null };
+}
+
 // Deadline/schedule preset shortcuts ("in 2 hours", "end of day", "tomorrow
 // morning"...) - shared by the deadline preset chips, the schedule preset
 // chips, and quick-add parsing below.

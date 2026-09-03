@@ -1269,16 +1269,23 @@ body{
 
 .subtaskItem{
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    gap: 6px;
     padding: 6px 8px;
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.4);
     border: 1px solid rgba(103, 159, 255, 0.4);
 }
 
+.subtaskRow{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .subtaskCheckBtn,
-.subtaskDeleteBtn{
+.subtaskDeleteBtn,
+.subtaskDeadlineBtn{
     background: transparent;
     border: none;
     outline: none;
@@ -1316,12 +1323,72 @@ body{
     color: #d0473f;
 }
 
+.subtaskDeadlineBtn{
+    color: #8fa3c2;
+    font-size: 11px;
+}
+
+.subtaskDeadlineBtn:hover{
+    color: #4a92f6;
+}
+
 .subtaskText{
     flex: 1;
     min-width: 0;
     word-break: break-word;
     font-size: 13px;
     color: #1e1e1e;
+}
+
+.subtaskDeadlineBadge{
+    flex: 0 0 auto;
+    border-radius: 999px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    border: 1px solid transparent;
+}
+
+.subtaskDeadlineBadge.hidden{
+    display: none;
+}
+
+.subtaskDeadlineInputWrap{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.subtaskDeadlineInputWrap.hidden{
+    display: none;
+}
+
+.subtaskDeadlineInput{
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    padding: 0 8px;
+    border: none;
+    outline: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid rgba(103, 159, 255, 0.5);
+    font-size: 11px;
+    color: #1e1e1e;
+}
+
+.subtaskDeadlineClearBtn{
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: #8fa3c2;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.subtaskDeadlineClearBtn:hover{
+    color: #d0473f;
 }
 
 .subtaskItem.completed .subtaskText{
@@ -4581,8 +4648,39 @@ body.authGateActive .authOverlay{
     color: #ff9d9d;
 }
 
+.subtaskDeadlineBtn{
+    color: rgba(215, 208, 255, 0.6);
+}
+
+.subtaskDeadlineBtn:hover{
+    color: var(--violet-accent);
+}
+
+.subtaskDeadlineClearBtn{
+    color: rgba(215, 208, 255, 0.6);
+}
+
+.subtaskDeadlineClearBtn:hover{
+    color: #ff9d9d;
+}
+
 .subtaskText{
     color: var(--violet-text);
+}
+
+.subtaskDeadlineInput{
+    background: var(--violet-surface);
+    border-color: rgba(188, 173, 255, 0.42);
+    color: var(--violet-text);
+    color-scheme: dark;
+}
+
+.subtaskDeadlineInput:focus,
+.subtaskDeadlineInput:focus-visible{
+    outline: none;
+    background: rgba(45, 33, 106, 0.98);
+    border-color: rgba(225, 217, 255, 0.72);
+    box-shadow: 0 0 0 3px rgba(171, 145, 255, 0.3);
 }
 
 .subtaskInput{
@@ -5290,6 +5388,42 @@ body.authGateActive .authOverlay{
     font-size: 11px;
     font-weight: 700;
     color: rgba(217, 206, 255, 0.85);
+}
+
+/* One row per field Dusty actually proposed changing (createTaskEditReviewCard)
+   - only ever the fields present on the draft, never a full form, so a
+   one-field edit ("push the deadline") shows exactly one row, not five. */
+.brainDumpTaskEditRow{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    color: rgba(217, 206, 255, 0.85);
+}
+
+.brainDumpTaskEditRow select{
+    height: 30px;
+    padding: 0 6px;
+    border: 1px solid rgba(178, 161, 255, 0.5);
+    border-radius: var(--radius-sm);
+    background: rgba(53, 39, 120, 0.95);
+    color: #f7f3ff;
+    font-size: var(--text-xs);
+}
+
+.brainDumpTaskEditRow .brainDumpTaskCardDeadlineWrap{
+    flex: 1 1 auto;
+    max-width: 220px;
+}
+
+.brainDumpTaskEditCompletedRow{
+    justify-content: flex-start;
+}
+
+.brainDumpTaskEditCompletedRow input[type="checkbox"]{
+    accent-color: var(--violet-accent, #b58bff);
 }
 
 .brainDumpTaskCardText{

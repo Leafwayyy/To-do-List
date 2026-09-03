@@ -647,6 +647,57 @@ function commitAiTasksSolo(draftTasks) {
     saveTasks();
 }
 
+// Applies Dusty-proposed edits to EXISTING tasks (matrix/difficulty/
+// dueAt/scheduledAt/completed only - never text/subtasks, and never a
+// delete - see the EDITING EXISTING TASKS rule in the Worker's system
+// instruction). taskId is never trusted blind: findTaskById re-checks it
+// against the real, already-loaded task list, same discipline as
+// commitComments/commitAiSuggestionsGroup in group.js - a draft naming a
+// taskId that no longer exists (deleted mid-conversation, say) is just
+// skipped, not force-created or errored.
+function commitAiTaskEditsSolo(draftEdits) {
+    let anyCompletionChanged = false;
+
+    draftEdits.forEach((draft) => {
+        const task = findTaskById(draft.taskId);
+        if (!task) {
+            return;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(draft, 'matrix') && draft.matrix) {
+            task.matrix = getValidMatrixValue(draft.matrix);
+        }
+        if (Object.prototype.hasOwnProperty.call(draft, 'difficulty') && draft.difficulty) {
+            task.difficulty = getValidDifficultyLevel(draft.difficulty);
+        }
+        if (Object.prototype.hasOwnProperty.call(draft, 'dueAt')) {
+            task.dueAt = isValidDateValue(draft.dueAt) ? new Date(draft.dueAt).toISOString() : null;
+        }
+        if (Object.prototype.hasOwnProperty.call(draft, 'scheduledAt')) {
+            task.scheduledAt = isValidDateValue(draft.scheduledAt) ? new Date(draft.scheduledAt).toISOString() : null;
+        }
+        if (Object.prototype.hasOwnProperty.call(draft, 'completed')) {
+            // Reuses the exact same completion path the checkbox itself
+            // uses (activity count, history entry, milestone check) rather
+            // than a bare task.completed assignment, so marking something
+            // done through Dusty behaves identically to checking it off by
+            // hand.
+            setTaskCompletedState(task, Boolean(draft.completed));
+            anyCompletionChanged = true;
+        }
+        task.updatedAt = new Date().toISOString();
+    });
+
+    applyOrdering();
+    renderTasks();
+    updateTaskSummary();
+    updateUrgencyAlert();
+    if (anyCompletionChanged) {
+        renderActivityHeatmap();
+    }
+    saveTasks();
+}
+
 function openCalendar() {
     playClickSound();
     setDetailsPanelOpen(true);
@@ -739,7 +790,8 @@ const tourController = createTourController({
 // way the group page needs, since your own task list always exists).
 const brainDumpController = createBrainDumpController({
     context: 'solo',
-    commitTasks: commitAiTasksSolo
+    commitTasks: commitAiTasksSolo,
+    commitTaskEdits: commitAiTaskEditsSolo
 });
 const brainDumpToggleBtn = document.querySelector('.brainDumpToggleBtn');
 if (brainDumpToggleBtn) {
@@ -1099,13 +1151,18 @@ function createTaskItem(task) {
     const countdownBadge = document.createElement('span');
     countdownBadge.classList.add('countdownBadge');
 
+    // .deadlineBadge stays on the task's own literal due date; the
+    // countdown badge and the row's status-* class use urgency, which also
+    // factors in an incomplete step's own nearer deadline (see
+    // getTaskUrgencyStatus in task-shared.js).
     const deadlineStatus = getTaskDisplayDeadlineStatus(task);
-    taskItem.classList.add(`status-${deadlineStatus.urgencyLevel}`);
+    const urgencyStatus = getTaskUrgencyStatus(task);
+    taskItem.classList.add(`status-${urgencyStatus.urgencyLevel}`);
     deadlineBadge.classList.add(deadlineStatus.deadlineClassName);
     deadlineBadge.textContent = deadlineStatus.deadlineLabel;
 
-    countdownBadge.classList.add(deadlineStatus.countdownClassName);
-    countdownBadge.textContent = deadlineStatus.countdownLabel;
+    countdownBadge.classList.add(urgencyStatus.countdownClassName);
+    countdownBadge.textContent = urgencyStatus.countdownLabel;
 
     const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
     const subtaskDoneCount = subtasks.filter((subtask) => subtask.completed).length;
@@ -1398,9 +1455,13 @@ function createSubtaskItem(taskId, subtask) {
     const item = document.createElement('div');
     item.classList.add('subtaskItem');
     item.setAttribute('role', 'listitem');
+    item.dataset.subtaskId = subtask.id;
     if (subtask.completed) {
         item.classList.add('completed');
     }
+
+    const row = document.createElement('div');
+    row.classList.add('subtaskRow');
 
     const checkBtn = document.createElement('button');
     checkBtn.type = 'button';
@@ -1412,11 +1473,54 @@ function createSubtaskItem(taskId, subtask) {
     text.classList.add('subtaskText');
     text.textContent = subtask.text;
 
+    // A step's own optional deadline - shown as a small colored badge
+    // (same shape/urgency classes as the task-level deadline badge) when
+    // set, editable via the clock button's inline datetime-local input.
+    // Only an incomplete step's deadline feeds the parent task's own
+    // urgency (see getTaskUrgencyStatus in task-shared.js) - this badge
+    // itself just reflects the step's own status directly.
+    const deadlineBadge = document.createElement('span');
+    deadlineBadge.classList.add('subtaskDeadlineBadge', 'hidden');
+
+    const deadlineBtn = document.createElement('button');
+    deadlineBtn.type = 'button';
+    deadlineBtn.classList.add('subtaskDeadlineBtn');
+    deadlineBtn.innerHTML = '<i class="fa-solid fa-clock"></i>';
+
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.classList.add('subtaskDeleteBtn');
     deleteBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
     deleteBtn.setAttribute('aria-label', 'Delete step');
+
+    const inputWrap = document.createElement('div');
+    inputWrap.classList.add('subtaskDeadlineInputWrap', 'hidden');
+    const deadlineInput = document.createElement('input');
+    deadlineInput.type = 'datetime-local';
+    deadlineInput.classList.add('subtaskDeadlineInput');
+    deadlineInput.setAttribute('aria-label', 'Step deadline');
+    deadlineInput.addEventListener('mousedown', (event) => event.stopPropagation());
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.classList.add('subtaskDeadlineClearBtn');
+    clearBtn.textContent = 'Clear';
+    inputWrap.appendChild(deadlineInput);
+    inputWrap.appendChild(clearBtn);
+
+    function refreshDeadlineDisplay() {
+        deadlineBtn.setAttribute('aria-label', subtask.dueAt ? 'Change step deadline' : 'Set step deadline');
+        if (!subtask.dueAt) {
+            deadlineBadge.classList.add('hidden');
+            deadlineBadge.textContent = '';
+            return;
+        }
+        const status = getDeadlineStatus(subtask.dueAt);
+        deadlineBadge.classList.remove('hidden', 'deadline-none', 'deadline-normal', 'deadline-soon', 'deadline-critical', 'deadline-overdue');
+        deadlineBadge.classList.add(status.deadlineClassName);
+        deadlineBadge.textContent = status.deadlineLabel.replace(/^Due /, '');
+        deadlineBadge.title = status.countdownLabel;
+    }
+    refreshDeadlineDisplay();
 
     checkBtn.addEventListener('click', () => {
         playClickSound();
@@ -1428,9 +1532,40 @@ function createSubtaskItem(taskId, subtask) {
         deleteSubtaskFromTask(taskId, subtask.id);
     });
 
-    item.appendChild(checkBtn);
-    item.appendChild(text);
-    item.appendChild(deleteBtn);
+    deadlineBtn.addEventListener('click', () => {
+        playClickSound();
+        deadlineInput.value = subtask.dueAt ? toDatetimeLocalValue(subtask.dueAt) : '';
+        inputWrap.classList.toggle('hidden');
+        if (!inputWrap.classList.contains('hidden')) {
+            deadlineInput.focus();
+        }
+    });
+
+    deadlineInput.addEventListener('change', () => {
+        playClickSound();
+        const iso = deadlineInput.value ? new Date(deadlineInput.value).toISOString() : null;
+        subtask.dueAt = iso;
+        refreshDeadlineDisplay();
+        inputWrap.classList.add('hidden');
+        setSubtaskDueAt(taskId, subtask.id, iso);
+    });
+
+    clearBtn.addEventListener('click', () => {
+        playClickSound();
+        subtask.dueAt = null;
+        deadlineInput.value = '';
+        refreshDeadlineDisplay();
+        inputWrap.classList.add('hidden');
+        setSubtaskDueAt(taskId, subtask.id, null);
+    });
+
+    row.appendChild(checkBtn);
+    row.appendChild(text);
+    row.appendChild(deadlineBadge);
+    row.appendChild(deadlineBtn);
+    row.appendChild(deleteBtn);
+    item.appendChild(row);
+    item.appendChild(inputWrap);
     return item;
 }
 
@@ -1961,7 +2096,8 @@ function addSubtaskToTask(taskId, text) {
         id: generateSubtaskId(),
         text: trimmedText,
         completed: false,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        dueAt: null
     });
     task.subtasksExpanded = true;
     task.updatedAt = new Date().toISOString();
@@ -1972,6 +2108,28 @@ function addSubtaskToTask(taskId, text) {
     updateTaskSummary();
     updateUrgencyAlert();
     renderActivityHeatmap();
+    saveTasks();
+}
+
+// A step's own deadline - independent of the task's completion/subtask
+// state, so it doesn't need recomputeParentCompletionFromSubtasks or the
+// heatmap refresh addSubtaskToTask's neighbors do.
+function setSubtaskDueAt(taskId, subtaskId, dueAtIsoOrNull) {
+    const task = findTaskById(taskId);
+    if (!task || !Array.isArray(task.subtasks)) {
+        return;
+    }
+
+    const subtask = task.subtasks.find((item) => item.id === subtaskId);
+    if (!subtask) {
+        return;
+    }
+
+    subtask.dueAt = dueAtIsoOrNull;
+    task.updatedAt = new Date().toISOString();
+
+    applyOrdering();
+    renderTasks();
     saveTasks();
 }
 
@@ -2446,7 +2604,10 @@ function compareByPriority(taskA, taskB) {
 }
 
 function getPriorityScore(task) {
-    const status = getDeadlineStatus(task.dueAt);
+    // Urgency, not the task's own literal dueAt alone - an incomplete
+    // step's own deadline counts too, whichever is sooner (see
+    // getTaskUrgencyStatus/getEffectiveDueAt in task-shared.js).
+    const status = getTaskUrgencyStatus(task);
     const matrixRank = MATRIX_CONFIG[getValidMatrixValue(task.matrix)].rank;
     const typeRank = TASK_TYPE_CONFIG[getValidTaskType(task.taskType)].rank;
     const difficultyRank = DIFFICULTY_CONFIG[getValidDifficultyLevel(task.difficulty)].rank;
@@ -3164,12 +3325,14 @@ function normalizeSubtask(subtask) {
     const createdAt = isValidDateValue(subtask.createdAt)
         ? new Date(subtask.createdAt).toISOString()
         : new Date().toISOString();
+    const dueAt = isValidDateValue(subtask.dueAt) ? new Date(subtask.dueAt).toISOString() : null;
 
     return {
         id: typeof subtask.id === 'string' && subtask.id.trim() !== '' ? subtask.id : generateSubtaskId(),
         text: subtask.text.trim(),
         completed: Boolean(subtask.completed),
-        createdAt
+        createdAt,
+        dueAt
     };
 }
 
@@ -3215,6 +3378,31 @@ function toDatetimeLocalValue(isoValue) {
 
 // getTaskDisplayDeadlineStatus now lives in task-shared.js.
 
+// Live-ticks each visible step's own deadline badge the same way the
+// task-level ones already tick (called from refreshDeadlineBadges below,
+// once per second) - matched by data-subtask-id rather than DOM position,
+// so it stays correct even if a subtask row's order in the array has
+// shifted since the last full render.
+function refreshSubtaskDeadlineBadges(taskItem, task) {
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    taskItem.querySelectorAll('.subtaskItem').forEach((row) => {
+        const subtask = subtasks.find((item) => item.id === row.dataset.subtaskId);
+        const badge = row.querySelector('.subtaskDeadlineBadge');
+        if (!subtask || !badge) {
+            return;
+        }
+        if (!subtask.dueAt) {
+            badge.classList.add('hidden');
+            return;
+        }
+        const status = getDeadlineStatus(subtask.dueAt);
+        badge.classList.remove('hidden', 'deadline-none', 'deadline-normal', 'deadline-soon', 'deadline-critical', 'deadline-overdue');
+        badge.classList.add(status.deadlineClassName);
+        badge.textContent = status.deadlineLabel.replace(/^Due /, '');
+        badge.title = status.countdownLabel;
+    });
+}
+
 function refreshDeadlineBadges() {
     let notificationCandidate = null;
 
@@ -3236,40 +3424,46 @@ function refreshDeadlineBadges() {
             return;
         }
 
+        // .deadlineBadge stays on the task's own literal due date; the
+        // countdown badge and the row's status-* class use urgency (which
+        // also factors in an incomplete step's own nearer deadline - see
+        // getTaskUrgencyStatus in task-shared.js).
         const deadlineStatus = getTaskDisplayDeadlineStatus(task);
+        const urgencyStatus = getTaskUrgencyStatus(task);
 
         deadlineBadge.classList.remove('deadline-none', 'deadline-normal', 'deadline-soon', 'deadline-critical', 'deadline-overdue');
         deadlineBadge.classList.add(deadlineStatus.deadlineClassName);
         deadlineBadge.textContent = deadlineStatus.deadlineLabel;
 
         countdownBadge.classList.remove('countdown-none', 'countdown-normal', 'countdown-soon', 'countdown-critical', 'countdown-overdue');
-        countdownBadge.classList.add(deadlineStatus.countdownClassName);
-        countdownBadge.textContent = deadlineStatus.countdownLabel;
+        countdownBadge.classList.add(urgencyStatus.countdownClassName);
+        countdownBadge.textContent = urgencyStatus.countdownLabel;
 
         taskItem.classList.remove('status-normal', 'status-soon', 'status-critical', 'status-overdue');
-        taskItem.classList.add(`status-${deadlineStatus.urgencyLevel}`);
+        taskItem.classList.add(`status-${urgencyStatus.urgencyLevel}`);
 
         effortBadge.textContent = getEffortLabel(task);
+        refreshSubtaskDeadlineBadges(taskItem, task);
 
-        if (!isNotifiableUrgency(task, deadlineStatus)) {
+        if (!isNotifiableUrgency(task, urgencyStatus)) {
             return;
         }
 
         if (!notificationCandidate) {
-            notificationCandidate = { task, status: deadlineStatus };
+            notificationCandidate = { task, status: urgencyStatus };
             return;
         }
 
-        const currentRank = getUrgencyRank(deadlineStatus.urgencyLevel);
+        const currentRank = getUrgencyRank(urgencyStatus.urgencyLevel);
         const candidateRank = getUrgencyRank(notificationCandidate.status.urgencyLevel);
 
         if (currentRank > candidateRank) {
-            notificationCandidate = { task, status: deadlineStatus };
+            notificationCandidate = { task, status: urgencyStatus };
             return;
         }
 
-        if (currentRank === candidateRank && deadlineStatus.deadlineTimestamp < notificationCandidate.status.deadlineTimestamp) {
-            notificationCandidate = { task, status: deadlineStatus };
+        if (currentRank === candidateRank && urgencyStatus.deadlineTimestamp < notificationCandidate.status.deadlineTimestamp) {
+            notificationCandidate = { task, status: urgencyStatus };
         }
     });
 

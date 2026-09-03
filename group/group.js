@@ -272,7 +272,7 @@ async function addGroupSubtask(groupId, task, text) {
 
     const subtasks = [
         ...(task.subtasks || []),
-        { id: generateSubtaskId(), text: trimmedText, completed: false, createdAt: new Date().toISOString() }
+        { id: generateSubtaskId(), text: trimmedText, completed: false, createdAt: new Date().toISOString(), dueAt: null }
     ];
 
     await applySubtaskDrivenUpdate(groupId, task, subtasks);
@@ -288,6 +288,17 @@ async function toggleGroupSubtask(groupId, task, subtaskId) {
 
 async function deleteGroupSubtask(groupId, task, subtaskId) {
     const subtasks = (task.subtasks || []).filter((subtask) => subtask.id !== subtaskId);
+
+    await applySubtaskDrivenUpdate(groupId, task, subtasks);
+}
+
+// A step's own deadline - reuses the same generic "write this subtasks
+// array, recompute completion" pipeline every other subtask mutator does,
+// even though this particular change can never itself flip completion.
+async function setGroupSubtaskDueAt(groupId, task, subtaskId, dueAtIsoOrNull) {
+    const subtasks = (task.subtasks || []).map((subtask) => (
+        subtask.id === subtaskId ? { ...subtask, dueAt: dueAtIsoOrNull } : subtask
+    ));
 
     await applySubtaskDrivenUpdate(groupId, task, subtasks);
 }
@@ -596,16 +607,21 @@ function createGroupTaskItem(groupId, task, isOwner) {
     // Deadline/countdown go first when a deadline exists (Serial Position
     // Effect, section D): the most decision-relevant badge gets the primacy
     // slot instead of being buried after matrix/difficulty/effort.
+    // .deadlineBadge stays on the task's own literal due date; the
+    // countdown badge and the row's status-* class use urgency, which also
+    // factors in an incomplete step's own nearer deadline (see
+    // getTaskUrgencyStatus in task-shared.js).
     const deadlineStatus = getTaskDisplayDeadlineStatus(task);
-    taskItem.classList.add(`status-${deadlineStatus.urgencyLevel}`);
+    const urgencyStatus = getTaskUrgencyStatus(task);
+    taskItem.classList.add(`status-${urgencyStatus.urgencyLevel}`);
 
     const deadlineBadge = document.createElement('span');
     deadlineBadge.classList.add('deadlineBadge', deadlineStatus.deadlineClassName);
     deadlineBadge.textContent = deadlineStatus.deadlineLabel;
 
     const countdownBadge = document.createElement('span');
-    countdownBadge.classList.add('countdownBadge', deadlineStatus.countdownClassName);
-    countdownBadge.textContent = deadlineStatus.countdownLabel;
+    countdownBadge.classList.add('countdownBadge', urgencyStatus.countdownClassName);
+    countdownBadge.textContent = urgencyStatus.countdownLabel;
 
     if (deadlineStatus.hasDeadline) {
         taskMeta.appendChild(deadlineBadge);
@@ -1309,9 +1325,13 @@ function createGroupSubtaskItem(groupId, task, subtask, isOwner) {
     const item = document.createElement('div');
     item.classList.add('subtaskItem');
     item.setAttribute('role', 'listitem');
+    item.dataset.subtaskId = subtask.id;
     if (subtask.completed) {
         item.classList.add('completed');
     }
+
+    const row = document.createElement('div');
+    row.classList.add('subtaskRow');
 
     const checkBtn = document.createElement('button');
     checkBtn.type = 'button';
@@ -1326,10 +1346,83 @@ function createGroupSubtaskItem(groupId, task, subtask, isOwner) {
     text.classList.add('subtaskText');
     text.textContent = subtask.text;
 
-    item.appendChild(checkBtn);
-    item.appendChild(text);
+    // A step's own optional deadline - same badge/urgency-color language as
+    // the task-level deadline badge. Non-owners see the badge (if set) but
+    // can't open the editor, same permission gate as delete/check above.
+    const deadlineBadge = document.createElement('span');
+    deadlineBadge.classList.add('subtaskDeadlineBadge', 'hidden');
 
+    function refreshDeadlineDisplay() {
+        if (!subtask.dueAt) {
+            deadlineBadge.classList.add('hidden');
+            deadlineBadge.textContent = '';
+            return;
+        }
+        const status = getDeadlineStatus(subtask.dueAt);
+        deadlineBadge.classList.remove('hidden', 'deadline-none', 'deadline-normal', 'deadline-soon', 'deadline-critical', 'deadline-overdue');
+        deadlineBadge.classList.add(status.deadlineClassName);
+        deadlineBadge.textContent = status.deadlineLabel.replace(/^Due /, '');
+        deadlineBadge.title = status.countdownLabel;
+    }
+    refreshDeadlineDisplay();
+
+    row.appendChild(checkBtn);
+    row.appendChild(text);
+    row.appendChild(deadlineBadge);
+
+    let inputWrap = null;
     if (isOwner) {
+        const deadlineBtn = document.createElement('button');
+        deadlineBtn.type = 'button';
+        deadlineBtn.classList.add('subtaskDeadlineBtn');
+        deadlineBtn.innerHTML = '<i class="fa-solid fa-clock"></i>';
+        deadlineBtn.setAttribute('aria-label', subtask.dueAt ? 'Change step deadline' : 'Set step deadline');
+
+        inputWrap = document.createElement('div');
+        inputWrap.classList.add('subtaskDeadlineInputWrap', 'hidden');
+        const deadlineInput = document.createElement('input');
+        deadlineInput.type = 'datetime-local';
+        deadlineInput.classList.add('subtaskDeadlineInput');
+        deadlineInput.setAttribute('aria-label', 'Step deadline');
+        deadlineInput.addEventListener('mousedown', (event) => event.stopPropagation());
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.classList.add('subtaskDeadlineClearBtn');
+        clearBtn.textContent = 'Clear';
+        inputWrap.appendChild(deadlineInput);
+        inputWrap.appendChild(clearBtn);
+
+        deadlineBtn.addEventListener('click', () => {
+            playClickSound();
+            deadlineInput.value = subtask.dueAt ? toDatetimeLocalValue(subtask.dueAt) : '';
+            inputWrap.classList.toggle('hidden');
+            if (!inputWrap.classList.contains('hidden')) {
+                deadlineInput.focus();
+            }
+        });
+
+        deadlineInput.addEventListener('change', () => {
+            playClickSound();
+            const iso = deadlineInput.value ? new Date(deadlineInput.value).toISOString() : null;
+            subtask.dueAt = iso;
+            deadlineBtn.setAttribute('aria-label', iso ? 'Change step deadline' : 'Set step deadline');
+            refreshDeadlineDisplay();
+            inputWrap.classList.add('hidden');
+            setGroupSubtaskDueAt(groupId, task, subtask.id, iso).catch((error) => console.error('Failed to set step deadline:', error));
+        });
+
+        clearBtn.addEventListener('click', () => {
+            playClickSound();
+            subtask.dueAt = null;
+            deadlineInput.value = '';
+            deadlineBtn.setAttribute('aria-label', 'Set step deadline');
+            refreshDeadlineDisplay();
+            inputWrap.classList.add('hidden');
+            setGroupSubtaskDueAt(groupId, task, subtask.id, null).catch((error) => console.error('Failed to clear step deadline:', error));
+        });
+
+        row.appendChild(deadlineBtn);
+
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
         deleteBtn.classList.add('subtaskDeleteBtn');
@@ -1339,7 +1432,7 @@ function createGroupSubtaskItem(groupId, task, subtask, isOwner) {
             playClickSound();
             deleteGroupSubtask(groupId, task, subtask.id).catch((error) => console.error('Failed to delete step:', error));
         });
-        item.appendChild(deleteBtn);
+        row.appendChild(deleteBtn);
     }
 
     checkBtn.addEventListener('click', () => {
@@ -1350,6 +1443,10 @@ function createGroupSubtaskItem(groupId, task, subtask, isOwner) {
         toggleGroupSubtask(groupId, task, subtask.id).catch((error) => console.error('Failed to update step:', error));
     });
 
+    item.appendChild(row);
+    if (inputWrap) {
+        item.appendChild(inputWrap);
+    }
     return item;
 }
 
@@ -1675,7 +1772,10 @@ function toDatetimeLocalValue(isoValue) {
 // people's tasks mixed together "what matters most right now" is the whole
 // point of the shared view.
 function getGroupPriorityScore(task) {
-    const status = getDeadlineStatus(task.dueAt);
+    // Urgency, not the task's own literal dueAt alone - an incomplete
+    // step's own deadline counts too, whichever is sooner (see
+    // getTaskUrgencyStatus/getEffectiveDueAt in task-shared.js).
+    const status = getTaskUrgencyStatus(task);
     const matrixRank = MATRIX_CONFIG[getValidMatrixValue(task.matrix)].rank;
     const difficultyRank = DIFFICULTY_CONFIG[getValidDifficultyLevel(task.difficulty)].rank;
 
@@ -3366,7 +3466,7 @@ function maybeNotifyGroupTaskUrgency() {
         if (task.ownerId !== currentUser.uid) {
             return;
         }
-        const status = getTaskDisplayDeadlineStatus(task);
+        const status = getTaskUrgencyStatus(task);
         if (!isNotifiableGroupUrgency(task, status)) {
             return;
         }
@@ -3424,6 +3524,31 @@ function maybeNotifyGroupTaskUrgency() {
 // so the banner could sit on a stale "12m" while a task's own badge had
 // already ticked down to "3m". This interval refreshes both together, every
 // second, regardless of what else triggers a render.
+// Live-ticks each visible step's own deadline badge the same way the
+// task-level ones already tick - matched by data-subtask-id rather than
+// DOM position, so it stays correct even if a subtask row's order in the
+// array has shifted since the last full render. Mirrors solo's identical
+// helper in script.js.
+function refreshSubtaskDeadlineBadges(taskItem, task) {
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    taskItem.querySelectorAll('.subtaskItem').forEach((row) => {
+        const subtask = subtasks.find((item) => item.id === row.dataset.subtaskId);
+        const badge = row.querySelector('.subtaskDeadlineBadge');
+        if (!subtask || !badge) {
+            return;
+        }
+        if (!subtask.dueAt) {
+            badge.classList.add('hidden');
+            return;
+        }
+        const status = getDeadlineStatus(subtask.dueAt);
+        badge.classList.remove('hidden', 'deadline-none', 'deadline-normal', 'deadline-soon', 'deadline-critical', 'deadline-overdue');
+        badge.classList.add(status.deadlineClassName);
+        badge.textContent = status.deadlineLabel.replace(/^Due /, '');
+        badge.title = status.countdownLabel;
+    });
+}
+
 function refreshGroupDeadlineBadges() {
     if (!groupTasksList) {
         return;
@@ -3441,18 +3566,25 @@ function refreshGroupDeadlineBadges() {
             return;
         }
 
+        // .deadlineBadge stays on the task's own literal due date; the
+        // countdown badge and the row's status-* class use urgency, which
+        // also factors in an incomplete step's own nearer deadline (see
+        // getTaskUrgencyStatus in task-shared.js).
         const deadlineStatus = getTaskDisplayDeadlineStatus(task);
+        const urgencyStatus = getTaskUrgencyStatus(task);
 
         deadlineBadge.classList.remove('deadline-none', 'deadline-normal', 'deadline-soon', 'deadline-critical', 'deadline-overdue');
         deadlineBadge.classList.add(deadlineStatus.deadlineClassName);
         deadlineBadge.textContent = deadlineStatus.deadlineLabel;
 
         countdownBadge.classList.remove('countdown-none', 'countdown-normal', 'countdown-soon', 'countdown-critical', 'countdown-overdue');
-        countdownBadge.classList.add(deadlineStatus.countdownClassName);
-        countdownBadge.textContent = deadlineStatus.countdownLabel;
+        countdownBadge.classList.add(urgencyStatus.countdownClassName);
+        countdownBadge.textContent = urgencyStatus.countdownLabel;
 
         taskItem.classList.remove('status-normal', 'status-soon', 'status-critical', 'status-overdue');
-        taskItem.classList.add(`status-${deadlineStatus.urgencyLevel}`);
+        taskItem.classList.add(`status-${urgencyStatus.urgencyLevel}`);
+
+        refreshSubtaskDeadlineBadges(taskItem, task);
     });
 }
 
@@ -3931,11 +4063,78 @@ async function commitAiCommentsGroup(drafts) {
     }
 }
 
+// Applies Dusty-proposed edits to the user's OWN existing tasks in the
+// currently-open group only (matrix/difficulty/dueAt/scheduledAt/completed
+// - never text/subtasks, never a delete - see the EDITING EXISTING TASKS
+// rule in the Worker's system instruction). taskId is never trusted blind:
+// re-checked against groupTasks (the live, already-loaded list), same
+// discipline as commitAiCommentsGroup/commitAiSuggestionsGroup above - and
+// ownerId is re-checked here too, so even a misbehaving or confused
+// proposal can never edit a teammate's task, regardless of what the model
+// output actually said.
+async function commitAiTaskEditsGroup(drafts) {
+    const group = getSelectedGroup();
+    if (!group || !currentUser) {
+        throw new Error('No group selected.');
+    }
+
+    const { doc, updateDoc } = fs();
+
+    for (const draft of drafts) {
+        if (!draft.taskId) {
+            continue;
+        }
+        const realTask = groupTasks.find((task) => task.id === draft.taskId);
+        if (!realTask) {
+            console.error(`Brain Dump: could not find task "${draft.taskId}" for an edit - skipped.`);
+            continue;
+        }
+        if (realTask.ownerId !== currentUser.uid) {
+            console.error(`Brain Dump: task "${draft.taskId}" does not belong to the current user - skipped.`);
+            continue;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(draft, 'completed')) {
+            const willBeCompleted = Boolean(draft.completed);
+            await setGroupTaskCompleted(group.id, realTask.id, willBeCompleted);
+            // Same side effects the checkbox itself triggers on completing
+            // a task (see the .checkBtn click handler above) - history log
+            // and milestone check, not just the Firestore write.
+            if (willBeCompleted) {
+                playTaskCompleteSound();
+                checkGroupMilestone(group.id, realTask.id);
+                logGroupTaskCompletion(group.id, realTask, new Date().toISOString()).catch((error) => {
+                    console.error('Failed to log completion history:', error);
+                });
+            }
+        }
+
+        const fieldUpdates = {};
+        if (Object.prototype.hasOwnProperty.call(draft, 'matrix') && draft.matrix) {
+            fieldUpdates.matrix = getValidMatrixValue(draft.matrix);
+        }
+        if (Object.prototype.hasOwnProperty.call(draft, 'difficulty') && draft.difficulty) {
+            fieldUpdates.difficulty = getValidDifficultyLevel(draft.difficulty);
+        }
+        if (Object.prototype.hasOwnProperty.call(draft, 'dueAt')) {
+            fieldUpdates.dueAt = isValidDateValue(draft.dueAt) ? new Date(draft.dueAt).toISOString() : null;
+        }
+        if (Object.prototype.hasOwnProperty.call(draft, 'scheduledAt')) {
+            fieldUpdates.scheduledAt = isValidDateValue(draft.scheduledAt) ? new Date(draft.scheduledAt).toISOString() : null;
+        }
+        if (Object.keys(fieldUpdates).length > 0) {
+            fieldUpdates.updatedAt = new Date().toISOString();
+            await updateDoc(doc(db(), 'groups', group.id, 'tasks', realTask.id), fieldUpdates);
+        }
+    }
+}
+
 const brainDumpController = createBrainDumpController({
     context: 'group',
     commitTasks: commitAiTasksGroup,
     commitSuggestions: commitAiSuggestionsGroup,
     commitComments: commitAiCommentsGroup,
+    commitTaskEdits: commitAiTaskEditsGroup,
     getCurrentGroupId: () => getSelectedGroup()?.id || null
 });
 if (brainDumpToggleBtn) {

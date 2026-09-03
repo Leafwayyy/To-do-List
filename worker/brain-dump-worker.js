@@ -72,7 +72,15 @@ For each proposed task, fill in:
 - estimateMinutes: a number of minutes as a string if taskType is 'timeboxed' and a duration is inferable, otherwise null
 - dueAt: an ISO 8601 datetime string per the reasoning above (resolve relative dates like "tomorrow" or "next Friday" against the current time given below), or null only per the rule above
 - scheduledAt: an ISO 8601 datetime string only if the user said specifically when they plan to work on it, otherwise null
-- subtasks: array of short subtask strings per the guidance above, or [] only for genuinely single-step tasks`;
+- subtasks: array of short subtask strings per the guidance above, or [] only for genuinely single-step tasks
+
+EDITING EXISTING TASKS - a separate capability from proposing new ones. You may propose "taskEdits" (changes to a task that ALREADY EXISTS, from the workload list below) when the user's CURRENT message clearly asks to change something about a specific existing task (e.g. "push my dentist appointment to Friday", "mark the grocery run as done", "that report is actually pretty hard, bump the difficulty up", "clear the deadline on the laundry task"). Never propose one as a side effect of a general planning/brain-dump message, never because you think a task's priority looks off, never unprompted - only when the user is clearly asking to change that specific task right now.
+
+THE HARD RULE: only propose an edit for a task that is unambiguously identifiable from the list below by its exact "id" - never invent or guess an id, and never edit a task assigned to someone else in a group (only the user's own tasks, solo or in a group). If more than one task in the list could plausibly match what the user described, or nothing matches clearly enough, leave it out and ask which task they mean instead of guessing (same STEP 2/3 rule as under-specified new tasks). You can only change matrix, difficulty, dueAt, scheduledAt, and completed - never the task's own text or its subtasks, and never delete a task; if the user wants either of those, say so in "reply" and point them to editing it directly instead.
+
+Only include the specific field(s) actually changing in each taskEdits item - never restate a field that isn't part of what the user asked to change. To explicitly clear a deadline or schedule, set that field to null; to leave a field untouched, omit it from the item entirely.
+
+For each taskEdits item: taskId (the EXACT id string from the list below), taskPreview (a short quote/paraphrase of the task's current text, just so the human reviewing your draft can tell which task you mean), then only whichever of matrix/difficulty/dueAt/scheduledAt/completed are actually changing.`;
 
 // Appended only when a group is actually the currently-open one (see
 // buildGeminiRequest) - keeps the base prompt shorter, and the model's
@@ -300,7 +308,11 @@ function buildTaskContextBlock(taskContext, currentGroupId) {
 
     if (solo.length > 0) {
         lines.push(`\nPersonal (solo) list, ${solo.length} active task(s):`);
-        solo.forEach((task) => lines.push(`- ${describeContextTask(task, false)}`));
+        // includeId: true - solo tasks are always the user's own, so
+        // there's no ownership ambiguity the way there is for a teammate's
+        // task in a group. Task edits (see the EDITING EXISTING TASKS rule)
+        // need a real id to reference here regardless of context.
+        solo.forEach((task) => lines.push(`- ${describeContextTask(task, true)}`));
     }
 
     groups.forEach((group) => {
@@ -413,13 +425,37 @@ function buildGeminiRequest(body) {
                 required: ['text']
             }
         },
+        // See the "EDITING EXISTING TASKS" rule in SYSTEM_INSTRUCTION -
+        // available regardless of context (solo or group), same as
+        // memoryProposals. Every field but taskId/taskPreview is OPTIONAL
+        // (nullable, not required) - unlike "tasks" above (a brand new task
+        // needs every field decided one way or another), an edit should
+        // only ever carry the specific fields actually changing. Omitted
+        // means "leave as-is"; an explicit null on dueAt/scheduledAt means
+        // "clear this deadline/schedule".
+        taskEdits: {
+            type: 'ARRAY',
+            items: {
+                type: 'OBJECT',
+                properties: {
+                    taskId: { type: 'STRING' },
+                    taskPreview: { type: 'STRING' },
+                    matrix: { type: 'STRING', enum: ['do', 'schedule', 'delegate', 'eliminate'], nullable: true },
+                    difficulty: { type: 'STRING', nullable: true },
+                    dueAt: { type: 'STRING', nullable: true },
+                    scheduledAt: { type: 'STRING', nullable: true },
+                    completed: { type: 'BOOLEAN', nullable: true }
+                },
+                required: ['taskId', 'taskPreview']
+            }
+        },
         // See the "Whenever reply ends on a question..." rule in STEP 3 -
         // the tappable-chip version of whatever multiple-choice-style
         // question "reply" just asked, if any. Available regardless of
         // context, same as memoryProposals.
         quickReplies: { type: 'ARRAY', items: { type: 'STRING' } }
     };
-    const requiredProperties = ['reply', 'tasks', 'memoryProposals', 'quickReplies'];
+    const requiredProperties = ['reply', 'tasks', 'memoryProposals', 'taskEdits', 'quickReplies'];
 
     // Both only ever populated when a group is marked "currently open" -
     // left out of the schema ENTIRELY otherwise (not just told to leave
@@ -525,6 +561,7 @@ async function callGemini(body, env) {
         teammateSuggestions: Array.isArray(parsed.teammateSuggestions) ? parsed.teammateSuggestions : [],
         teammateComments: Array.isArray(parsed.teammateComments) ? parsed.teammateComments : [],
         memoryProposals: Array.isArray(parsed.memoryProposals) ? parsed.memoryProposals : [],
+        taskEdits: Array.isArray(parsed.taskEdits) ? parsed.taskEdits : [],
         quickReplies: Array.isArray(parsed.quickReplies) ? parsed.quickReplies : [],
         // Real usage for this exact call, straight from Gemini itself -
         // what the rate limiter actually charges against the user's
