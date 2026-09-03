@@ -76,8 +76,11 @@ const DUSTY_IDLE_HINTS_GROUP = [
     "Not sure what to focus on? Ask me what's most urgent.",
     'Plans changed? I can edit an existing task too, just ask.'
 ];
-const DUSTY_IDLE_HINT_MIN_DELAY_MS = 2 * 60 * 1000;
-const DUSTY_IDLE_HINT_MAX_DELAY_MS = 4 * 60 * 1000;
+// ~30s between hints, per explicit request (was 2-4 min) - kept a small
+// amount of jitter either side rather than a flat 30000 so it doesn't feel
+// like a metronome, still centered right on 30s.
+const DUSTY_IDLE_HINT_MIN_DELAY_MS = 25 * 1000;
+const DUSTY_IDLE_HINT_MAX_DELAY_MS = 35 * 1000;
 const DUSTY_IDLE_HINT_VISIBLE_MS = 7000;
 const DUSTY_IDLE_HINT_LAST_INDEX_KEY = 'dustyIdleHintLastIndex';
 
