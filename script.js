@@ -1356,6 +1356,11 @@ function applySnoozeToTask(taskId, preset) {
 
     task.dueAt = presetDate.toISOString();
     task.updatedAt = new Date().toISOString();
+    // Tracked purely for Dusty's planning signals (a task snoozed several
+    // times is a real "this keeps not happening" pattern worth surfacing,
+    // not just quietly rescheduling forever) - not shown anywhere in the
+    // UI itself.
+    task.snoozeCount = (Number(task.snoozeCount) || 0) + 1;
     expandedSnoozeTaskIds.delete(taskId);
 
     applyOrdering();

@@ -39,6 +39,10 @@ Never use an em dash (the "—" character) anywhere - not in "reply", not in any
 
 You will also be given the user's CURRENT existing workload as background context - their whole personal task list and every group they're in (everyone's tasks in those groups, not just the user's own), appended at the end of these instructions. Use it to avoid proposing a task that's basically already on one of these lists, to give real prioritization guidance grounded in what they already have on their plate, and to answer general workload/analysis questions directly (e.g. "what should I focus on", "how's my team doing", "am I overloaded this week") - answer those fully in "reply" and propose zero new tasks, since there's nothing to extract.
 
+FORWARD PLANNING - when the user asks a strategic or planning-shaped question (e.g. "what should I do this week", "help me plan this out", "am I going to be okay", "what's the best order to do these in", "what could go wrong", "who on the team needs help"), you're being asked to actually think ahead, not just restate the task list back at them. You'll also be given PLANNING SIGNALS - real computed numbers (total estimated effort due today/this week, tasks that have been snoozed repeatedly, per-member workload, deadline collisions across teammates) appended near the task lists below. These are ground truth, already computed correctly - use the numbers exactly as given, never re-derive or guess your own totals from the raw task list when a computed figure is right there. Your job on top of them is the part a spreadsheet can't do: turn the numbers into an actual recommendation.
+
+A good forward-planning answer does three things: (1) names the real situation plainly, using the actual signal numbers ("you've got 340 minutes of estimated work due today across 4 tasks, and 2 more due tasks have no time estimate so the real number is probably higher" beats "you have a lot due today"), (2) calls out the specific roadblocks or conflicts the signals surfaced - a stalled task that keeps getting snoozed instead of done, a day where two teammates both have something due, one person visibly carrying more than everyone else - not generic risk language, and (3) gives a concrete, sequenced course of action ("do X before Y because Z" or "push A to tomorrow since it's not due yet, that frees up time for B which actually is"), not just a restated priority list. If nothing in the signals is actually concerning (no overload, nothing stalled, no collisions), say that plainly and briefly instead of manufacturing a problem - a clean bill of health is a valid, useful answer. Always propose zero tasks and zero taskEdits for a pure planning question unless the user also explicitly asked you to act on something specific.
+
 MEMORY - a list of short, durable facts about the user, given to you below (if any exist). USE THEM ACTIVELY - this is not passive background to ignore. When a known fact is relevant to what you're doing this turn, let it actually shape your reasoning: default a task's timing/matrix/subtasks around a known preference or constraint instead of asking about something you already know, steer away from something a known constraint rules out (an allergy, a fixed limitation), and when a known fact visibly changed what you proposed, say so briefly in "reply" (e.g. "Set this for the evening since I know that's when you usually work out" or "Left dairy out of the snack list since I know you're lactose intolerant") so the user can see it's actually being used, not just stored. Don't force a mention when nothing this turn actually touches a known fact.
 
 You can also propose ADDING a new memory via "memoryProposals". You MAY propose one proactively, without being explicitly asked, since it only affects the user's own private data, never anyone else's - but be sparing. Only propose one for something genuinely durable and useful for future planning: a real constraint (an allergy, a fixed limitation), a strong stated preference (always prefers mornings, hates a specific chore), or a clearly recurring pattern across this conversation. Never propose one for a one-off detail, small talk, something already obvious from their task list, or anything already in the known-facts list below. At most one or two per turn, and often none at all - most turns should propose zero. Every proposal is a DRAFT only, shown to the user to confirm or discard, never saved by you directly. Each memoryProposals item is just a short first-person-neutral "text" string, e.g. "Allergic to peanuts" or "Prefers working out in the evenings", not a full sentence about the conversation.
@@ -350,6 +354,71 @@ function buildMemoryBlock(memories) {
     return lines.join('\n');
 }
 
+function formatSignalMinutes(totalMinutes) {
+    const minutes = Math.max(0, Math.round(Number(totalMinutes) || 0));
+    if (minutes === 0) return '0m';
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    if (hours === 0) return `${remainder}m`;
+    return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
+}
+
+// Turns the client's computed planning signals (see brain-dump.js's
+// computeSoloPlanningSignals/computeGroupPlanningSignals) into a plain-text
+// block, same "background info, not something said in this conversation"
+// framing as buildTaskContextBlock/buildMemoryBlock. These are real
+// arithmetic already done correctly client-side (totals, counts, date
+// bucketing) - this function only formats them for the prompt, it never
+// recomputes anything, so the numbers the model sees are exactly the
+// numbers the app itself would show.
+function buildPlanningSignalsBlock(signals, groupName) {
+    if (!signals || typeof signals !== 'object') {
+        return '';
+    }
+    const lines = [];
+
+    const solo = signals.solo;
+    if (solo && (solo.dueTodayCount > 0 || solo.dueWeekCount > 0 || (Array.isArray(solo.stalled) && solo.stalled.length > 0))) {
+        lines.push('\n\nPERSONAL PLANNING SIGNALS (computed - use these exact numbers, per the FORWARD PLANNING rule above):');
+        const todayNote = solo.dueTodayUnestimatedCount > 0
+            ? ` (${solo.dueTodayUnestimatedCount} of those has/have no time estimate, so this is a floor, not the full picture)`
+            : '';
+        lines.push(`- Due today: ${solo.dueTodayCount} task(s), ${formatSignalMinutes(solo.dueTodayMinutes)} of estimated work${todayNote}.`);
+        const weekNote = solo.dueWeekUnestimatedCount > 0
+            ? ` (${solo.dueWeekUnestimatedCount} unestimated)`
+            : '';
+        lines.push(`- Due within 7 days: ${solo.dueWeekCount} task(s), ${formatSignalMinutes(solo.dueWeekMinutes)} of estimated work${weekNote}.`);
+        if (Array.isArray(solo.stalled) && solo.stalled.length > 0) {
+            lines.push('- Stalled (snoozed 3 or more times - likely a real blocker, not just a busy week):');
+            solo.stalled.forEach((task) => lines.push(`  - "${task.text}" (snoozed ${task.snoozeCount} times, id=${task.id})`));
+        }
+    }
+
+    const group = signals.group;
+    if (group && (group.perMember?.length > 0 || group.deadlineCollisions?.length > 0 || group.pendingSuggestions?.length > 0)) {
+        lines.push(`\n\nGROUP PLANNING SIGNALS for "${String(groupName || 'this group').slice(0, 80)}" (computed - use these exact numbers):`);
+        if (Array.isArray(group.perMember) && group.perMember.length > 0) {
+            lines.push('- Workload by member (active tasks, estimated effort, overdue count):');
+            group.perMember.forEach((member) => {
+                lines.push(`  - ${member.name}: ${member.activeTaskCount} active, ${formatSignalMinutes(member.totalEstimateMinutes)} estimated, ${member.overdueCount} overdue.`);
+            });
+        }
+        if (Array.isArray(group.deadlineCollisions) && group.deadlineCollisions.length > 0) {
+            lines.push('- Deadline collisions (2+ different people with something due the same day - often a shared external deadline worth coordinating on, not a coincidence):');
+            group.deadlineCollisions.forEach((collision) => {
+                const taskList = collision.tasks.map((t) => `"${t.text}" (${t.owner})`).join(', ');
+                lines.push(`  - ${collision.date}: ${taskList}`);
+            });
+        }
+        if (Array.isArray(group.pendingSuggestions) && group.pendingSuggestions.length > 0) {
+            lines.push('- Pending suggestions still awaiting a response (avoid proposing something that overlaps with one of these):');
+            group.pendingSuggestions.forEach((suggestion) => lines.push(`  - "${suggestion.text}" for ${suggestion.forUserName}`));
+        }
+    }
+
+    return lines.join('\n');
+}
+
 function buildGeminiRequest(body) {
     const history = Array.isArray(body.history) ? body.history.slice(-MAX_HISTORY_TURNS) : [];
     const contents = history.map((turn) => ({
@@ -378,6 +447,10 @@ function buildGeminiRequest(body) {
     const currentGroupId = typeof body.currentGroupId === 'string' ? body.currentGroupId : null;
     const taskContextBlock = buildTaskContextBlock(body.taskContext, currentGroupId);
     const memoryBlock = buildMemoryBlock(body.memories);
+    const currentGroupForSignals = currentGroupId && Array.isArray(body.taskContext?.groups)
+        ? body.taskContext.groups.find((group) => group?.id === currentGroupId)
+        : null;
+    const planningSignalsBlock = buildPlanningSignalsBlock(body.taskContext?.signals, currentGroupForSignals?.name);
     // Only meaningful with a real currently-open group - see
     // TEAMMATE_INSTRUCTION's own comment for why this is trimmed rather
     // than always sent.
@@ -493,7 +566,7 @@ function buildGeminiRequest(body) {
     }
 
     return {
-        systemInstruction: { parts: [{ text: `${SYSTEM_INSTRUCTION}${teammateInstruction}\n\n${timeNote}${taskContextBlock}${memoryBlock}` }] },
+        systemInstruction: { parts: [{ text: `${SYSTEM_INSTRUCTION}${teammateInstruction}\n\n${timeNote}${taskContextBlock}${planningSignalsBlock}${memoryBlock}` }] },
         contents,
         generationConfig: {
             temperature: 0.4,

@@ -104,26 +104,141 @@ function brainDumpSummarizeTask(task) {
     };
 }
 
+// Planning signals (see computeSoloPlanningSignals/computeGroupPlanningSignals
+// below) need raw fields this summary deliberately strips (estimateMinutes,
+// snoozeCount, ownerId) - kept as a separate function rather than adding
+// those to brainDumpSummarizeTask itself, since the per-task text sent to
+// Gemini doesn't need them individually, only the aggregate numbers computed
+// from them.
+
+// Solo: "is the user actually overloaded, or just busy-looking" and "which
+// task keeps getting pushed instead of done" - both real arithmetic/
+// counting questions that belong in code, not left for the model to
+// eyeball from a flat task list (the same reasoning already applied to
+// task-id validation elsewhere in this app: compute the hard facts
+// reliably, let the LLM reason narratively on top of them).
+function computeSoloPlanningSignals(rawTasks) {
+    const now = new Date();
+    const todayEnd = new Date(now);
+    todayEnd.setHours(23, 59, 59, 999);
+    const weekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    let dueTodayMinutes = 0;
+    let dueTodayCount = 0;
+    let dueTodayUnestimatedCount = 0;
+    let dueWeekMinutes = 0;
+    let dueWeekCount = 0;
+    let dueWeekUnestimatedCount = 0;
+    const stalled = [];
+
+    rawTasks.forEach((task) => {
+        const minutes = Number(task.estimateMinutes) || 0;
+        if (task.dueAt) {
+            const due = new Date(task.dueAt);
+            if (!Number.isNaN(due.getTime()) && due >= now && due <= weekEnd) {
+                dueWeekCount += 1;
+                if (minutes > 0) dueWeekMinutes += minutes; else dueWeekUnestimatedCount += 1;
+                if (due <= todayEnd) {
+                    dueTodayCount += 1;
+                    if (minutes > 0) dueTodayMinutes += minutes; else dueTodayUnestimatedCount += 1;
+                }
+            }
+        }
+        // 3+ snoozes - a genuine repeating pattern, not just "life happened
+        // once." Only ever set by an explicit user action (the snooze
+        // button), never inferred.
+        const snoozeCount = Number(task.snoozeCount) || 0;
+        if (snoozeCount >= 3) {
+            stalled.push({ id: task.id, text: String(task.text || '').slice(0, 120), snoozeCount });
+        }
+    });
+
+    return {
+        dueTodayMinutes, dueTodayCount, dueTodayUnestimatedCount,
+        dueWeekMinutes, dueWeekCount, dueWeekUnestimatedCount,
+        stalled: stalled.slice(0, 20)
+    };
+}
+
+// Group: per-member workload (raw counts/minutes, comparative judgment left
+// to the model - "overloaded" is relative, the arithmetic isn't) and
+// deadline collisions (2+ different people with something due the same
+// calendar day - often a shared external deadline worth coordinating on,
+// not a coincidence). Bucketed by the literal date portion of the ISO
+// string rather than trying to reconcile different members' timezones -
+// simple and transparent beats a precision this doesn't actually need.
+function computeGroupPlanningSignals(rawTasks) {
+    const now = new Date();
+    const perMember = new Map();
+    const byDate = new Map();
+
+    rawTasks.forEach((task) => {
+        const owner = task.ownerName || 'Teammate';
+        if (!perMember.has(owner)) {
+            perMember.set(owner, { activeTaskCount: 0, totalEstimateMinutes: 0, overdueCount: 0 });
+        }
+        const stats = perMember.get(owner);
+        stats.activeTaskCount += 1;
+        stats.totalEstimateMinutes += Number(task.estimateMinutes) || 0;
+
+        if (task.dueAt && typeof task.dueAt === 'string') {
+            const due = new Date(task.dueAt);
+            if (!Number.isNaN(due.getTime())) {
+                if (due < now) stats.overdueCount += 1;
+                const dayKey = task.dueAt.slice(0, 10);
+                if (!byDate.has(dayKey)) byDate.set(dayKey, []);
+                byDate.get(dayKey).push({ id: task.id, text: String(task.text || '').slice(0, 100), owner });
+            }
+        }
+    });
+
+    const deadlineCollisions = [];
+    byDate.forEach((tasksOnDay, date) => {
+        const distinctOwners = new Set(tasksOnDay.map((t) => t.owner));
+        if (distinctOwners.size >= 2) {
+            deadlineCollisions.push({ date, tasks: tasksOnDay.slice(0, 10) });
+        }
+    });
+    deadlineCollisions.sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+        perMember: Array.from(perMember.entries()).map(([name, stats]) => ({ name, ...stats })).slice(0, 30),
+        deadlineCollisions: deadlineCollisions.slice(0, 10),
+        // Filled in separately by gatherTaskContext (needs its own Firestore
+        // read) - defaulted here so the shape is always consistent even if
+        // that second read fails or never runs.
+        pendingSuggestions: []
+    };
+}
+
 // A fresh, one-time, read-only snapshot - not a live subscription, since
 // this only ever needs "what does their workload look like right now, at
 // the moment they hit send" rather than staying continuously in sync.
-async function gatherTaskContext(user) {
+// currentGroupId: only used to scope the two extra reads planning signals
+// need for the CURRENTLY OPEN group (its own raw task fields for
+// computeGroupPlanningSignals, and its pending suggestions) - same "only
+// the open group" scoping teammateSuggestions/teammateComments already
+// use, so this doesn't add a read per group the user happens to be in.
+async function gatherTaskContext(user, currentGroupId) {
     const { db, firestore } = window.ToDoAuth;
     const { collection, getDocs, query, where } = firestore;
 
     let soloTasks = [];
+    let soloSignals = null;
     try {
         const soloSnapshot = await getDocs(collection(db, 'users', user.uid, 'tasks'));
-        soloTasks = soloSnapshot.docs
+        const rawSoloTasks = soloSnapshot.docs
             .map((taskDoc) => ({ id: taskDoc.id, ...taskDoc.data() }))
             .filter((task) => !task.completed)
-            .slice(0, BRAIN_DUMP_MAX_CONTEXT_TASKS)
-            .map(brainDumpSummarizeTask);
+            .slice(0, BRAIN_DUMP_MAX_CONTEXT_TASKS);
+        soloSignals = computeSoloPlanningSignals(rawSoloTasks);
+        soloTasks = rawSoloTasks.map(brainDumpSummarizeTask);
     } catch (error) {
         console.error('Brain Dump: failed to load solo tasks for context:', error);
     }
 
     let groupsContext = [];
+    let groupSignals = null;
     try {
         const groupsQuery = query(collection(db, 'groups'), where('memberIds', 'array-contains', user.uid));
         const groupsSnapshot = await getDocs(groupsQuery);
@@ -133,28 +248,56 @@ async function gatherTaskContext(user) {
         const groups = groupsSnapshot.docs.map((groupDoc) => ({
             id: groupDoc.id,
             name: groupDoc.data().name,
+            memberIds: groupDoc.data().memberIds || [],
             memberNames: groupDoc.data().memberNames || []
         }));
 
         groupsContext = await Promise.all(groups.map(async (group) => {
             try {
                 const tasksSnapshot = await getDocs(collection(db, 'groups', group.id, 'tasks'));
-                const groupTasks = tasksSnapshot.docs
+                const rawGroupTasks = tasksSnapshot.docs
                     .map((taskDoc) => ({ id: taskDoc.id, ...taskDoc.data() }))
                     .filter((task) => !task.completed)
-                    .slice(0, BRAIN_DUMP_MAX_CONTEXT_TASKS)
-                    .map(brainDumpSummarizeTask);
+                    .slice(0, BRAIN_DUMP_MAX_CONTEXT_TASKS);
+                if (currentGroupId && group.id === currentGroupId) {
+                    groupSignals = computeGroupPlanningSignals(rawGroupTasks);
+                }
+                const groupTasks = rawGroupTasks.map(brainDumpSummarizeTask);
                 return { id: group.id, name: group.name, memberNames: group.memberNames, tasks: groupTasks };
             } catch (error) {
                 console.error(`Brain Dump: failed to load tasks for group ${group.id}:`, error);
                 return { id: group.id, name: group.name, memberNames: group.memberNames, tasks: [] };
             }
         }));
+
+        if (currentGroupId && groupSignals) {
+            try {
+                // forUserId -> a real display name via the roster already
+                // fetched above (memberIds/memberNames are parallel arrays
+                // on the group doc), rather than a second query per name.
+                const currentGroup = groups.find((g) => g.id === currentGroupId);
+                const nameForId = (id) => {
+                    const idx = currentGroup ? currentGroup.memberIds.indexOf(id) : -1;
+                    return idx !== -1 ? currentGroup.memberNames[idx] : 'a teammate';
+                };
+                const suggestionsSnapshot = await getDocs(collection(db, 'groups', currentGroupId, 'suggestions'));
+                groupSignals.pendingSuggestions = suggestionsSnapshot.docs
+                    .map((suggestionDoc) => suggestionDoc.data())
+                    .filter((suggestion) => suggestion.status === 'pending')
+                    .slice(0, 30)
+                    .map((suggestion) => ({
+                        forUserName: nameForId(suggestion.forUserId),
+                        text: String(suggestion.text || '').slice(0, 150)
+                    }));
+            } catch (error) {
+                console.error(`Brain Dump: failed to load pending suggestions for group ${currentGroupId}:`, error);
+            }
+        }
     } catch (error) {
         console.error('Brain Dump: failed to load groups for context:', error);
     }
 
-    return { soloTasks, groups: groupsContext };
+    return { soloTasks, groups: groupsContext, signals: { solo: soloSignals, group: groupSignals } };
 }
 
 // A fresh, one-time, read-only snapshot of users/{uid}/dustyMemory - the
@@ -1681,9 +1824,10 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             // Fetched together - the token and the workload snapshot are
             // independent reads, no reason to wait on one before starting
             // the other.
+            const activeGroupId = typeof getCurrentGroupId === 'function' ? getCurrentGroupId() : null;
             const [idToken, taskContext, memories] = await Promise.all([
                 user.getIdToken(),
-                gatherTaskContext(user),
+                gatherTaskContext(user, activeGroupId),
                 gatherDustyMemories(user)
             ]);
             // Best-effort refresh of the soft-limit counter (see
@@ -1706,8 +1850,11 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
                     // when no group is currently selected - either way the
                     // Worker's prompt then has no group it's allowed to
                     // target, so teammateSuggestions/teammateComments come
-                    // back empty regardless of what's asked.
-                    currentGroupId: typeof getCurrentGroupId === 'function' ? getCurrentGroupId() : null
+                    // back empty regardless of what's asked. Same value
+                    // already used above to scope gatherTaskContext's
+                    // planning-signal reads - reused here rather than
+                    // calling getCurrentGroupId() a second time.
+                    currentGroupId: activeGroupId
                 })
             });
 

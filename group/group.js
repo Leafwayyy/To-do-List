@@ -819,10 +819,16 @@ function applyGroupSnoozeToTask(groupId, taskId, preset) {
 
     expandedSnoozeTaskIds.delete(taskId);
 
-    const { doc, updateDoc } = fs();
+    // snoozeCount: same reasoning as solo's applySnoozeToTask - Dusty's
+    // planning signals use this to flag a task that keeps getting pushed
+    // rather than done, not shown anywhere in the group UI itself.
+    // increment() is atomic (no read needed first), same pattern already
+    // used for commentCount above.
+    const { doc, updateDoc, increment } = fs();
     updateDoc(doc(db(), 'groups', groupId, 'tasks', taskId), {
         dueAt: presetDate.toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
+        snoozeCount: increment(1)
     }).catch((error) => console.error('Failed to snooze task:', error));
 }
 
