@@ -43,11 +43,12 @@ body{
 }
 
 .title{
+    font-family: 'Playfair Display', serif;
     font-size: 36px;
-    font-weight: 750;
+    font-weight: 700;
     color: #1e1e1e;
     margin-bottom: 20px;
-    
+
 }
 
 .motivatorContainer{
