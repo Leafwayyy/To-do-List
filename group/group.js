@@ -4085,22 +4085,34 @@ async function commitAiTaskEditsGroup(drafts) {
             continue;
         }
 
+        // One combined updateDoc below instead of two sequential ones - a
+        // draft that both completes a task and changes another field used
+        // to cost two full round-trips to the same document. completed/
+        // completedAt are folded straight into fieldUpdates (the same two
+        // fields setGroupTaskCompleted itself would have written) rather
+        // than calling that function for the write; its side effects
+        // (sound/milestone/history-log, not Firestore writes) still run
+        // separately below, same as before.
+        const fieldUpdates = {};
+
+        // realTask.completed !== willBeCompleted guard: without it, a
+        // draft redundantly marking an already-completed task complete
+        // (Gemini including completed:true alongside another field change
+        // on a done task, say) would re-log a duplicate history entry and
+        // re-fire the milestone check every time, inflating the This week/
+        // This month leaderboard counts - solo's commitAiTaskEditsSolo
+        // avoids this for free via setTaskCompletedState's own
+        // wasCompleted===completed no-op. Real bug caught by code review.
+        let justCompleted = false;
         if (Object.prototype.hasOwnProperty.call(draft, 'completed')) {
             const willBeCompleted = Boolean(draft.completed);
-            await setGroupTaskCompleted(group.id, realTask.id, willBeCompleted);
-            // Same side effects the checkbox itself triggers on completing
-            // a task (see the .checkBtn click handler above) - history log
-            // and milestone check, not just the Firestore write.
-            if (willBeCompleted) {
-                playTaskCompleteSound();
-                checkGroupMilestone(group.id, realTask.id);
-                logGroupTaskCompletion(group.id, realTask, new Date().toISOString()).catch((error) => {
-                    console.error('Failed to log completion history:', error);
-                });
+            if (realTask.completed !== willBeCompleted) {
+                fieldUpdates.completed = willBeCompleted;
+                fieldUpdates.completedAt = willBeCompleted ? new Date().toISOString() : null;
+                justCompleted = willBeCompleted;
             }
         }
 
-        const fieldUpdates = {};
         if (Object.prototype.hasOwnProperty.call(draft, 'matrix') && draft.matrix) {
             fieldUpdates.matrix = getValidMatrixValue(draft.matrix);
         }
@@ -4116,6 +4128,17 @@ async function commitAiTaskEditsGroup(drafts) {
         if (Object.keys(fieldUpdates).length > 0) {
             fieldUpdates.updatedAt = new Date().toISOString();
             await updateDoc(doc(db(), 'groups', group.id, 'tasks', realTask.id), fieldUpdates);
+        }
+
+        // Same side effects the checkbox itself triggers on completing a
+        // task (see the .checkBtn click handler above) - history log and
+        // milestone check, not just the Firestore write above.
+        if (justCompleted) {
+            playTaskCompleteSound();
+            checkGroupMilestone(group.id, realTask.id);
+            logGroupTaskCompletion(group.id, realTask, new Date().toISOString()).catch((error) => {
+                console.error('Failed to log completion history:', error);
+            });
         }
     }
 }

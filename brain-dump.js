@@ -1035,7 +1035,18 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         bulkBtn.classList.add('brainDumpAddBtn');
         bulkBtn.textContent = addBtnLabel;
         bulkBtn.addEventListener('click', async () => {
-            const confirmed = cards.map((card) => card.read()).filter((draft) => draft.included && draft.text.trim());
+            // draft.text === undefined check: task-edit drafts (see
+            // createTaskEditReviewCard) have no text field at all, unlike
+            // every other review type this scaffold serves - a bare
+            // draft.text.trim() threw a TypeError for them, crashing the
+            // whole bulk-apply click silently (an unhandled rejection, no
+            // status message). Every other type still gets the exact same
+            // empty-text filtering as before; task edits fall through to
+            // whatever their own commit function already validates
+            // (findTaskById/groupTasks.find), same as it always did. Real
+            // bug caught by code review.
+            const confirmed = cards.map((card) => card.read())
+                .filter((draft) => draft.included && (draft.text === undefined || draft.text.trim()));
             if (confirmed.length === 0) {
                 status.textContent = 'Nothing checked.';
                 return;
