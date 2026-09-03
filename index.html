@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260902p">
+    <link rel="stylesheet" href="style.css?v=20260902q">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#050225">
@@ -129,8 +129,31 @@
                         </div>
                     </div>
 
+                    <!-- Deadline is a third primary field, not behind More
+                         options - it drives sort order/urgency as directly as
+                         matrix and difficulty do (getPriorityScore, the
+                         overdue badge, Do This Next), so it gets the same
+                         always-visible treatment, just on its own row since
+                         its field (icon + label + input) is wider than a
+                         plain select. -->
+                    <div class="detailsFieldGroup detailsDeadlinePrimary">
+                        <div class="deadlineContainer">
+                            <span class="deadlineTag"><i class="fa-solid fa-calendar"></i> Deadline</span>
+                            <input type="datetime-local" class="deadlineInput" aria-label="Deadline" title="Set deadline date and time" placeholder="Set date and time">
+                        </div>
+                        <p class="detailsFieldSubtitle">When it's due</p>
+                    </div>
+
+                    <div class="deadlinePresets" aria-label="Quick deadline presets">
+                        <button class="deadlinePresetBtn" data-preset="hour2">In 2 hours</button>
+                        <button class="deadlinePresetBtn" data-preset="hour6">In 6 hours</button>
+                        <button class="deadlinePresetBtn" data-preset="eod">End of day</button>
+                        <button class="deadlinePresetBtn" data-preset="tomorrow">Tomorrow 9 AM</button>
+                        <button class="deadlinePresetBtn" data-preset="clear">No deadline</button>
+                    </div>
+
                     <button type="button" class="detailsMoreToggleBtn" aria-expanded="false" aria-controls="detailsMoreOptions">
-                        <span>More options: estimate, deadline, schedule</span>
+                        <span>More options: estimate, schedule</span>
                         <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
                     </button>
 
@@ -152,23 +175,10 @@
                                 </div>
                             </div>
 
-                            <div class="deadlineContainer">
-                                <span class="deadlineTag"><i class="fa-solid fa-calendar"></i> Deadline</span>
-                                <input type="datetime-local" class="deadlineInput" aria-label="Deadline" title="Set deadline date and time" placeholder="Set date and time">
-                            </div>
-
                             <div class="deadlineContainer scheduleContainer">
                                 <span class="deadlineTag scheduleTag"><i class="fa-solid fa-clock"></i> Schedule</span>
                                 <input type="datetime-local" class="deadlineInput scheduleInput" aria-label="Scheduled time" title="Set when you'll actually work on this" placeholder="When will you do this?">
                             </div>
-                        </div>
-
-                        <div class="deadlinePresets" aria-label="Quick deadline presets">
-                            <button class="deadlinePresetBtn" data-preset="hour2">In 2 hours</button>
-                            <button class="deadlinePresetBtn" data-preset="hour6">In 6 hours</button>
-                            <button class="deadlinePresetBtn" data-preset="eod">End of day</button>
-                            <button class="deadlinePresetBtn" data-preset="tomorrow">Tomorrow 9 AM</button>
-                            <button class="deadlinePresetBtn" data-preset="clear">No deadline</button>
                         </div>
 
                         <div class="schedulePresets" aria-label="Quick schedule presets">
@@ -355,7 +365,7 @@
     <script src="task-shared.js?v=20260831g"></script>
     <script src="brain-dump.js?v=20260902b"></script>
     <script src="auth-gate.js?v=20260830a"></script>
-    <script src="script.js?v=20260902i"></script>
+    <script src="script.js?v=20260902j"></script>
     <script type="module" src="firebase-init.js?v=20260831a"></script>
     <script src="settings.js?v=20260902b"></script>
 

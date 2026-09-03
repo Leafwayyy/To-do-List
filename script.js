@@ -2315,8 +2315,22 @@ function initializeTaskEditor() {
                 </label>
             </div>
 
+            <!-- Deadline is a third primary field, not behind More options -
+                 same reasoning as the inline Prioritize panel (index.html):
+                 it drives sort order/urgency as directly as matrix and
+                 difficulty do. -->
+            <label class="detailsFieldGroup detailsDeadlinePrimary">
+                Deadline
+                <div class="editorDeadlineWrap">
+                    <input type="datetime-local" class="editorDeadlineInput">
+                    <button type="button" class="editorCalendarBtn" aria-label="Open edit deadline calendar">
+                        <i class="fa-solid fa-calendar"></i>
+                    </button>
+                </div>
+            </label>
+
             <button type="button" class="detailsMoreToggleBtn editorMoreToggleBtn" aria-expanded="false" aria-controls="editorMoreOptions">
-                <span>More options: estimate, deadline, schedule</span>
+                <span>More options: estimate, schedule</span>
                 <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
             </button>
 
@@ -2329,15 +2343,6 @@ function initializeTaskEditor() {
                             <option value="open">No time estimate</option>
                         </select>
                         <input type="number" class="editorDurationInput" min="5" step="5" placeholder="Minutes">
-                    </div>
-                </label>
-                <label>
-                    Deadline
-                    <div class="editorDeadlineWrap">
-                        <input type="datetime-local" class="editorDeadlineInput">
-                        <button type="button" class="editorCalendarBtn" aria-label="Open edit deadline calendar">
-                            <i class="fa-solid fa-calendar"></i>
-                        </button>
                     </div>
                 </label>
                 <label>

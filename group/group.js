@@ -1539,8 +1539,20 @@ function initializeGroupTaskEditor() {
                 </label>
             </div>
 
+            <!-- Deadline is a third primary field, not behind More options -
+                 same reasoning as the inline Prioritize panel. -->
+            <label class="detailsFieldGroup detailsDeadlinePrimary">
+                Deadline
+                <div class="editorDeadlineWrap">
+                    <input type="datetime-local" class="editorDeadlineInput">
+                    <button type="button" class="editorCalendarBtn" aria-label="Open edit deadline calendar">
+                        <i class="fa-solid fa-calendar"></i>
+                    </button>
+                </div>
+            </label>
+
             <button type="button" class="detailsMoreToggleBtn editorMoreToggleBtn" aria-expanded="false" aria-controls="groupEditorMoreOptions">
-                <span>More options: estimate, deadline, schedule</span>
+                <span>More options: estimate, schedule</span>
                 <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
             </button>
 
@@ -1553,15 +1565,6 @@ function initializeGroupTaskEditor() {
                             <option value="open">No time estimate</option>
                         </select>
                         <input type="number" class="editorDurationInput" min="5" step="5" placeholder="Minutes">
-                    </div>
-                </label>
-                <label>
-                    Deadline
-                    <div class="editorDeadlineWrap">
-                        <input type="datetime-local" class="editorDeadlineInput">
-                        <button type="button" class="editorCalendarBtn" aria-label="Open edit deadline calendar">
-                            <i class="fa-solid fa-calendar"></i>
-                        </button>
                     </div>
                 </label>
                 <label>
@@ -2228,22 +2231,22 @@ function initializeSuggestModal() {
                 </label>
             </div>
 
-            <button type="button" class="detailsMoreToggleBtn editorMoreToggleBtn" aria-expanded="false" aria-controls="suggestMoreOptions">
-                <span>More options: deadline</span>
-                <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
-            </button>
-
-            <div class="detailsMoreOptions editorMoreOptions" id="suggestMoreOptions">
-                <label>
-                    Deadline (optional)
-                    <div class="editorDeadlineWrap">
-                        <input type="datetime-local" class="editorDeadlineInput">
-                        <button type="button" class="editorCalendarBtn" aria-label="Open deadline calendar">
-                            <i class="fa-solid fa-calendar"></i>
-                        </button>
-                    </div>
-                </label>
-            </div>
+            <!-- No More options toggle here (unlike the task editor/inline
+                 panel) - deadline was the ONLY thing behind it, and deadline
+                 is a primary field now (same reasoning as everywhere else in
+                 this rework), so there is nothing left this modal would ever
+                 need to hide. Matrix, Difficulty, and Deadline together are
+                 still well within Hick's Law's comfortable range as three
+                 always-visible fields. -->
+            <label class="detailsFieldGroup detailsDeadlinePrimary">
+                Deadline (optional)
+                <div class="editorDeadlineWrap">
+                    <input type="datetime-local" class="editorDeadlineInput">
+                    <button type="button" class="editorCalendarBtn" aria-label="Open deadline calendar">
+                        <i class="fa-solid fa-calendar"></i>
+                    </button>
+                </div>
+            </label>
 
             <div class="editorActions">
                 <button type="button" class="editorCancelBtn">Cancel</button>
@@ -2259,20 +2262,11 @@ function initializeSuggestModal() {
     const deadlineWrap = suggestOverlay.querySelector('.editorDeadlineWrap');
     const cancelBtn = suggestOverlay.querySelector('.editorCancelBtn');
     const sendBtn = suggestOverlay.querySelector('.editorSaveBtn');
-    const suggestMoreToggleBtn = suggestOverlay.querySelector('.editorMoreToggleBtn');
-    const suggestMoreOptions = suggestOverlay.querySelector('.editorMoreOptions');
+    // No More options toggle in this modal anymore (see the markup above) -
+    // deadline was the only thing behind it, and it's a primary field now.
 
     sendBtn.addEventListener('click', submitSuggestTaskModal);
     cancelBtn.addEventListener('click', closeSuggestModal);
-
-    if (suggestMoreToggleBtn && suggestMoreOptions) {
-        suggestMoreToggleBtn.addEventListener('click', () => {
-            playClickSound();
-            const isOpen = !suggestMoreOptions.classList.contains('open');
-            suggestMoreOptions.classList.toggle('open', isOpen);
-            suggestMoreToggleBtn.setAttribute('aria-expanded', String(isOpen));
-        });
-    }
 
     suggestTextInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
@@ -2321,16 +2315,6 @@ function openSuggestTaskModal(groupId, forUserId, forUserName) {
     suggestOverlay.querySelector('.editorMatrixSelect').value = 'schedule';
     suggestOverlay.querySelector('.editorDifficultySelect').value = '3';
     suggestOverlay.querySelector('.editorDeadlineInput').value = '';
-
-    // Always a brand new suggestion, never pre-filled data to protect the
-    // way the task editor's open state can be (see openGroupTaskEditor) -
-    // more options starts collapsed every time.
-    const suggestMoreToggleBtn = suggestOverlay.querySelector('.editorMoreToggleBtn');
-    const suggestMoreOptions = suggestOverlay.querySelector('.editorMoreOptions');
-    if (suggestMoreOptions && suggestMoreToggleBtn) {
-        suggestMoreOptions.classList.remove('open');
-        suggestMoreToggleBtn.setAttribute('aria-expanded', 'false');
-    }
 
     suggestOverlay.classList.add('open');
     suggestOverlay.querySelector('.editorTextInput').focus();

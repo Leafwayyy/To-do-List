@@ -195,7 +195,15 @@ body{
 }
 
 .taskDetailsPanel.open{
-    max-height: 520px;
+    /* Bumped from 520px - deadline (plus its preset row) moved from More
+       options into the always-visible primary tier, so the panel's
+       collapsed-more-options height grew even though its fully-expanded
+       worst case did not (more options itself now has one less field).
+       overflow is visible below, not hidden, so oversized content would
+       still be readable even past this cap, but it would visually spill
+       outside the panel's own background/border - safer to just give it
+       enough room. */
+    max-height: 640px;
     overflow: visible;
     opacity: 1;
     transform: translateY(0);
@@ -3278,6 +3286,35 @@ body > .viewTabs{
     font-size: var(--text-2xs);
     color: var(--violet-muted, #d7d0ff);
     opacity: 0.85;
+}
+
+/* Deadline as a third primary field (see index.html/group/index.html) -
+   its own row below Matrix/Difficulty since its field (icon + label +
+   input) is wider than a plain select, not crammed into the same 2-column
+   row as them. */
+.detailsDeadlinePrimary{
+    margin-top: var(--space-3);
+}
+
+/* Real bug found and fixed while adding the above: .editorPrimaryGrid
+   (task editor overlay, initializeTaskEditor/initializeGroupTaskEditor)
+   never actually carried the base .detailsGrid class the way the inline
+   Prioritize panel's own .detailsGridPrimary does, and the inline panel's
+   2-column grid rule is scoped to .mainColumn .taskDetailsPanel anyway -
+   a completely different DOM context from .taskEditorCard, a dynamically
+   created overlay. Matrix and Difficulty have been rendering stacked full-
+   width, one above the other, instead of side by side, since step 5 of
+   this rework first built the editor's two-tier disclosure. */
+.taskEditorCard .editorPrimaryGrid{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-3);
+}
+
+@media (max-width: 500px){
+    .taskEditorCard .editorPrimaryGrid{
+        grid-template-columns: 1fr;
+    }
 }
 
 .detailsMoreToggleBtn{
