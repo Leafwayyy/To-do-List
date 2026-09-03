@@ -375,7 +375,11 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         }
         let lastIndex = -1;
         try {
-            lastIndex = Number(localStorage.getItem(DUSTY_IDLE_HINT_LAST_INDEX_KEY));
+            const stored = localStorage.getItem(DUSTY_IDLE_HINT_LAST_INDEX_KEY);
+            // getItem returns null on first-ever run - Number(null) is 0, not
+            // NaN, which would wrongly treat index 0 as "just shown". Only
+            // trust a stored value that was actually written.
+            lastIndex = stored === null ? -1 : Number(stored);
         } catch {
             lastIndex = -1;
         }
@@ -388,7 +392,9 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         } catch {
             // Non-fatal - worst case the same line can repeat back to back.
         }
-        return pool[nextIndex];
+        // Defensive fallback - pool[nextIndex] should always be a real line
+        // given the bounds above, but never hand the caller an empty bubble.
+        return pool[nextIndex] || pool[0] || '';
     }
 
     function scheduleIdleHint() {
