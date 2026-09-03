@@ -1737,6 +1737,16 @@ body{
 
 .taskEditorCard{
     width: min(460px, 95vw);
+    /* Real bug, found by actually rendering this with "More options" open
+       on a landscape phone (667x375): with no height cap and
+       overflow-y:visible, the expanded form (Task/Matrix/Difficulty/
+       Deadline/More options/Save) runs well past 375px tall, and
+       .taskEditorOverlay centers it - so it overflowed the viewport on
+       BOTH edges equally, with no way to scroll. The Save button was
+       literally unreachable. calc(100vh - 40px) leaves the same 20px
+       breathing room top and bottom as .taskEditorOverlay's own padding. */
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
     background: rgba(247, 252, 255, 0.95);
     border: 2px solid rgba(74, 146, 246, 0.5);
     border-radius: var(--radius-lg);
