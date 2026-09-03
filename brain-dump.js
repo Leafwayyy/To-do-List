@@ -54,6 +54,13 @@ const BRAIN_DUMP_MAX_HISTORY_TURNS = 10;
 const BRAIN_DUMP_MAX_CONTEXT_TASKS = 150; // per list (solo, or each group) - a defensive cap, not a realistic ceiling
 const BRAIN_DUMP_MAX_MEMORIES = 60; // how many saved memories get sent as context per message - a defensive cap
 const BRAIN_DUMP_MEMORY_SOFT_LIMIT = 60; // stop offering to save new ones past this - nudges toward deleting stale ones from Settings instead of growing forever
+// A "context" memory (a current situation, not a durable trait - see
+// commitMemories/gatherDustyMemories) stops being sent to Dusty after this
+// many days, on the theory that "starting a new job" or "recovering from
+// an injury" is realistically not still shaping planning 3 months later.
+// A 'preference' memory never expires. Picked as a reasonable single
+// default rather than something the AI gets to decide per-memory.
+const BRAIN_DUMP_MEMORY_CONTEXT_EXPIRY_DAYS = 90;
 
 // Recurring idle hints (see startIdleHintCycle) - unlike maybeShowIntroHint
 // (once ever, for a first-time visitor), these keep showing periodically for
@@ -305,6 +312,16 @@ async function gatherTaskContext(user, currentGroupId) {
 // confirmed (see createMemoryReviewCard/commitMemories below). Sent with
 // every message, solo or group, since this is about the PERSON, not
 // whichever list they happen to have open.
+// Stale "context" memories (see commitMemories) are filtered out HERE,
+// before Dusty ever sees them - not deleted, just no longer sent to
+// Gemini or counted against the soft limit. Settings' own "manage
+// memories" panel reads dustyMemory directly (not through this function),
+// so a stale one still shows up there for the user to actually delete,
+// this only controls what's active for the AI.
+function isMemoryExpired(memory) {
+    return memory?.type === 'context' && typeof memory.expiresAt === 'string' && new Date(memory.expiresAt) <= new Date();
+}
+
 async function gatherDustyMemories(user) {
     const { db, firestore } = window.ToDoAuth;
     const { collection, getDocs } = firestore;
@@ -312,7 +329,8 @@ async function gatherDustyMemories(user) {
     try {
         const snapshot = await getDocs(collection(db, 'users', user.uid, 'dustyMemory'));
         return snapshot.docs
-            .map((memoryDoc) => ({ id: memoryDoc.id, text: memoryDoc.data().text }))
+            .map((memoryDoc) => ({ id: memoryDoc.id, text: memoryDoc.data().text, type: memoryDoc.data().type, expiresAt: memoryDoc.data().expiresAt }))
+            .filter((memory) => !isMemoryExpired(memory))
             .slice(0, BRAIN_DUMP_MAX_MEMORIES);
     } catch (error) {
         console.error('Brain Dump: failed to load saved memories:', error);
@@ -1621,6 +1639,11 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         const card = document.createElement('div');
         card.classList.add('brainDumpTaskCard');
 
+        // Normalized once, same "trust the LLM's coarse label, never its
+        // exact dates" reasoning as commitMemories - anything but exactly
+        // 'context' is treated as a durable preference.
+        const memoryType = draft.type === 'context' ? 'context' : 'preference';
+
         const header = document.createElement('div');
         header.classList.add('brainDumpTaskCardHeader');
 
@@ -1631,6 +1654,14 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         checkbox.checked = true;
         checkboxLabel.appendChild(checkbox);
         header.appendChild(checkboxLabel);
+
+        if (memoryType === 'context') {
+            const typeBadge = document.createElement('span');
+            typeBadge.classList.add('brainDumpMemoryTypeBadge');
+            typeBadge.textContent = 'Current situation';
+            typeBadge.title = `Expires automatically after ${BRAIN_DUMP_MEMORY_CONTEXT_EXPIRY_DAYS} days - Dusty will stop using it once it's likely stale, though it stays visible in Settings until you delete it.`;
+            header.appendChild(typeBadge);
+        }
 
         const rememberOneBtn = document.createElement('button');
         rememberOneBtn.type = 'button';
@@ -1643,7 +1674,9 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
 
         const targetLabel = document.createElement('p');
         targetLabel.classList.add('brainDumpTaskCardTarget');
-        targetLabel.textContent = 'Remember this about you:';
+        targetLabel.textContent = memoryType === 'context'
+            ? `Remember this for about ${BRAIN_DUMP_MEMORY_CONTEXT_EXPIRY_DAYS} days:`
+            : 'Remember this about you:';
         fields.appendChild(targetLabel);
 
         const textInputEl = document.createElement('input');
@@ -1658,7 +1691,8 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
 
         const read = () => ({
             included: checkbox.checked,
-            text: textInputEl.value
+            text: textInputEl.value,
+            type: memoryType
         });
 
         const markRemembered = () => {
@@ -1734,8 +1768,20 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
                 console.error('Brain Dump: memory soft limit reached - skipped saving the rest of this batch. Delete some old ones from Settings first.');
                 break;
             }
+            // type: never trust Gemini with an actual expiry date (see
+            // task-id validation elsewhere in this file for the same
+            // reasoning) - only a coarse 'context'/'preference' label,
+            // decided by the LLM. The real expiresAt is always computed
+            // here, from a fixed constant, not proposed. Anything other
+            // than exactly 'context' defaults to a durable preference.
+            const memoryType = draft.type === 'context' ? 'context' : 'preference';
+            const expiresAt = memoryType === 'context'
+                ? new Date(Date.now() + BRAIN_DUMP_MEMORY_CONTEXT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString()
+                : null;
             await setDoc(doc(collection(db, 'users', user.uid, 'dustyMemory'), generateTaskId()), {
                 text: trimmedText.slice(0, 300),
+                type: memoryType,
+                expiresAt,
                 createdAt: serverTimestamp()
             });
             knownMemoryCount += 1;

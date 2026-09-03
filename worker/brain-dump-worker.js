@@ -45,7 +45,12 @@ A good forward-planning answer does three things: (1) names the real situation p
 
 MEMORY - a list of short, durable facts about the user, given to you below (if any exist). USE THEM ACTIVELY - this is not passive background to ignore. When a known fact is relevant to what you're doing this turn, let it actually shape your reasoning: default a task's timing/matrix/subtasks around a known preference or constraint instead of asking about something you already know, steer away from something a known constraint rules out (an allergy, a fixed limitation), and when a known fact visibly changed what you proposed, say so briefly in "reply" (e.g. "Set this for the evening since I know that's when you usually work out" or "Left dairy out of the snack list since I know you're lactose intolerant") so the user can see it's actually being used, not just stored. Don't force a mention when nothing this turn actually touches a known fact.
 
-You can also propose ADDING a new memory via "memoryProposals". You MAY propose one proactively, without being explicitly asked, since it only affects the user's own private data, never anyone else's - but be sparing. Only propose one for something genuinely durable and useful for future planning: a real constraint (an allergy, a fixed limitation), a strong stated preference (always prefers mornings, hates a specific chore), or a clearly recurring pattern across this conversation. Never propose one for a one-off detail, small talk, something already obvious from their task list, or anything already in the known-facts list below. At most one or two per turn, and often none at all - most turns should propose zero. Every proposal is a DRAFT only, shown to the user to confirm or discard, never saved by you directly. Each memoryProposals item is just a short first-person-neutral "text" string, e.g. "Allergic to peanuts" or "Prefers working out in the evenings", not a full sentence about the conversation.
+You can also propose ADDING a new memory via "memoryProposals". You MAY propose one proactively, without being explicitly asked, since it only affects the user's own private data, never anyone else's - but be sparing. Every proposal is a DRAFT only, shown to the user to confirm or discard, never saved by you directly. At most one or two per turn, and often none at all - most turns should propose zero. Each memoryProposals item is a short first-person-neutral "text" string, e.g. "Allergic to peanuts" or "Starting a new job on the 15th", not a full sentence about the conversation, plus a "type":
+
+- "preference" - something durable that doesn't go stale: a real constraint (an allergy, a fixed limitation), or a strong stated preference (always prefers mornings, hates a specific chore). Propose one for a clearly recurring pattern across this conversation, not a one-off detail.
+- "context" - something going on in the user's life RIGHT NOW that will stop being relevant after a while, but matters for planning while it's true: starting a new job, moving, recovering from an injury or illness, a big project at work, travel coming up, a temporary schedule change. This is new - actively watch for it, not just preferences. If the user mentions something like this in passing (not asking you to remember it, just mentioning it while talking about something else), that's still worth a proposal - this is exactly the kind of thing that otherwise gets said once and never surfaces again. The client attaches its own expiry to these and quietly retires them later, so propose these more readily than "preference" ones.
+
+Never propose either for small talk, something already obvious from their task list, or anything already in the known-facts list below.
 
 FOLLOW THIS PROCESS ON EVERY TURN, IN ORDER:
 
@@ -350,7 +355,14 @@ function buildMemoryBlock(memories) {
         return '\n\nKnown facts about the user: none saved yet.';
     }
     const lines = ['\n\nKnown facts about the user (already saved - apply these actively per the MEMORY rule above, and do not re-propose any of these):'];
-    list.forEach((memory) => lines.push(`- ${String(memory?.text || '').slice(0, 300)}`));
+    list.forEach((memory) => {
+        const text = String(memory?.text || '').slice(0, 300);
+        // Already expiry-filtered client-side (see gatherDustyMemories) -
+        // this label is just so a still-active "context" fact reads to you
+        // as a current situation, not a fixed trait, when you phrase things.
+        const tag = memory?.type === 'context' ? ' (current situation, not necessarily permanent)' : '';
+        lines.push(`- ${text}${tag}`);
+    });
     return lines.join('\n');
 }
 
@@ -493,7 +505,16 @@ function buildGeminiRequest(body) {
             items: {
                 type: 'OBJECT',
                 properties: {
-                    text: { type: 'STRING' }
+                    text: { type: 'STRING' },
+                    // 'preference' - durable, doesn't go stale (an allergy,
+                    // "hates mornings"). 'context' - a current situation
+                    // that will stop being relevant after a while (a new
+                    // job, recovering from an injury, travel). The client
+                    // gives 'context' memories a fixed expiry and quietly
+                    // stops using them once stale - see the MEMORY section
+                    // above. Optional, defaults to 'preference' if omitted
+                    // or not one of these two.
+                    type: { type: 'STRING', enum: ['preference', 'context'] }
                 },
                 required: ['text']
             }

@@ -224,6 +224,23 @@
                 font-size: 0.86rem;
             }
             .settingsMemoryItemText { flex: 1; min-width: 0; word-break: break-word; }
+            /* An expired "context" memory (see refreshMemoryList) - Dusty
+               already stopped using it, this just makes that visible here
+               too instead of it looking identical to an active memory. */
+            .settingsMemoryItemExpired { opacity: 0.55; }
+            .settingsMemoryItemExpired .settingsMemoryItemText { text-decoration: line-through; text-decoration-color: rgba(215, 208, 255, 0.4); }
+            .settingsMemoryExpiredBadge {
+                flex: 0 0 auto;
+                font-size: 0.68rem;
+                font-weight: 700;
+                color: #d7d0ff;
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(170, 152, 255, 0.3);
+                border-radius: 999px;
+                padding: 2px 8px;
+                white-space: nowrap;
+                cursor: help;
+            }
             .settingsMemoryForgetBtn {
                 flex: 0 0 auto;
                 background: transparent;
@@ -602,6 +619,22 @@
                 textSpan.className = 'settingsMemoryItemText';
                 textSpan.textContent = memory.text || '';
                 item.appendChild(textSpan);
+
+                // Expired 'context' memories (see brain-dump.js's
+                // isMemoryExpired) already stopped being sent to Dusty -
+                // this is just so it's visible HERE too, rather than
+                // silently sitting in the list looking identical to an
+                // active one. Still has to be deleted manually - Dusty
+                // stops using it, but nothing here auto-deletes anything.
+                const isExpired = memory.type === 'context' && typeof memory.expiresAt === 'string' && new Date(memory.expiresAt) <= new Date();
+                if (isExpired) {
+                    item.classList.add('settingsMemoryItemExpired');
+                    const expiredBadge = document.createElement('span');
+                    expiredBadge.className = 'settingsMemoryExpiredBadge';
+                    expiredBadge.textContent = 'No longer used';
+                    expiredBadge.title = 'This was a temporary "current situation" memory - Dusty has stopped using it since it\'s likely stale now. Delete it whenever you like.';
+                    item.appendChild(expiredBadge);
+                }
 
                 const forgetBtn = document.createElement('button');
                 forgetBtn.type = 'button';

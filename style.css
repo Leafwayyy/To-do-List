@@ -5463,6 +5463,23 @@ body.authGateActive .authOverlay{
     white-space: nowrap;
 }
 
+/* Marks a memory proposal as 'context' (a current situation, not a
+   durable trait) - see createMemoryReviewCard. Only ever shown for
+   context-type drafts, never for the default preference type, so its
+   mere presence already communicates "this one expires". */
+.brainDumpMemoryTypeBadge{
+    font-size: var(--text-2xs, 10px);
+    font-weight: 700;
+    text-align: center;
+    color: var(--violet-accent, #b58bff);
+    background: rgba(181, 139, 255, 0.16);
+    border: 1px solid rgba(181, 139, 255, 0.4);
+    border-radius: var(--radius-pill);
+    padding: 2px 8px;
+    white-space: nowrap;
+    cursor: help;
+}
+
 .brainDumpTaskCardFields{
     flex: 1 1 auto;
     min-width: 0;
