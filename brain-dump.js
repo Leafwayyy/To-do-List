@@ -407,13 +407,22 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     }
 
     function showIdleHint() {
-        // fabEl.offsetParent === null - a plain, dependency-free "is this
-        // actually visible" check (catches display:none, including
-        // group.js's hidden-until-a-group-is-selected class, without
-        // needing to know its exact class name here). Every skip case
-        // still reschedules - a hidden/backgrounded moment now just means
-        // try again in another 2-4 minutes, not give up entirely.
-        if (!fabEl || isOpen() || document.hidden || fabEl.offsetParent === null || fabEl.querySelector('.dustyHint')) {
+        // THE BUG: this used to check fabEl.offsetParent === null as an
+        // "is this actually visible" test. That works for normal in-flow
+        // elements, but .brainDumpToggleBtn is position:fixed - and a
+        // position:fixed element's offsetParent is ALWAYS null in every
+        // browser, regardless of whether it's actually on screen (verified
+        // directly against real Chromium, not just spec-reading). So this
+        // check was unconditionally true, every single time, forever - the
+        // idle hint scheduled itself over and over but could never actually
+        // pass this guard, which is exactly why it never appeared for
+        // anyone. getClientRects().length is the fix: it's empty when the
+        // element (or an ancestor, e.g. group.js's hidden-until-a-group-
+        // is-selected class) is display:none, but non-empty for a rendered
+        // position:fixed element - verified against both cases directly.
+        // Every skip case still reschedules - a hidden/backgrounded moment
+        // now just means try again next cycle, not give up entirely.
+        if (!fabEl || isOpen() || document.hidden || fabEl.getClientRects().length === 0 || fabEl.querySelector('.dustyHint')) {
             scheduleIdleHint();
             return;
         }
