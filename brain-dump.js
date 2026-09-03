@@ -55,6 +55,32 @@ const BRAIN_DUMP_MAX_CONTEXT_TASKS = 150; // per list (solo, or each group) - a 
 const BRAIN_DUMP_MAX_MEMORIES = 60; // how many saved memories get sent as context per message - a defensive cap
 const BRAIN_DUMP_MEMORY_SOFT_LIMIT = 60; // stop offering to save new ones past this - nudges toward deleting stale ones from Settings instead of growing forever
 
+// Recurring idle hints (see startIdleHintCycle) - unlike maybeShowIntroHint
+// (once ever, for a first-time visitor), these keep showing periodically for
+// the life of the page, for anyone: the whole point is ongoing discoverability
+// of what Dusty can actually do, not just a first-run nudge. Rotates through
+// a small pool per context so it doesn't say the same thing every time.
+const DUSTY_IDLE_HINTS_SOLO = [
+    "Got a lot on your mind? Just tell me about it.",
+    'I can turn a messy brain-dump into real tasks.',
+    "Not sure what to focus on? Ask me what's most urgent.",
+    "Need to add a bunch of tasks at once? I've got you.",
+    'Plans changed? I can edit an existing task too, just ask.',
+    'Stuck on how to break a task down? I can suggest some steps.'
+];
+const DUSTY_IDLE_HINTS_GROUP = [
+    "Got a lot on your mind? Just tell me about it.",
+    'I can turn a messy brain-dump into real tasks.',
+    'I can suggest a task to a teammate for you, just ask.',
+    "I can comment on a teammate's task too.",
+    "Not sure what to focus on? Ask me what's most urgent.",
+    'Plans changed? I can edit an existing task too, just ask.'
+];
+const DUSTY_IDLE_HINT_MIN_DELAY_MS = 2 * 60 * 1000;
+const DUSTY_IDLE_HINT_MAX_DELAY_MS = 4 * 60 * 1000;
+const DUSTY_IDLE_HINT_VISIBLE_MS = 7000;
+const DUSTY_IDLE_HINT_LAST_INDEX_KEY = 'dustyIdleHintLastIndex';
+
 function brainDumpToDatetimeLocalValue(date) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
@@ -330,6 +356,87 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         fabEl.addEventListener('click', dismiss, { once: true });
     }
 
+    // Recurring reminder that Dusty is actually useful, not just a mascot
+    // that blinks - unlike maybeShowIntroHint above (shows once, ever, for
+    // a first-time visitor), this keeps firing every few minutes for the
+    // life of the page, for anyone, rotating through a small pool of real
+    // things Dusty can do. Paused (not shown, but still rescheduled for
+    // later) whenever the chat is open, the tab isn't visible, or a hint is
+    // already on screen - never stacks, never interrupts an active chat.
+    let idleHintTimeoutId = null;
+
+    function pickIdleHintMessage() {
+        const pool = context === 'group' ? DUSTY_IDLE_HINTS_GROUP : DUSTY_IDLE_HINTS_SOLO;
+        if (pool.length <= 1) {
+            return pool[0] || '';
+        }
+        let lastIndex = -1;
+        try {
+            lastIndex = Number(localStorage.getItem(DUSTY_IDLE_HINT_LAST_INDEX_KEY));
+        } catch {
+            lastIndex = -1;
+        }
+        let nextIndex = Math.floor(Math.random() * pool.length);
+        if (nextIndex === lastIndex) {
+            nextIndex = (nextIndex + 1) % pool.length;
+        }
+        try {
+            localStorage.setItem(DUSTY_IDLE_HINT_LAST_INDEX_KEY, String(nextIndex));
+        } catch {
+            // Non-fatal - worst case the same line can repeat back to back.
+        }
+        return pool[nextIndex];
+    }
+
+    function scheduleIdleHint() {
+        clearTimeout(idleHintTimeoutId);
+        const delay = DUSTY_IDLE_HINT_MIN_DELAY_MS
+            + Math.random() * (DUSTY_IDLE_HINT_MAX_DELAY_MS - DUSTY_IDLE_HINT_MIN_DELAY_MS);
+        idleHintTimeoutId = setTimeout(showIdleHint, delay);
+    }
+
+    function showIdleHint() {
+        // fabEl.offsetParent === null - a plain, dependency-free "is this
+        // actually visible" check (catches display:none, including
+        // group.js's hidden-until-a-group-is-selected class, without
+        // needing to know its exact class name here). Every skip case
+        // still reschedules - a hidden/backgrounded moment now just means
+        // try again in another 2-4 minutes, not give up entirely.
+        if (!fabEl || isOpen() || document.hidden || fabEl.offsetParent === null || fabEl.querySelector('.dustyHint')) {
+            scheduleIdleHint();
+            return;
+        }
+
+        // Small bounce alongside the bubble (same burst already used when
+        // Dusty reappears after the chat closes) - a static bubble next to
+        // an otherwise-idle mascot is easy to miss out of the corner of an
+        // eye; the motion is what actually draws attention to it.
+        playGreetBurst();
+
+        const hint = document.createElement('div');
+        hint.className = 'dustyHint dustyIdleHint';
+        hint.textContent = pickIdleHintMessage();
+        fabEl.appendChild(hint);
+
+        let dismissed = false;
+        const dismiss = () => {
+            if (dismissed) {
+                return;
+            }
+            dismissed = true;
+            hint.classList.add('dustyHintHide');
+            setTimeout(() => hint.remove(), 400);
+        };
+
+        const hideTimeoutId = setTimeout(dismiss, DUSTY_IDLE_HINT_VISIBLE_MS);
+        fabEl.addEventListener('click', () => {
+            clearTimeout(hideTimeoutId);
+            dismiss();
+        }, { once: true });
+
+        scheduleIdleHint();
+    }
+
     // Runs once, immediately, rather than lazily in build() (which only
     // fires on first open) - Dusty needs to be visible and idling on the
     // page well before anyone opens the chat.
@@ -341,6 +448,11 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         fabEl.setAttribute('aria-label', 'Chat with Dusty');
         fabEl.title = "Chat with Dusty - let AI turn what you type into tasks";
         maybeShowIntroHint();
+        // Own minimum delay (2-4 min) already puts this well clear of the
+        // one-time intro hint's 6-second window, so no explicit sequencing
+        // needed between the two - starts counting down regardless of
+        // whether the intro hint fires on this visit.
+        scheduleIdleHint();
     }
     mountFab();
 
