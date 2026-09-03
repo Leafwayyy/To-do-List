@@ -5179,6 +5179,12 @@ body.authGateActive .authOverlay{
     align-items: center;
     justify-content: space-between;
     flex: 0 0 auto;
+    /* .brainDumpCard has no gap between its direct children (header,
+       messages, composer), and .brainDumpMessages' own 10px gap only
+       applies BETWEEN message bubbles, not above the first one - so
+       without this, the header sat flush against Dusty's first message
+       with no breathing room at all. */
+    margin-bottom: 12px;
 }
 
 .brainDumpHeaderIdentity{
