@@ -166,13 +166,6 @@ const TOUR_STEPS = [
         beforeShow: () => switchSoloView('tasks')
     },
     {
-        selector: '.viewTabs',
-        title: 'Tasks and Activity',
-        text: 'Everything you\'re working on lives under Tasks, that\'s where we\'ll stay for now. Go ahead, tap over to Activity and back, that\'s where your completion history lives whenever you want it.',
-        action: { event: 'click' },
-        beforeShow: () => switchSoloView('tasks')
-    },
-    {
         selector: '.detailsToggleBtn',
         title: 'Let\'s open Prioritize',
         text: 'Now tap Prioritize, and I\'ll show you everything that helps me figure out what matters most for you.',
@@ -245,6 +238,13 @@ const TOUR_STEPS = [
         selector: '.taskViews',
         title: 'Switch views',
         text: 'Jump straight to what\'s overdue, due today, due this week, or already done. Go ahead and try one, you should even see the task you just added.',
+        action: { event: 'click' },
+        beforeShow: () => switchSoloView('tasks')
+    },
+    {
+        selector: '.viewTabs',
+        title: 'Tasks and Activity',
+        text: 'Everything you\'ve been doing lives under Tasks. Go ahead, tap over to Activity, that\'s where your completion history lives whenever you want it.',
         action: { event: 'click' },
         beforeShow: () => switchSoloView('tasks')
     },

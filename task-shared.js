@@ -796,8 +796,13 @@ function startRewardReelTicking(track, tileStepPx) {
 // who can't or doesn't want to perform the exact action), but doing the
 // real thing on the real element - clicking it, changing it, typing into
 // it - is what the step is actually asking for, and doing it gives a brief
-// "Nice, that's it" confirmation before moving on, rather than silently
-// jumping ahead. validate, when given, is checked every time the event
+// "Nice, that's it" confirmation (checkmark, glowing ring) rather than
+// silently doing nothing. It does NOT auto-advance except on the tour's
+// very last step (see armActionListener) - it used to, on every gated
+// step, but that meant a typing step yanked you forward on the very first
+// keystroke, mid-word, before you'd finished. Confirming and then waiting
+// for you to hit Next yourself keeps you in control of when a step is
+// actually done. validate, when given, is checked every time the event
 // fires and the step keeps waiting until it returns true - e.g. an
 // 'input' step requiring real non-whitespace text, not just an empty
 // keystroke. Only steps whose action is low-friction and non-destructive/
@@ -929,6 +934,15 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
         // opened for most of a second. Ending almost immediately instead
         // means the tour gets out of the way right as the real thing takes
         // over, rather than the confirmation flash competing with it.
+        //
+        // Every OTHER step used to auto-advance too, on a fixed delay after
+        // firing - real bug, reported live: on a typing step that delay ran
+        // from the very first keystroke, so it yanked you to the next step
+        // mid-word before you'd finished typing your actual task. Now
+        // firing just confirms (checkmark, glowing ring) and leaves Next
+        // for you to hit whenever you're actually done - typing, or just
+        // re-reading what you did - matching Dusty's own copy on the
+        // confirmation line below.
         const isLastStep = stepIndex === steps.length - 1;
         let fired = false;
         const handler = () => {
@@ -947,7 +961,9 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
             tourActionHint?.classList.add('hidden');
             tourActionConfirmed?.classList.remove('hidden');
             target.classList.add('tourTargetConfirmed');
-            advanceTimeoutId = setTimeout(goToNextStep, isLastStep ? 60 : 900);
+            if (isLastStep) {
+                advanceTimeoutId = setTimeout(goToNextStep, 60);
+            }
         };
         target.addEventListener(eventName, handler);
         pendingActionCleanup = () => target.removeEventListener(eventName, handler);

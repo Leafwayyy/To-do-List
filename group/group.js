@@ -4537,13 +4537,6 @@ const GROUP_TOUR_STEPS = [
         beforeShow: () => switchGroupView('tasks')
     },
     {
-        selector: '.viewTabs',
-        title: 'Four places, one job each',
-        text: 'Tasks is where you work, that\'s where we\'ll stay for now. Go ahead, tap through Team, Leaderboard, and Activity and back, everyone\'s roles, rankings, and finished work all live there whenever you want them.',
-        action: { event: 'click' },
-        beforeShow: () => switchGroupView('tasks')
-    },
-    {
         selector: '.detailsToggleBtn',
         title: 'Let\'s open Prioritize',
         text: 'Now tap Prioritize, and I\'ll show you everything that helps me figure out what matters most for a new task.',
@@ -4620,6 +4613,13 @@ const GROUP_TOUR_STEPS = [
         selector: '.deadlineViewTabs',
         title: 'Filter by deadline',
         text: 'Jump to what\'s overdue, due today, this week, or already done, across whoever\'s selected above. Try tapping one, I\'ll filter the list for you.',
+        action: { event: 'click' },
+        beforeShow: () => switchGroupView('tasks')
+    },
+    {
+        selector: '.viewTabs',
+        title: 'Four places, one job each',
+        text: 'Tasks is where you\'ve been working. Go ahead, tap through Team, Leaderboard, and Activity, everyone\'s roles, rankings, and finished work all live there whenever you want them.',
         action: { event: 'click' },
         beforeShow: () => switchGroupView('tasks')
     },
