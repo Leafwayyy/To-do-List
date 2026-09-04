@@ -303,6 +303,24 @@ async function setGroupSubtaskDueAt(groupId, task, subtaskId, dueAtIsoOrNull) {
     await applySubtaskDrivenUpdate(groupId, task, subtasks);
 }
 
+// A step's own text (see createGroupSubtaskItem's click-to-rename handler)
+// - same generic subtasks-array pipeline as every other mutator here.
+// Empty/whitespace-only is rejected before ever reaching Firestore, same
+// reasoning as addGroupSubtask's own guard.
+async function renameGroupSubtask(groupId, task, subtaskId, newText) {
+    const trimmedText = (newText || '').trim();
+    if (!trimmedText) {
+        return false;
+    }
+
+    const subtasks = (task.subtasks || []).map((subtask) => (
+        subtask.id === subtaskId ? { ...subtask, text: trimmedText } : subtask
+    ));
+
+    await applySubtaskDrivenUpdate(groupId, task, subtasks);
+    return true;
+}
+
 // ---------------------------------------------------------------------
 // DOM references
 // ---------------------------------------------------------------------
@@ -1352,6 +1370,67 @@ function createGroupSubtaskItem(groupId, task, subtask, isOwner) {
     text.classList.add('subtaskText');
     text.textContent = subtask.text;
 
+    // Rename - owner-only, same permission gate as delete/deadline below.
+    // Not built at all for non-owners, same pattern those already use,
+    // rather than building it disabled.
+    let renameInput = null;
+    let renameBtn = null;
+    if (isOwner) {
+        renameInput = document.createElement('input');
+        renameInput.type = 'text';
+        renameInput.classList.add('subtaskRenameInput', 'hidden');
+        renameInput.maxLength = 300;
+        renameInput.setAttribute('aria-label', 'Step text');
+        renameInput.addEventListener('mousedown', (event) => event.stopPropagation());
+
+        renameBtn = document.createElement('button');
+        renameBtn.type = 'button';
+        renameBtn.classList.add('subtaskRenameBtn');
+        renameBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+        renameBtn.setAttribute('aria-label', 'Rename step');
+        renameBtn.title = 'Rename step';
+
+        const enterRenameMode = () => {
+            renameInput.value = subtask.text;
+            text.classList.add('hidden');
+            renameInput.classList.remove('hidden');
+            renameInput.focus();
+            renameInput.select();
+        };
+        const exitRenameMode = () => {
+            renameInput.classList.add('hidden');
+            text.classList.remove('hidden');
+        };
+        const commitRename = () => {
+            const newText = renameInput.value;
+            if (newText.trim() === '' || newText.trim() === subtask.text) {
+                exitRenameMode();
+                return;
+            }
+            // renameGroupSubtask's own write triggers the live group-tasks
+            // listener, which re-renders this row from Firestore - no need
+            // to manually sync text.textContent on success.
+            renameGroupSubtask(groupId, task, subtask.id, newText)
+                .then((saved) => { if (!saved) exitRenameMode(); })
+                .catch((error) => { console.error('Failed to rename step:', error); exitRenameMode(); });
+        };
+
+        renameBtn.addEventListener('click', () => {
+            playClickSound();
+            enterRenameMode();
+        });
+        renameInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                renameInput.blur();
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                exitRenameMode();
+            }
+        });
+        renameInput.addEventListener('blur', commitRename);
+    }
+
     // A step's own optional deadline - same badge/urgency-color language as
     // the task-level deadline badge. Non-owners see the badge (if set) but
     // can't open the editor, same permission gate as delete/check above.
@@ -1374,10 +1453,15 @@ function createGroupSubtaskItem(groupId, task, subtask, isOwner) {
 
     row.appendChild(checkBtn);
     row.appendChild(text);
+    if (renameInput) {
+        row.appendChild(renameInput);
+    }
     row.appendChild(deadlineBadge);
 
     let inputWrap = null;
     if (isOwner) {
+        row.appendChild(renameBtn);
+
         const deadlineBtn = document.createElement('button');
         deadlineBtn.type = 'button';
         deadlineBtn.classList.add('subtaskDeadlineBtn');

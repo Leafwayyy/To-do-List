@@ -1483,6 +1483,68 @@ function createSubtaskItem(taskId, subtask) {
     text.classList.add('subtaskText');
     text.textContent = subtask.text;
 
+    // Rename - same icon-button convention as checkBtn/deleteBtn/
+    // deadlineBtn in this row, rather than a click-on-text pattern with no
+    // visible affordance. Swaps the span for a text input in place; commits
+    // on blur/Enter, reverts (no save) on Escape.
+    const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
+    renameBtn.classList.add('subtaskRenameBtn');
+    renameBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+    renameBtn.setAttribute('aria-label', 'Rename step');
+    renameBtn.title = 'Rename step';
+
+    const renameInput = document.createElement('input');
+    renameInput.type = 'text';
+    renameInput.classList.add('subtaskRenameInput', 'hidden');
+    renameInput.maxLength = 300;
+    renameInput.setAttribute('aria-label', 'Step text');
+    renameInput.addEventListener('mousedown', (event) => event.stopPropagation());
+
+    function enterRenameMode() {
+        renameInput.value = subtask.text;
+        text.classList.add('hidden');
+        renameInput.classList.remove('hidden');
+        renameInput.focus();
+        renameInput.select();
+    }
+
+    function exitRenameMode() {
+        renameInput.classList.add('hidden');
+        text.classList.remove('hidden');
+    }
+
+    function commitRename() {
+        const newText = renameInput.value;
+        if (newText.trim() === '' || newText.trim() === subtask.text) {
+            exitRenameMode();
+            return;
+        }
+        // renameSubtaskInTask calls renderTasks() on success, which rebuilds
+        // this whole row from the saved data - no need to manually sync
+        // text.textContent here, that next render already reflects it.
+        const saved = renameSubtaskInTask(taskId, subtask.id, newText);
+        if (!saved) {
+            exitRenameMode();
+        }
+    }
+
+    renameBtn.addEventListener('click', () => {
+        playClickSound();
+        enterRenameMode();
+    });
+
+    renameInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            renameInput.blur();
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            exitRenameMode();
+        }
+    });
+    renameInput.addEventListener('blur', commitRename);
+
     // A step's own optional deadline - shown as a small colored badge
     // (same shape/urgency classes as the task-level deadline badge) when
     // set, editable via the clock button's inline datetime-local input.
@@ -1571,7 +1633,9 @@ function createSubtaskItem(taskId, subtask) {
 
     row.appendChild(checkBtn);
     row.appendChild(text);
+    row.appendChild(renameInput);
     row.appendChild(deadlineBadge);
+    row.appendChild(renameBtn);
     row.appendChild(deadlineBtn);
     row.appendChild(deleteBtn);
     item.appendChild(row);
@@ -2141,6 +2205,36 @@ function setSubtaskDueAt(taskId, subtaskId, dueAtIsoOrNull) {
     applyOrdering();
     renderTasks();
     saveTasks();
+}
+
+// Same shape as setSubtaskDueAt above - a step's own text, edited in place
+// (see createSubtaskItem's click-to-rename handler). Empty/whitespace-only
+// is rejected rather than silently saved (would leave a blank, unrecoverable
+// step) - the caller reverts the input back to the original text in that
+// case, same as pressing Escape.
+function renameSubtaskInTask(taskId, subtaskId, newText) {
+    const trimmedText = (newText || '').trim();
+    if (trimmedText === '') {
+        return false;
+    }
+
+    const task = findTaskById(taskId);
+    if (!task || !Array.isArray(task.subtasks)) {
+        return false;
+    }
+
+    const subtask = task.subtasks.find((item) => item.id === subtaskId);
+    if (!subtask) {
+        return false;
+    }
+
+    subtask.text = trimmedText;
+    task.updatedAt = new Date().toISOString();
+
+    applyOrdering();
+    renderTasks();
+    saveTasks();
+    return true;
 }
 
 function deleteSubtaskFromTask(taskId, subtaskId) {

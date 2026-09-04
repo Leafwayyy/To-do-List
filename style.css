@@ -5,7 +5,18 @@
 }
 
 body{
-    font-family: 'Poppins', sans-serif;
+    /* Real bug found while making this change: 'Poppins' was never
+       actually loaded anywhere (no <link> for it in any HTML file, only
+       'Inter'+'Playfair Display' are), so every non-serif element in the
+       app has been silently falling back to the OS's generic sans-serif
+       this whole time, not this declared font at all. -apple-system/
+       BlinkMacSystemFont resolve to the real native San Francisco on
+       macOS/iOS Safari and Chrome (Apple doesn't distribute SF as a
+       downloadable web font, this is the standard way to actually get it);
+       everywhere else now correctly gets 'Inter', which was already being
+       loaded via the Google Fonts <link> in every HTML file but never
+       referenced by anything - so this also fixes a dead, wasted font load. */
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
@@ -1294,7 +1305,8 @@ body{
 
 .subtaskCheckBtn,
 .subtaskDeleteBtn,
-.subtaskDeadlineBtn{
+.subtaskDeadlineBtn,
+.subtaskRenameBtn{
     background: transparent;
     border: none;
     outline: none;
@@ -1341,12 +1353,43 @@ body{
     color: #4a92f6;
 }
 
+.subtaskRenameBtn{
+    color: #8fa3c2;
+    font-size: 11px;
+}
+
+.subtaskRenameBtn:hover{
+    color: #7c5fd6;
+}
+
 .subtaskText{
     flex: 1;
     min-width: 0;
     word-break: break-word;
     font-size: 13px;
     color: #1e1e1e;
+}
+
+.subtaskText.hidden{
+    display: none;
+}
+
+.subtaskRenameInput{
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+    padding: 0 8px;
+    border: none;
+    outline: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid rgba(103, 159, 255, 0.5);
+    font-size: 13px;
+    color: #1e1e1e;
+}
+
+.subtaskRenameInput.hidden{
+    display: none;
 }
 
 .subtaskDeadlineBadge{
@@ -4746,6 +4789,21 @@ body.authGateActive .authOverlay{
 
 .subtaskDeadlineBtn:hover{
     color: var(--violet-accent);
+}
+
+.subtaskRenameBtn{
+    color: rgba(215, 208, 255, 0.6);
+}
+
+.subtaskRenameBtn:hover{
+    color: var(--violet-accent);
+}
+
+.subtaskRenameInput{
+    background: var(--violet-surface);
+    border-color: rgba(188, 173, 255, 0.42);
+    color: var(--violet-text);
+    color-scheme: dark;
 }
 
 .subtaskDeadlineClearBtn{
