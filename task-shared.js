@@ -815,6 +815,10 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
     const tourActionConfirmed = document.querySelector('.tourActionConfirmed');
     const tourSkipBtn = document.querySelector('.tourSkipBtn');
     const tourNextBtn = document.querySelector('.tourNextBtn');
+    const tourCurtainTop = document.querySelector('.tourCurtainTop');
+    const tourCurtainBottom = document.querySelector('.tourCurtainBottom');
+    const tourCurtainLeft = document.querySelector('.tourCurtainLeft');
+    const tourCurtainRight = document.querySelector('.tourCurtainRight');
 
     // Dusty's portrait, built once - buildDustyAvatarMarkup is defined in
     // brain-dump.js, which loads before whichever page-specific script
@@ -857,6 +861,43 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
 
         tourCard.style.left = `${centeredLeft}px`;
         tourCard.style.top = `${top}px`;
+    }
+
+    // The real fix for "the highlighted thing is dark and I can't click
+    // it" - 4 curtain panels tiled around the target's live rect (a small
+    // padding outside it) so the target itself sits in a genuine gap with
+    // nothing painted over it, rather than trying to out-z-index an
+    // overlay that a nested stacking context (.container's own position+
+    // z-index) was silently defeating anyway. Recomputed on every step
+    // change, resize, and scroll, same triggers positionCard already uses.
+    function positionCurtains() {
+        if (!tourCurtainTop || !tourCurtainBottom || !tourCurtainLeft || !tourCurtainRight) {
+            return;
+        }
+        if (!isOpen() || !highlightedElement) {
+            [tourCurtainTop, tourCurtainBottom, tourCurtainLeft, tourCurtainRight].forEach((el) => {
+                el.style.width = '0px';
+                el.style.height = '0px';
+            });
+            return;
+        }
+
+        const rect = highlightedElement.getBoundingClientRect();
+        const pad = 8;
+        const top = Math.max(0, rect.top - pad);
+        const left = Math.max(0, rect.left - pad);
+        const right = Math.min(window.innerWidth, rect.right + pad);
+        const bottom = Math.min(window.innerHeight, rect.bottom + pad);
+
+        Object.assign(tourCurtainTop.style, { left: '0px', top: '0px', width: '100%', height: `${top}px` });
+        Object.assign(tourCurtainBottom.style, { left: '0px', top: `${bottom}px`, width: '100%', height: `${Math.max(0, window.innerHeight - bottom)}px` });
+        Object.assign(tourCurtainLeft.style, { left: '0px', top: `${top}px`, width: `${left}px`, height: `${Math.max(0, bottom - top)}px` });
+        Object.assign(tourCurtainRight.style, { left: `${right}px`, top: `${top}px`, width: `${Math.max(0, window.innerWidth - right)}px`, height: `${Math.max(0, bottom - top)}px` });
+    }
+
+    function repositionOverlay() {
+        positionCard();
+        positionCurtains();
     }
 
     // Clears whatever the PREVIOUS step set up - the real event listener
@@ -953,7 +994,7 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
         armActionListener(step, target, stepIndex);
 
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        setTimeout(positionCard, 180);
+        setTimeout(repositionOverlay, 180);
         return true;
     }
 
@@ -999,6 +1040,7 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
         tourOverlay.setAttribute('aria-hidden', 'true');
         tourCard.style.left = '';
         tourCard.style.top = '';
+        positionCurtains();
 
         localStorage.setItem(storageKey, skipped ? 'dismissed' : 'tour-completed');
         onEnd?.(skipped);
@@ -1010,8 +1052,8 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
     if (tourNextBtn) {
         tourNextBtn.addEventListener('click', goToNextStep);
     }
-    window.addEventListener('resize', positionCard);
-    window.addEventListener('scroll', positionCard, true);
+    window.addEventListener('resize', repositionOverlay);
+    window.addEventListener('scroll', repositionOverlay, true);
 
     return { start, end, isOpen, hasBeenSeen };
 }

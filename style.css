@@ -4046,20 +4046,46 @@ body > .viewTabs{
 }
 
 
+/* The overlay element itself no longer paints or blocks anything - it's
+   just a positioning root for its children now. Real bug, reported live:
+   a single full-screen dark rect here, with the target merely raised via
+   z-index, only works when nothing between the target and <body> creates
+   its own stacking context - .container does (position:relative + a real
+   z-index, for its own ambient-glow layering), which silently traps every
+   z-index set inside it, .tourTarget's 1510 included. The target rendered
+   UNDER the dark rect and was completely unclickable as a result, not just
+   visually dim. Four independently positioned "curtain" panels (below) that
+   tile the viewport minus a real rectangular hole around the current
+   target fix this properly - there's no darkness painted over the target
+   at all, so there's no stacking context to win against, and the hole is a
+   genuine gap in pointer-events coverage, not a z-index illusion. */
 .tourOverlay{
     position: fixed;
     inset: 0;
     z-index: 1500;
+    pointer-events: none;
+}
+
+.tourOverlay.hidden{
+    display: none;
+}
+
+/* Positioned individually in JS (createTourController's positionCurtains)
+   from the current target's live getBoundingClientRect, recomputed on every
+   step change, resize, and scroll - same triggers positionCard already
+   uses to keep the tour card itself lined up. */
+.tourCurtain{
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
     /* Darkened from 0.56 - the whole point of a spotlight is real contrast
        between "the one thing you're looking at" and everything else, and
        the old value read as a mild dim rather than a clear foreground/
        background split. */
     background: rgba(5, 4, 20, 0.7);
     pointer-events: auto;
-}
-
-.tourOverlay.hidden{
-    display: none;
 }
 
 .tourCard{
@@ -4073,6 +4099,10 @@ body > .viewTabs{
     box-shadow: 0 18px 48px rgba(6, 3, 25, 0.56);
     padding: 12px;
     color: #f7f4ff;
+    /* .tourOverlay (this card's parent) is pointer-events:none now that the
+       curtains do the actual blocking - pointer-events is inherited, so
+       this needs its own explicit auto or Skip/Next would be inert too. */
+    pointer-events: auto;
 }
 
 /* Dusty hosts the tour now, not a generic "Tutorial" label - same portrait
@@ -4191,17 +4221,19 @@ body > .viewTabs{
     color: #120a32;
 }
 
-/* The one element the current tour step is about - sits above the darkened
-   .tourOverlay via z-index alone (no separate "cutout" layer needed: the
-   overlay is a single full-screen rect, and a higher z-index element still
-   paints, and hit-tests for clicks, above it). filter:brightness makes it
-   read as genuinely lit up rather than just outlined against the dark
+/* The one element the current tour step is about. The 4 .tourCurtain panels
+   (see .tourOverlay above) already leave a real, undarkened hole around it,
+   so this needs no z-index trick to "beat" the overlay - it was never
+   covered in the first place. position/z-index stay here only as cheap
+   insurance against ordinary same-page siblings that might otherwise
+   overlap it, not against the tour overlay itself. filter:brightness makes
+   it read as genuinely lit up rather than just outlined against the dark
    backdrop, and the ring itself pulses rather than sitting static, so it
    reads as "this is alive, interact with me" instead of just "this is
    circled." */
 .tourTarget{
     position: relative;
-    z-index: 1510;
+    z-index: 1;
     border-radius: 12px;
     filter: brightness(1.12) saturate(1.08);
     animation: tourTargetPulse 1.8s ease-in-out infinite;
