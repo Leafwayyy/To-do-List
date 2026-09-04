@@ -477,6 +477,7 @@ const groupAlertToggleBtn = document.querySelector('.groupAlertToggleBtn');
 const helpTourBtn = document.querySelector('.helpTourBtn');
 const navAttentionBadge = document.querySelector('.navAttentionBadge');
 const navAttentionCount = document.querySelector('.navAttentionCount');
+const navAttentionMenu = document.querySelector('.navAttentionMenu');
 const groupOnboardingHint = document.querySelector('.groupOnboardingHint');
 const groupOnboardingStartTourBtn = document.querySelector('.groupOnboardingStartTourBtn');
 const groupOnboardingDismissBtn = document.querySelector('.groupOnboardingDismissBtn');
@@ -3452,12 +3453,117 @@ function computeAttentionSummary() {
     };
 }
 
+function closeNavAttentionMenu() {
+    navAttentionMenu?.classList.add('hidden');
+    navAttentionBadge?.setAttribute('aria-expanded', 'false');
+}
+
+// Brief "look here" pulse on whatever a notification row actually jumped
+// you to - removed afterward purely so it can play again on a later jump
+// without needing a forced-reflow restart trick.
+function flashAttentionTarget(el) {
+    if (!el) {
+        return;
+    }
+    el.classList.remove('attentionFlash');
+    // Force a reflow so re-adding the class restarts the animation even if
+    // it's still mid-flash from a moment ago (e.g. jumping to the same
+    // task twice in a row).
+    void el.offsetWidth;
+    el.classList.add('attentionFlash');
+    setTimeout(() => el.classList.remove('attentionFlash'), 1600);
+}
+
+// Each of these resets whatever filter/scope might otherwise be hiding the
+// target first - landing on a notification should never mean an empty
+// list because a filter from three actions ago is still active.
+function jumpToUnreadComments() {
+    const target = groupTasks.filter(hasUnreadComments)[0];
+    if (!target) {
+        return;
+    }
+    switchGroupView('tasks');
+    setActiveView('all');
+    setActiveMemberScope('all');
+    setTimeout(() => {
+        const row = groupTasksList?.querySelector(`li[data-task-id="${CSS.escape(target.id)}"]`);
+        if (!row) {
+            return;
+        }
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        flashAttentionTarget(row);
+        const commentsBtn = row.querySelector('.commentsToggleBtn');
+        if (commentsBtn?.getAttribute('aria-expanded') === 'false') {
+            commentsBtn.click();
+        }
+    }, 30);
+}
+
+function jumpToSuggestionsForYou() {
+    switchGroupView('tasks');
+    setTimeout(() => {
+        suggestionsForYouPanel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        flashAttentionTarget(suggestionsForYouPanel);
+    }, 30);
+}
+
+function jumpToJoinRequests() {
+    const group = getSelectedGroup();
+    if (!group) {
+        return;
+    }
+    openGroupSettingsModal(group);
+    setTimeout(() => {
+        flashAttentionTarget(groupSettingsOverlay?.querySelector('.groupSettingsRequestsList'));
+    }, 30);
+}
+
+function renderNavAttentionMenu(summary) {
+    if (!navAttentionMenu) {
+        return;
+    }
+    navAttentionMenu.innerHTML = '';
+
+    const rows = [
+        summary.suggestionsCount > 0 && {
+            icon: 'fa-solid fa-lightbulb',
+            label: `${summary.suggestionsCount} suggestion${summary.suggestionsCount === 1 ? '' : 's'} for you`,
+            onClick: jumpToSuggestionsForYou
+        },
+        summary.unreadCommentsCount > 0 && {
+            icon: 'fa-regular fa-comment',
+            label: `${summary.unreadCommentsCount} unread comment${summary.unreadCommentsCount === 1 ? '' : 's'}`,
+            onClick: jumpToUnreadComments
+        },
+        summary.joinRequestsCount > 0 && {
+            icon: 'fa-solid fa-user-plus',
+            label: `${summary.joinRequestsCount} pending join request${summary.joinRequestsCount === 1 ? '' : 's'}`,
+            onClick: jumpToJoinRequests
+        }
+    ].filter(Boolean);
+
+    rows.forEach((row) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.classList.add('navAttentionMenuRow');
+        btn.setAttribute('role', 'menuitem');
+        btn.innerHTML = `<i class="${row.icon}"></i><span>${row.label}</span>`;
+        btn.addEventListener('click', () => {
+            playClickSound();
+            closeNavAttentionMenu();
+            row.onClick();
+        });
+        navAttentionMenu.appendChild(btn);
+    });
+}
+
 function updateNavAttentionBadge(group) {
     if (!navAttentionBadge || !navAttentionCount) {
         return;
     }
     if (!group) {
         navAttentionBadge.classList.remove('visible');
+        closeNavAttentionMenu();
         return;
     }
     const summary = computeAttentionSummary();
@@ -3468,7 +3574,37 @@ function updateNavAttentionBadge(group) {
         summary.joinRequestsCount && `${summary.joinRequestsCount} pending join request${summary.joinRequestsCount === 1 ? '' : 's'}`,
         summary.suggestionsCount && `${summary.suggestionsCount} suggestion${summary.suggestionsCount === 1 ? '' : 's'} for you`
     ].filter(Boolean).join(', ');
+    renderNavAttentionMenu(summary);
+    if (summary.total === 0) {
+        closeNavAttentionMenu();
+    }
 }
+
+navAttentionBadge?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (!navAttentionBadge.classList.contains('visible')) {
+        return;
+    }
+    playClickSound();
+    const willOpen = navAttentionMenu?.classList.contains('hidden');
+    navAttentionMenu?.classList.toggle('hidden', !willOpen);
+    navAttentionBadge.setAttribute('aria-expanded', String(Boolean(willOpen)));
+});
+
+document.addEventListener('click', (event) => {
+    if (!navAttentionMenu || navAttentionMenu.classList.contains('hidden')) {
+        return;
+    }
+    if (!navAttentionMenu.contains(event.target) && !navAttentionBadge?.contains(event.target)) {
+        closeNavAttentionMenu();
+    }
+});
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+        closeNavAttentionMenu();
+    }
+});
 
 // Team-wide version of solo's updateUrgencyAlert() - scoped to every
 // member's tasks in the group (not just yours), since the point is

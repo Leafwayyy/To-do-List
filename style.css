@@ -6079,18 +6079,43 @@ body.authGateActive .authOverlay{
 }
 
 /* Aggregate "needs attention" indicator - see computeAttentionSummary/
-   updateNavAttentionBadge. Passive (no click action), title attribute
-   carries the breakdown. Hidden entirely at 0. */
+   updateNavAttentionBadge. Real bug, reported live: this used to be a
+   plain <span>, not even a button - not clickable, not keyboard-reachable,
+   and its only explanation of what was pending was the title attribute,
+   invisible on any touch device. Now a real button that opens
+   .navAttentionMenu (below), one row per pending category, each row a
+   real jump straight to the thing it's naming - see jumpToUnreadComments/
+   jumpToSuggestionsForYou/jumpToJoinRequests. title stays as a bonus
+   desktop-hover hint, no longer the only way to see what's pending.
+   Hidden entirely at 0 - nothing to click through to when there's nothing
+   pending. */
+.navAttentionWrap{
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
 .navAttentionBadge{
     display: none;
     align-items: center;
     gap: 3px;
     font-size: 12px;
     color: var(--violet-muted, #b5a8d9);
+    background: none;
+    border: none;
+    padding: 4px;
+    border-radius: var(--radius-sm, 8px);
+    cursor: pointer;
 }
 
 .navAttentionBadge.visible{
     display: inline-flex;
+}
+
+.navAttentionBadge:hover,
+.navAttentionBadge:focus-visible{
+    color: #f2edff;
+    background: rgba(255, 255, 255, 0.1);
 }
 
 .navAttentionCount{
@@ -6106,6 +6131,76 @@ body.authGateActive .authOverlay{
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+
+.navAttentionMenu{
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 60;
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px;
+    border-radius: var(--radius-md, 12px);
+    border: 1px solid rgba(220, 207, 255, 0.34);
+    background: linear-gradient(165deg, rgba(60, 44, 136, 0.98), rgba(34, 24, 95, 0.99));
+    box-shadow: 0 18px 40px rgba(6, 3, 25, 0.5);
+}
+
+.navAttentionMenu.hidden{
+    display: none;
+}
+
+.navAttentionMenuRow{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: var(--radius-sm, 8px);
+    background: none;
+    color: #f2edff;
+    font-size: var(--text-sm, 12px);
+    text-align: left;
+    cursor: pointer;
+}
+
+.navAttentionMenuRow i{
+    color: var(--violet-muted, #b5a8d9);
+    width: 14px;
+    text-align: center;
+}
+
+.navAttentionMenuRow:hover,
+.navAttentionMenuRow:focus-visible{
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* One-shot "look here" pulse for whatever a notification row jumped you
+   to - a task row's comment thread, or the suggestions panel. Fades out
+   on its own; the class is removed afterward (see flashAttentionTarget)
+   purely so it can be re-triggered later without a forced-reflow hack. */
+@keyframes attentionFlashPulse{
+    0%{
+        box-shadow: 0 0 0 3px rgba(198, 168, 255, 0.9), 0 0 24px 4px rgba(180, 156, 255, 0.5);
+    }
+    100%{
+        box-shadow: 0 0 0 3px rgba(198, 168, 255, 0);
+    }
+}
+
+.attentionFlash{
+    animation: attentionFlashPulse 1.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce){
+    .attentionFlash{
+        animation: none;
+        box-shadow: 0 0 0 3px rgba(198, 168, 255, 0.7);
+    }
 }
 
 .authModeRow,

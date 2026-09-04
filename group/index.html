@@ -11,7 +11,7 @@
     <!-- Same stylesheet as the solo app, loaded once, the normal way - no
          second build/bundle for this page, so there's nothing for its rules
          to collide with. -->
-    <link rel="stylesheet" href="../style.css?v=20260904c">
+    <link rel="stylesheet" href="../style.css?v=20260904d">
 </head>
 <body class="authChecking">
 
@@ -23,7 +23,12 @@
     <div class="userBadge hidden">
         <a class="groupNavLink" href="../">My Tasks</a>
         <button class="helpTourBtn" type="button" title="Restart the group tutorial"><i class="fa-solid fa-question"></i> Tutorial</button>
-        <span class="navAttentionBadge" title=""><i class="fa-regular fa-bell"></i><span class="navAttentionCount"></span></span>
+        <div class="navAttentionWrap">
+            <button class="navAttentionBadge" type="button" title="" aria-haspopup="true" aria-expanded="false" aria-label="Notifications">
+                <i class="fa-regular fa-bell"></i><span class="navAttentionCount"></span>
+            </button>
+            <div class="navAttentionMenu hidden" role="menu"></div>
+        </div>
         <img class="userBadgeAvatar hidden" alt="">
         <span class="userBadgeName"></span>
         <button class="userSignOutBtn" type="button" title="Sign out">Sign out</button>
@@ -392,7 +397,7 @@
     <script src="../brain-dump.js?v=20260904b"></script>
     <script src="../auth-gate.js?v=20260830a"></script>
     <script src="groups-data.js?v=20260830c"></script>
-    <script src="group.js?v=20260904e"></script>
+    <script src="group.js?v=20260904f"></script>
     <script type="module" src="../firebase-init.js?v=20260831a"></script>
     <script src="../settings.js?v=20260903b"></script>
 </body>
