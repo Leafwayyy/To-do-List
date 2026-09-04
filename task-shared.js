@@ -783,23 +783,48 @@ function startRewardReelTicking(track, tileStepPx) {
 // its own controller with its own step list and its own localStorage key,
 // so solo's and group's tour progress are tracked independently.
 //
-// steps: [{ selector, title, text, beforeShow?(), isRelevant?() }].
+// steps: [{ selector, title, text, beforeShow?(), isRelevant?(), action? }].
 // beforeShow runs right before that step's target is looked up (e.g. to
 // open a collapsed panel the target lives inside). onStart (optional):
 // called right as the tour opens, e.g. to hide a page's separate passive
 // "quick start" hint card so it doesn't sit underneath/behind the modal
 // for the whole tour.
+//
+// action (optional): { event: 'click' | 'change' } - makes a step genuinely
+// interactive instead of a slideshow. The Next button still always works
+// (never taken away - a real fallback for anyone who can't or doesn't want
+// to perform the exact action), but doing the real thing on the real
+// element - clicking it, changing it - is what the step is actually
+// asking for, and doing it gives a brief "Nice, that's it" confirmation
+// before moving on, rather than silently jumping ahead. Only steps whose
+// action is low-friction and non-destructive/non-navigating ever set this
+// (see TOUR_STEPS/GROUP_TOUR_STEPS for which) - anything that would
+// change a real setting or navigate away stays informational-only.
 function createTourController({ steps, storageKey, onEnd, onStart }) {
     const tourOverlay = document.querySelector('.tourOverlay');
     const tourCard = document.querySelector('.tourCard');
+    const tourDustyAvatar = document.querySelector('.tourDustyAvatar');
     const tourStepLabel = document.querySelector('.tourStepLabel');
     const tourTitle = document.querySelector('.tourTitle');
     const tourText = document.querySelector('.tourText');
+    const tourActionHint = document.querySelector('.tourActionHint');
+    const tourActionConfirmed = document.querySelector('.tourActionConfirmed');
     const tourSkipBtn = document.querySelector('.tourSkipBtn');
     const tourNextBtn = document.querySelector('.tourNextBtn');
 
+    // Dusty's portrait, built once - buildDustyAvatarMarkup is defined in
+    // brain-dump.js, which loads before whichever page-specific script
+    // actually calls createTourController, so this is safe despite
+    // task-shared.js itself loading first; guarded anyway in case that
+    // ever changes, so a missing avatar never breaks the tour itself.
+    if (tourDustyAvatar && typeof buildDustyAvatarMarkup === 'function') {
+        tourDustyAvatar.innerHTML = buildDustyAvatarMarkup(32);
+    }
+
     let activeStepIndex = -1;
     let highlightedElement = null;
+    let pendingActionCleanup = null;
+    let advanceTimeoutId = null;
 
     function isOpen() {
         return Boolean(tourOverlay && !tourOverlay.classList.contains('hidden'));
@@ -830,6 +855,51 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
         tourCard.style.top = `${top}px`;
     }
 
+    // Clears whatever the PREVIOUS step set up - the real event listener
+    // waiting for an action, and/or a pending auto-advance timeout - so
+    // leaving a step early (Next clicked instead, or the tour ends) never
+    // leaves a stale listener that could fire later on a completely
+    // different step, or a double-advance race between the action firing
+    // and Next being clicked around the same moment.
+    function clearPendingAction() {
+        pendingActionCleanup?.();
+        pendingActionCleanup = null;
+        clearTimeout(advanceTimeoutId);
+        advanceTimeoutId = null;
+        tourActionHint?.classList.add('hidden');
+        tourActionConfirmed?.classList.add('hidden');
+    }
+
+    function armActionListener(step, target, stepIndex) {
+        if (!step.action) {
+            return;
+        }
+        tourActionHint?.classList.remove('hidden');
+
+        const eventName = step.action.event || 'click';
+        // The last step's action (tapping Dusty herself) opens the real
+        // chat panel underneath - that overlay sits at a lower z-index
+        // than the tour's own darkened backdrop, so lingering on the usual
+        // confirmation pause here would visibly dim the chat she just
+        // opened for most of a second. Ending almost immediately instead
+        // means the tour gets out of the way right as the real thing takes
+        // over, rather than the confirmation flash competing with it.
+        const isLastStep = stepIndex === steps.length - 1;
+        let fired = false;
+        const handler = () => {
+            if (fired) {
+                return;
+            }
+            fired = true;
+            tourActionHint?.classList.add('hidden');
+            tourActionConfirmed?.classList.remove('hidden');
+            target.classList.add('tourTargetConfirmed');
+            advanceTimeoutId = setTimeout(goToNextStep, isLastStep ? 60 : 900);
+        };
+        target.addEventListener(eventName, handler);
+        pendingActionCleanup = () => target.removeEventListener(eventName, handler);
+    }
+
     function prepareStep(stepIndex) {
         const step = steps[stepIndex];
         if (!step) {
@@ -854,8 +924,9 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
             return false;
         }
 
+        clearPendingAction();
         if (highlightedElement) {
-            highlightedElement.classList.remove('tourTarget');
+            highlightedElement.classList.remove('tourTarget', 'tourTargetConfirmed');
         }
 
         activeStepIndex = stepIndex;
@@ -866,6 +937,8 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
         tourTitle.textContent = step.title;
         tourText.textContent = step.text;
         tourNextBtn.textContent = stepIndex === steps.length - 1 ? 'Finish' : 'Next';
+
+        armActionListener(step, target, stepIndex);
 
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         setTimeout(positionCard, 180);
@@ -903,8 +976,9 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
             return;
         }
 
+        clearPendingAction();
         if (highlightedElement) {
-            highlightedElement.classList.remove('tourTarget');
+            highlightedElement.classList.remove('tourTarget', 'tourTargetConfirmed');
         }
 
         highlightedElement = null;

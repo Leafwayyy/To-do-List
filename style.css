@@ -4050,7 +4050,11 @@ body > .viewTabs{
     position: fixed;
     inset: 0;
     z-index: 1500;
-    background: rgba(6, 5, 24, 0.56);
+    /* Darkened from 0.56 - the whole point of a spotlight is real contrast
+       between "the one thing you're looking at" and everything else, and
+       the old value read as a mild dim rather than a clear foreground/
+       background split. */
+    background: rgba(5, 4, 20, 0.7);
     pointer-events: auto;
 }
 
@@ -4071,6 +4075,33 @@ body > .viewTabs{
     color: #f7f4ff;
 }
 
+/* Dusty hosts the tour now, not a generic "Tutorial" label - same portrait
+   markup the chat FAB/header already use (buildDustyAvatarMarkup), just
+   smaller, so it's recognizably the same character talking. */
+.tourHeader{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tourDustyAvatar{
+    flex: 0 0 auto;
+    display: flex;
+    line-height: 0;
+}
+
+.tourHeaderText{
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.tourDustyName{
+    font-size: var(--text-sm);
+    font-weight: 800;
+    color: #f7f4ff;
+}
+
 .tourStepLabel{
     font-size: var(--text-xs);
     font-weight: 700;
@@ -4078,7 +4109,7 @@ body > .viewTabs{
 }
 
 .tourTitle{
-    margin-top: 5px;
+    margin-top: 8px;
     font-size: var(--text-md);
     font-weight: 800;
 }
@@ -4088,6 +4119,37 @@ body > .viewTabs{
     font-size: var(--text-sm);
     line-height: 1.4;
     color: rgba(235, 230, 255, 0.95);
+}
+
+/* Shown only for an action-gated step (see createTourController's
+   `action` field) - a plain, low-key nudge that this one step wants you
+   to actually do the thing, not just read about it. */
+.tourActionHint{
+    margin-top: 8px;
+    font-size: var(--text-xs);
+    font-weight: 700;
+    color: rgba(214, 201, 255, 0.85);
+    font-style: italic;
+}
+
+.tourActionHint.hidden{
+    display: none;
+}
+
+/* Swapped in for .tourActionHint the instant the real action fires - the
+   "yes, that's it" moment before auto-advancing. */
+.tourActionConfirmed{
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-xs);
+    font-weight: 800;
+    color: #7fe0a3;
+}
+
+.tourActionConfirmed.hidden{
+    display: none;
 }
 
 .tourActions{
@@ -4129,11 +4191,46 @@ body > .viewTabs{
     color: #120a32;
 }
 
+/* The one element the current tour step is about - sits above the darkened
+   .tourOverlay via z-index alone (no separate "cutout" layer needed: the
+   overlay is a single full-screen rect, and a higher z-index element still
+   paints, and hit-tests for clicks, above it). filter:brightness makes it
+   read as genuinely lit up rather than just outlined against the dark
+   backdrop, and the ring itself pulses rather than sitting static, so it
+   reads as "this is alive, interact with me" instead of just "this is
+   circled." */
 .tourTarget{
     position: relative;
     z-index: 1510;
-    box-shadow: 0 0 0 3px rgba(214, 201, 255, 0.78), 0 0 0 8px rgba(133, 111, 224, 0.32) !important;
     border-radius: 12px;
+    filter: brightness(1.12) saturate(1.08);
+    animation: tourTargetPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes tourTargetPulse{
+    0%, 100%{
+        box-shadow: 0 0 0 3px rgba(214, 201, 255, 0.85), 0 0 0 8px rgba(133, 111, 224, 0.4), 0 0 22px 4px rgba(180, 156, 255, 0.35);
+    }
+    50%{
+        box-shadow: 0 0 0 4px rgba(214, 201, 255, 1), 0 0 0 12px rgba(133, 111, 224, 0.22), 0 0 32px 8px rgba(180, 156, 255, 0.5);
+    }
+}
+
+/* The instant an action-gated step's real action fires (see
+   armActionListener) - a brief green confirmation ring replaces the
+   violet pulse for the ~900ms pause before the tour moves on, the visual
+   half of the same "yes, that's it" moment .tourActionConfirmed's text
+   gives. */
+.tourTargetConfirmed{
+    animation: none !important;
+    box-shadow: 0 0 0 3px rgba(127, 224, 163, 0.9), 0 0 0 9px rgba(127, 224, 163, 0.32), 0 0 26px 6px rgba(127, 224, 163, 0.45) !important;
+}
+
+@media (prefers-reduced-motion: reduce){
+    .tourTarget{
+        animation: none;
+        box-shadow: 0 0 0 3px rgba(214, 201, 255, 0.85), 0 0 0 8px rgba(133, 111, 224, 0.4), 0 0 22px 4px rgba(180, 156, 255, 0.35);
+    }
 }
 
 .rewardOverlay{

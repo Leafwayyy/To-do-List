@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260904a">
+    <link rel="stylesheet" href="style.css?v=20260904b">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#050225">
@@ -300,10 +300,18 @@
     </div>
 
     <div class="tourOverlay hidden" aria-hidden="true">
-        <div class="tourCard" role="dialog" aria-modal="true" aria-label="App tutorial">
-            <p class="tourStepLabel">Step 1 of 4</p>
+        <div class="tourCard" role="dialog" aria-modal="true" aria-label="Tutorial with Dusty">
+            <div class="tourHeader">
+                <div class="tourDustyAvatar"></div>
+                <div class="tourHeaderText">
+                    <p class="tourDustyName">Dusty</p>
+                    <p class="tourStepLabel">Step 1 of 4</p>
+                </div>
+            </div>
             <h3 class="tourTitle">Welcome</h3>
             <p class="tourText">This tutorial shows exactly what to do.</p>
+            <p class="tourActionHint hidden">Go ahead, try it yourself.</p>
+            <p class="tourActionConfirmed hidden"><i class="fa-solid fa-check"></i> Nice, that's it.</p>
             <div class="tourActions">
                 <button class="tourSkipBtn" type="button">Skip</button>
                 <button class="tourNextBtn" type="button">Next</button>
@@ -375,10 +383,10 @@
         </div>
     </div>
 
-    <script src="task-shared.js?v=20260904a"></script>
+    <script src="task-shared.js?v=20260904b"></script>
     <script src="brain-dump.js?v=20260904a"></script>
     <script src="auth-gate.js?v=20260830a"></script>
-    <script src="script.js?v=20260904b"></script>
+    <script src="script.js?v=20260904c"></script>
     <script type="module" src="firebase-init.js?v=20260831a"></script>
     <script src="settings.js?v=20260903a"></script>
 

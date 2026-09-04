@@ -139,64 +139,109 @@ const GLOBAL_REMINDER_GAP_MS = 8 * 60 * 1000;
 const MOBILE_LAYOUT_QUERY = window.matchMedia('(max-width: 900px)');
 const UNDO_DELETE_TIMEOUT_MS = 6000;
 
+// Hosted by Dusty now, speaking directly in first person throughout, per
+// direct request - and deliberately walked field by field through
+// Prioritize instead of summarizing it in one line, same reasoning. Commas
+// only, never a hyphen as punctuation, also per direct request (a plain
+// hyphen inside an actual word, like "one-time", is still fine).
+// action-gated steps (see createTourController) are limited to low-
+// friction, non-destructive, non-navigating interactions - changing a
+// select, opening a toggle - never something that changes a real setting
+// (auto-sort) or leaves the page (the Group link).
 const TOUR_STEPS = [
     {
         selector: '.inputContainer',
         title: 'Add a task quickly',
-        text: 'Type your task here, then press + or Enter to add it. Try typing a time too, like "tomorrow 3pm" - it\'s picked up automatically.',
+        text: 'Type your task right here, then press + or Enter to add it. Try typing a time too, like tomorrow 3pm, I\'ll pick it up automatically.',
         beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.viewTabs',
         title: 'Tasks and Activity',
-        text: 'Everything you\'re working on lives under Tasks. Switch to Activity any time to see your completion history.',
+        text: 'Everything you\'re working on lives under Tasks. Switch over to Activity any time you want to see your completion history.',
         beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.detailsToggleBtn',
-        title: 'Open smart options',
-        text: 'Use Prioritize to set matrix, difficulty, deadline, and repeat - the fields that matter most for sort order and staying on top of recurring tasks. More options underneath adds a time estimate and a separate schedule.',
+        title: 'Let\'s open Prioritize',
+        text: 'Tap Prioritize, and I\'ll show you everything that helps me figure out what matters most.',
+        action: { event: 'click' },
+        beforeShow: () => switchSoloView('tasks')
+    },
+    {
+        selector: '.matrixSelect',
+        title: 'Matrix',
+        text: 'This is matrix, how urgent something is and how important it is. It\'s the biggest single thing I weigh when deciding what should come first.',
+        beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
+    },
+    {
+        selector: '.difficultySelect',
+        title: 'Difficulty',
+        text: 'Difficulty is just your own honest guess, from very easy to very hard. It helps me tell the difference between something quick and something that actually needs real effort.',
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
     {
         selector: '.deadlineContainer',
-        title: 'Deadline vs. schedule',
-        text: 'Deadline (right here) is when it\'s due. Schedule, under More options, is when you actually plan to work on it - two different things, both optional.',
-        // Deadline itself is a primary, always-visible field now (unlike
-        // Schedule, which still lives behind More options) - only the outer
-        // panel needs opening to see it. More options only opens here so
-        // Schedule is ALSO visible somewhere on screen while this step's
-        // text compares the two, not because Deadline needs it revealed.
+        title: 'Deadline',
+        text: 'Deadline is simply when something is due. Set it here, and I\'ll factor it into everything, sorting, reminders, all of it.',
+        beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
+    },
+    {
+        selector: '.recurrenceSelect',
+        title: 'Repeat',
+        text: 'If something happens again and again, watering plants daily, rent every month, set it to repeat here. I\'ll bring it back for you automatically once it\'s done.',
+        action: { event: 'change' },
+        beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
+    },
+    {
+        selector: '.detailsMoreToggleBtn',
+        title: 'More options',
+        text: 'Tap here for two more things, a rough time estimate, and a schedule for when you actually plan to sit down and do it.',
+        action: { event: 'click' },
+        beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
+    },
+    {
+        selector: '.effortContainer',
+        title: 'Estimate',
+        text: 'Give me a rough time estimate if you have one. It helps me tell you honestly whether your day is actually realistic, not just busy.',
+        beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); setDetailsMoreOptionsOpen(true); }
+    },
+    {
+        selector: '.scheduleContainer',
+        title: 'Schedule',
+        text: 'Schedule is different from deadline, it\'s when you actually plan to sit down and work on it, not when it\'s due. Both are optional, and they don\'t have to match.',
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); setDetailsMoreOptionsOpen(true); }
     },
     {
         selector: '.priorityControls',
         title: 'Choose sorting mode',
-        text: 'Auto-sort keeps tasks ranked. Sort once now gives a one-time smart order.',
+        text: 'Auto-sort keeps your list ranked for you at all times. Sort once just gives you a one-time smart order instead, then leaves it alone.',
         beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.taskViews',
         title: 'Switch views',
-        text: 'Jump straight to what\'s overdue, due today, this week, or already done.',
+        text: 'Jump straight to what\'s overdue, due today, due this week, or already done. Go ahead and try one, I\'ll actually filter the list for you.',
+        action: { event: 'click' },
         beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.activityPanel',
         title: 'Track completed work',
-        text: 'Tap any day in Daily Activity to see completion history details.',
+        text: 'Tap any day in Daily Activity, and I\'ll show you exactly what you finished that day.',
         beforeShow: () => switchSoloView('activity')
     },
     {
         selector: '.groupNavLink',
         title: 'Working with a team?',
-        text: 'Click Group up here to create a shared workspace - everyone\'s tasks, progress, and deadlines in one place.',
+        text: 'Click Group up here any time you want a shared workspace, everyone\'s tasks, progress, and deadlines, all in one place.',
         beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.brainDumpToggleBtn',
-        title: 'Meet Dusty',
-        text: 'Tap Dusty any time to brain-dump what\'s on your mind - text, or a photo or file - and she\'ll turn it into real tasks to review. She can also edit tasks you already have, and answer real planning questions like "what should I focus on this week" using your actual numbers, not a guess.',
+        title: 'And that\'s me',
+        text: 'I\'m Dusty. Tell me what\'s on your mind, text, or a photo, or a file, and I\'ll turn it into real tasks for you to check over. I can edit tasks you already have too, and if you\'re ever not sure what to focus on, just ask me, I\'ll answer with your real numbers, not a guess. Go ahead, tap me, let\'s try it.',
+        action: { event: 'click' },
         beforeShow: () => switchSoloView('tasks')
     }
 ];
