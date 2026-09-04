@@ -10,6 +10,7 @@ const durationChips = Array.from(document.querySelectorAll('.durationChip'));
 const durationInput = document.querySelector('.durationInput');
 const difficultySelect = document.querySelector('.difficultySelect');
 const deadlineInput = document.querySelector('.deadlineInput');
+const recurrenceSelect = document.querySelector('.recurrenceSelect');
 const deadlineContainer = document.querySelector('.deadlineContainer');
 const calendarBtn = document.querySelector('.calendarBtn');
 const addBtn = document.querySelector('.addBtn');
@@ -543,6 +544,11 @@ function addTaskFromInputs() {
         }
     }
 
+    // Recurrence needs an actual date to repeat FROM - a "Weekly" pick
+    // with no deadline set has nothing to anchor to, so it's just ignored
+    // rather than silently repeating from "now" instead.
+    const recurrence = dueAt ? getValidRecurrenceValue(recurrenceSelect?.value) : null;
+
     const timestamp = new Date().toISOString();
 
     const nextManualOrder = tasks.length === 0
@@ -558,6 +564,7 @@ function addTaskFromInputs() {
         taskType,
         estimateMinutes,
         dueAt,
+        recurrence,
         scheduledAt: parseDeadlineInput(scheduleInput?.value),
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -577,6 +584,9 @@ function addTaskFromInputs() {
         difficultySelect.value = '3';
     }
     deadlineInput.value = '';
+    if (recurrenceSelect) {
+        recurrenceSelect.value = '';
+    }
     if (scheduleInput) {
         scheduleInput.value = '';
     }
@@ -1206,6 +1216,13 @@ function createTaskItem(task) {
     if (hasDeadline) {
         taskMeta.appendChild(deadlineBadge);
         taskMeta.appendChild(countdownBadge);
+    }
+
+    if (task.recurrence) {
+        const recurrenceBadge = document.createElement('span');
+        recurrenceBadge.classList.add('recurrenceBadge');
+        recurrenceBadge.innerHTML = `<i class="fa-solid fa-repeat"></i> ${getRecurrenceLabel(task.recurrence)}`;
+        taskMeta.appendChild(recurrenceBadge);
     }
 
     if (!(isMobile && matrixValue === 'schedule')) {
@@ -1950,6 +1967,26 @@ function setTaskCompletedState(task, completed) {
         addActivityCount(1);
         addActivityHistoryEntry(task);
         checkForMilestone();
+
+        // Recurring: this occurrence still counts (activity/history/
+        // milestone above already credited it) - it just doesn't STAY
+        // completed. Advances in place rather than spawning a new task,
+        // so history/heatmap/leaderboard (all keyed to this one doc) need
+        // no special handling. Steps and the snooze-stall signal reset for
+        // the fresh cycle - a step done last time isn't done this time,
+        // and a healthy recurring task that's always completed on time
+        // shouldn't accumulate a stale "stalled" flag from cycles ago.
+        if (task.recurrence) {
+            const nextDueAt = getNextRecurrenceDueAt(task.dueAt, task.recurrence);
+            if (nextDueAt) {
+                task.completed = false;
+                task.dueAt = nextDueAt;
+                task.snoozeCount = 0;
+                if (Array.isArray(task.subtasks)) {
+                    task.subtasks = task.subtasks.map((subtask) => ({ ...subtask, completed: false }));
+                }
+            }
+        }
     } else if (wasCompleted && !completed) {
         addActivityCount(-1);
         removeLatestActivityHistoryEntry(task);
@@ -2369,6 +2406,7 @@ function editTask(taskId) {
     // uses; real latent bug caught by code review.
     const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput:not(.editorScheduleInput)');
     const editorScheduleInput = taskEditorOverlay.querySelector('.editorScheduleInput');
+    const editorRecurrenceSelect = taskEditorOverlay.querySelector('.editorRecurrenceSelect');
 
     if (!editorTextInput || !editorMatrixSelect || !editorTaskTypeSelect || !editorDurationInput || !editorDifficultySelect || !editorDeadlineInput) {
         return;
@@ -2383,6 +2421,9 @@ function editTask(taskId) {
     editorDeadlineInput.value = task.dueAt ? toDatetimeLocalValue(task.dueAt) : '';
     if (editorScheduleInput) {
         editorScheduleInput.value = task.scheduledAt ? toDatetimeLocalValue(task.scheduledAt) : '';
+    }
+    if (editorRecurrenceSelect) {
+        editorRecurrenceSelect.value = getValidRecurrenceValue(task.recurrence) || '';
     }
 
     updateEditorDurationInputVisibility();
@@ -2455,6 +2496,16 @@ function initializeTaskEditor() {
                         <i class="fa-solid fa-calendar"></i>
                     </button>
                 </div>
+            </label>
+
+            <label class="detailsFieldGroup detailsRecurrencePrimary">
+                Repeat
+                <select class="editorRecurrenceSelect">
+                    <option value="">Does not repeat</option>
+                    <option value="daily">Repeats daily</option>
+                    <option value="weekly">Repeats weekly</option>
+                    <option value="monthly">Repeats monthly</option>
+                </select>
             </label>
 
             <button type="button" class="detailsMoreToggleBtn editorMoreToggleBtn" aria-expanded="false" aria-controls="editorMoreOptions">
@@ -2674,6 +2725,7 @@ function saveTaskEditorChanges() {
     // uses; real latent bug caught by code review.
     const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput:not(.editorScheduleInput)');
     const editorScheduleInput = taskEditorOverlay.querySelector('.editorScheduleInput');
+    const editorRecurrenceSelect = taskEditorOverlay.querySelector('.editorRecurrenceSelect');
 
     if (!editorTextInput || !editorMatrixSelect || !editorTaskTypeSelect || !editorDurationInput || !editorDifficultySelect || !editorDeadlineInput) {
         closeTaskEditor();
@@ -2688,14 +2740,19 @@ function saveTaskEditorChanges() {
     }
 
     const updatedTaskType = getValidTaskType(editorTaskTypeSelect.value);
+    const updatedDueAt = parseDeadlineInput(editorDeadlineInput.value);
 
     task.text = updatedText;
     task.matrix = getValidMatrixValue(editorMatrixSelect.value);
     task.taskType = updatedTaskType;
     task.estimateMinutes = updatedTaskType === 'timeboxed' ? parseDurationMinutes(editorDurationInput.value) : null;
     task.difficulty = getValidDifficultyLevel(editorDifficultySelect.value);
-    task.dueAt = parseDeadlineInput(editorDeadlineInput.value);
+    task.dueAt = updatedDueAt;
     task.scheduledAt = editorScheduleInput ? parseDeadlineInput(editorScheduleInput.value) : task.scheduledAt;
+    // Same "needs a deadline to repeat from" rule as creating a task -
+    // clearing the deadline on an existing recurring task also clears the
+    // repeat, rather than leaving a recurrence with nothing to anchor to.
+    task.recurrence = updatedDueAt && editorRecurrenceSelect ? getValidRecurrenceValue(editorRecurrenceSelect.value) : null;
     task.updatedAt = new Date().toISOString();
 
     applyOrdering();

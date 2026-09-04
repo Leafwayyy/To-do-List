@@ -479,11 +479,23 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         return Boolean(overlay && overlay.classList.contains('open'));
     }
 
-    // Shows once ever, across the whole app (same key checked/set from
+    // Fires once ever, across the whole app (same key checked/set from
     // both Solo and Group) - not account-level tracking like the onboarding
-    // tour, just a plain localStorage flag, since this is a cosmetic nudge
-    // rather than something that needs to survive a different device.
-    function maybeShowIntroHint() {
+    // tour, just a plain localStorage flag, since this is about a first-
+    // time visitor to the app itself, not something that needs to survive
+    // a different device.
+    //
+    // Used to just show a small hint bubble pointing at the FAB and wait
+    // for someone to notice it. Replaced with an actual auto-open: most
+    // productivity-app retention/upgrade decisions get made in the very
+    // first session (see the competitive research this was built from), so
+    // the strongest version of "introduce Dusty" puts a real, ready-to-use
+    // brain-dump box in front of a brand new user immediately, landing on
+    // a blank task list, rather than a small bubble they may never notice.
+    // Never auto-sends anything on the user's behalf - only opens the
+    // panel and hands the input a concrete example so a blank chat box
+    // doesn't just trade one blank-page problem for another.
+    function maybeAutoOpenForFirstVisit() {
         if (!fabEl) {
             return;
         }
@@ -496,30 +508,31 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         if (alreadySeen) {
             return;
         }
+        try {
+            localStorage.setItem('dustyIntroSeen', '1');
+        } catch {
+            // localStorage unavailable - non-fatal, this just runs again
+            // next load, which is harmless (still only opens once per load,
+            // not repeatedly).
+        }
 
-        const hint = document.createElement('div');
-        hint.className = 'dustyHint';
-        hint.textContent = "Hi, I'm Dusty! Tap me if you need help.";
-        fabEl.appendChild(hint);
-
-        let dismissed = false;
-        const dismiss = () => {
-            if (dismissed) {
+        // Short delay - let the page's own first paint settle before
+        // pulling focus into an overlay, rather than opening the instant
+        // the FAB mounts before anything else is even visible.
+        setTimeout(() => {
+            if (isOpen()) {
                 return;
             }
-            dismissed = true;
-            try {
-                localStorage.setItem('dustyIntroSeen', '1');
-            } catch {
-                // localStorage unavailable - non-fatal, the hint just
-                // reappears next load, which is harmless.
+            open();
+            if (textInput) {
+                textInput.placeholder = context === 'group'
+                    // Kept short on purpose - a long placeholder wraps to a
+                    // second line inside the single-row textarea and gets
+                    // visually clipped (verified by actually rendering it).
+                    ? "Try: \"groceries by Friday, rent due the 1st\""
+                    : "Try: \"chem exam Friday, laundry, gym at 6\"";
             }
-            hint.classList.add('dustyHintHide');
-            setTimeout(() => hint.remove(), 400);
-        };
-
-        setTimeout(dismiss, 6000);
-        fabEl.addEventListener('click', dismiss, { once: true });
+        }, 900);
     }
 
     // Recurring reminder that Dusty is actually useful, not just a mascot
@@ -628,11 +641,13 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         fabEl.innerHTML = buildDustyAvatarMarkup(40);
         fabEl.setAttribute('aria-label', 'Chat with Dusty');
         fabEl.title = "Chat with Dusty - let AI turn what you type into tasks";
-        maybeShowIntroHint();
-        // Own minimum delay (2-4 min) already puts this well clear of the
-        // one-time intro hint's 6-second window, so no explicit sequencing
-        // needed between the two - starts counting down regardless of
-        // whether the intro hint fires on this visit.
+        maybeAutoOpenForFirstVisit();
+        // Own ~30s minimum delay already puts this well clear of the
+        // one-time first-visit auto-open's 900ms window, so no explicit
+        // sequencing needed between the two - starts counting down
+        // regardless of whether the auto-open fires on this visit. If it
+        // does fire, showIdleHint's own isOpen() guard already skips (and
+        // reschedules) while that chat is still open.
         scheduleIdleHint();
     }
     mountFab();

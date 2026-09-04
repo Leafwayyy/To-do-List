@@ -178,7 +178,7 @@ async function retractSuggestion(groupId, suggestionId) {
     await deleteDoc(doc(db(), 'groups', groupId, 'suggestions', suggestionId));
 }
 
-async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, scheduledAt, taskType, estimateMinutes, subtasks }) {
+async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, recurrence, scheduledAt, taskType, estimateMinutes, subtasks }) {
     const trimmedText = text.trim();
     if (!trimmedText) {
         return;
@@ -209,6 +209,7 @@ async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, sc
         matrix: getValidMatrixValue(matrix),
         difficulty: getValidDifficultyLevel(difficulty),
         dueAt: dueAt || null,
+        recurrence: dueAt ? getValidRecurrenceValue(recurrence) : null,
         scheduledAt: scheduledAt || null,
         taskType: validTaskType,
         estimateMinutes: validTaskType === 'timeboxed' ? (estimateMinutes || null) : null,
@@ -218,13 +219,42 @@ async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, sc
     });
 }
 
-async function setGroupTaskCompleted(groupId, taskId, completed) {
+// Given a task that just transitioned to completed, returns the extra
+// field updates needed if it's recurring - advancing in place (same doc)
+// rather than staying completed, same reasoning as solo's
+// setTaskCompletedState. Returns null for a non-recurring task (or one
+// with no valid next occurrence), meaning "no extra fields, stays
+// completed normally." Shared by every completion write path below
+// (direct checkbox, subtask-driven auto-complete, Dusty's task edits) so
+// recurrence behaves identically no matter how a task got marked done.
+function getRecurrenceAdvanceFields(task) {
+    if (!task.recurrence) {
+        return null;
+    }
+    const nextDueAt = getNextRecurrenceDueAt(task.dueAt, task.recurrence);
+    if (!nextDueAt) {
+        return null;
+    }
+    return {
+        completed: false,
+        completedAt: null,
+        dueAt: nextDueAt,
+        snoozeCount: 0,
+        subtasks: (Array.isArray(task.subtasks) ? task.subtasks : []).map((subtask) => ({ ...subtask, completed: false }))
+    };
+}
+
+async function setGroupTaskCompleted(groupId, task, completed) {
     const { doc, updateDoc } = fs();
-    await updateDoc(doc(db(), 'groups', groupId, 'tasks', taskId), {
+    const update = {
         completed,
         completedAt: completed ? new Date().toISOString() : null,
         updatedAt: new Date().toISOString()
-    });
+    };
+    if (!task.completed && completed) {
+        Object.assign(update, getRecurrenceAdvanceFields(task) || {});
+    }
+    await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), update);
 }
 
 async function deleteGroupTask(groupId, taskId) {
@@ -238,14 +268,33 @@ async function deleteGroupTask(groupId, taskId) {
 // Shared by all three subtask mutators below: recomputes the parent task's
 // own completed/completedAt from its subtasks (auto-complete with manual
 // override, same as solo) - completedAt feeds the history panel.
-function subtaskDrivenTaskUpdate(subtasks) {
+function subtaskDrivenTaskUpdate(task, subtasks) {
     const completed = subtasks.length > 0 && subtasks.every((subtask) => subtask.completed);
-    return {
+    const justCompleted = !task.completed && completed;
+    const update = {
         subtasks,
         completed,
         completedAt: completed ? new Date().toISOString() : null,
         updatedAt: new Date().toISOString()
     };
+    // Captured BEFORE the recurrence override below can touch completedAt -
+    // real bug caught by actually running this: grabbing it AFTER
+    // Object.assign meant the history log would have recorded null instead
+    // of the real completion time for every recurring task, since the
+    // override sets completedAt back to null in the same object.
+    const historyCompletedAt = update.completedAt;
+    // Recurring: auto-completing via the last subtask advances the task
+    // in place too, same as the direct checkbox path (setGroupTaskCompleted)
+    // - checked against the FRESH subtasks array (post-toggle), not the
+    // stale task.subtasks, so the reset-to-incomplete below is based on
+    // the steps as they actually are right now. justCompleted is captured
+    // BEFORE this override and returned separately - the completion credit
+    // below still has to fire for a recurring task even though `completed`
+    // itself gets flipped straight back to false in the same update.
+    if (justCompleted) {
+        Object.assign(update, getRecurrenceAdvanceFields({ ...task, subtasks }) || {});
+    }
+    return { ...update, justCompleted, historyCompletedAt };
 }
 
 // Writes the subtask-driven update, then logs a history entry if that
@@ -253,12 +302,19 @@ function subtaskDrivenTaskUpdate(subtasks) {
 // - shared by all three subtask mutators below so "log on the completed
 // transition" isn't repeated three times.
 async function applySubtaskDrivenUpdate(groupId, task, subtasks) {
-    const update = subtaskDrivenTaskUpdate(subtasks);
+    const { justCompleted, historyCompletedAt, ...update } = subtaskDrivenTaskUpdate(task, subtasks);
     const { doc, updateDoc } = fs();
     await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), update);
 
-    if (!task.completed && update.completed) {
-        logGroupTaskCompletion(groupId, task, update.completedAt).catch((error) => {
+    // Real bug found while wiring in recurrence: a recurring task advanced
+    // via this path flips `completed` straight back to false in the SAME
+    // update, so checking update.completed here (the old code) would have
+    // silently skipped the history log for every recurring task completed
+    // this way - the occurrence still happened, it just doesn't stay
+    // marked done. justCompleted (captured before that override) is the
+    // real signal for "did this transition to completed just now".
+    if (justCompleted) {
+        logGroupTaskCompletion(groupId, task, historyCompletedAt).catch((error) => {
             console.error('Failed to log completion history:', error);
         });
     }
@@ -441,6 +497,7 @@ const matrixSelect = document.querySelector('.matrixSelect');
 const difficultySelect = document.querySelector('.difficultySelect');
 const deadlineContainer = document.querySelector('.deadlineContainer:not(.scheduleContainer)');
 const deadlineInput = document.querySelector('.deadlineInput:not(.scheduleInput)');
+const recurrenceSelect = document.querySelector('.recurrenceSelect');
 const scheduleContainer = document.querySelector('.scheduleContainer');
 const scheduleInput = document.querySelector('.scheduleInput');
 const typePills = Array.from(document.querySelectorAll('.typePill'));
@@ -646,6 +703,13 @@ function createGroupTaskItem(groupId, task, isOwner) {
         taskMeta.appendChild(countdownBadge);
     }
 
+    if (task.recurrence) {
+        const recurrenceBadge = document.createElement('span');
+        recurrenceBadge.classList.add('recurrenceBadge');
+        recurrenceBadge.innerHTML = `<i class="fa-solid fa-repeat"></i> ${getRecurrenceLabel(task.recurrence)}`;
+        taskMeta.appendChild(recurrenceBadge);
+    }
+
     const matrixValue = getValidMatrixValue(task.matrix);
     const matrixData = MATRIX_CONFIG[matrixValue];
     const matrixBadge = document.createElement('span');
@@ -758,7 +822,7 @@ function createGroupTaskItem(groupId, task, isOwner) {
         playClickSound();
         const willBeCompleted = !task.completed;
         const completedAt = new Date().toISOString();
-        setGroupTaskCompleted(groupId, task.id, willBeCompleted).catch((error) => {
+        setGroupTaskCompleted(groupId, task, willBeCompleted).catch((error) => {
             console.error('Failed to update task:', error);
         });
         if (willBeCompleted) {
@@ -1641,6 +1705,16 @@ function initializeGroupTaskEditor() {
                 </div>
             </label>
 
+            <label class="detailsFieldGroup detailsRecurrencePrimary">
+                Repeat
+                <select class="editorRecurrenceSelect">
+                    <option value="">Does not repeat</option>
+                    <option value="daily">Repeats daily</option>
+                    <option value="weekly">Repeats weekly</option>
+                    <option value="monthly">Repeats monthly</option>
+                </select>
+            </label>
+
             <button type="button" class="detailsMoreToggleBtn editorMoreToggleBtn" aria-expanded="false" aria-controls="groupEditorMoreOptions">
                 <span>More options: estimate, schedule</span>
                 <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
@@ -1770,6 +1844,7 @@ function openGroupTaskEditor(groupId, task) {
     const editorDifficultySelect = taskEditorOverlay.querySelector('.editorDifficultySelect');
     const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput:not(.editorScheduleInput)');
     const editorScheduleInput = taskEditorOverlay.querySelector('.editorScheduleInput');
+    const editorRecurrenceSelect = taskEditorOverlay.querySelector('.editorRecurrenceSelect');
 
     editorTextInput.value = task.text;
     editorMatrixSelect.value = getValidMatrixValue(task.matrix);
@@ -1779,6 +1854,9 @@ function openGroupTaskEditor(groupId, task) {
     editorDeadlineInput.value = task.dueAt && isValidDateValue(task.dueAt) ? toDatetimeLocalValue(task.dueAt) : '';
     if (editorScheduleInput) {
         editorScheduleInput.value = task.scheduledAt && isValidDateValue(task.scheduledAt) ? toDatetimeLocalValue(task.scheduledAt) : '';
+    }
+    if (editorRecurrenceSelect) {
+        editorRecurrenceSelect.value = getValidRecurrenceValue(task.recurrence) || '';
     }
     updateEditorDurationInputVisibility();
 
@@ -1823,6 +1901,7 @@ function saveGroupTaskEditorChanges() {
     const editorDifficultySelect = taskEditorOverlay.querySelector('.editorDifficultySelect');
     const editorDeadlineInput = taskEditorOverlay.querySelector('.editorDeadlineInput:not(.editorScheduleInput)');
     const editorScheduleInput = taskEditorOverlay.querySelector('.editorScheduleInput');
+    const editorRecurrenceSelect = taskEditorOverlay.querySelector('.editorRecurrenceSelect');
 
     const updatedText = editorTextInput.value.trim();
     if (updatedText === '') {
@@ -1832,6 +1911,7 @@ function saveGroupTaskEditorChanges() {
     }
 
     const updatedTaskType = getValidTaskType(editorTaskTypeSelect.value);
+    const updatedDueAt = editorDeadlineInput.value ? new Date(editorDeadlineInput.value).toISOString() : null;
 
     const { doc, updateDoc } = fs();
     updateDoc(doc(db(), 'groups', activeEditorGroupId, 'tasks', activeEditorTaskId), {
@@ -1840,7 +1920,10 @@ function saveGroupTaskEditorChanges() {
         taskType: updatedTaskType,
         estimateMinutes: updatedTaskType === 'timeboxed' ? parseDurationMinutes(editorDurationInput.value) : null,
         difficulty: getValidDifficultyLevel(editorDifficultySelect.value),
-        dueAt: editorDeadlineInput.value ? new Date(editorDeadlineInput.value).toISOString() : null,
+        dueAt: updatedDueAt,
+        // Same "needs a deadline to repeat from" rule as creating a task -
+        // clearing the deadline also clears the repeat.
+        recurrence: updatedDueAt && editorRecurrenceSelect ? getValidRecurrenceValue(editorRecurrenceSelect.value) : null,
         scheduledAt: editorScheduleInput && editorScheduleInput.value ? new Date(editorScheduleInput.value).toISOString() : null,
         updatedAt: new Date().toISOString()
     }).catch((error) => console.error('Failed to save task edits:', error));
@@ -4017,16 +4100,23 @@ function addTaskFromInputs() {
     const scheduledAt = scheduleInput?.value ? new Date(scheduleInput.value).toISOString() : null;
     const taskType = getSelectedTaskType();
     const estimateMinutes = taskType === 'timeboxed' ? parseDurationMinutes(durationInput?.value) : null;
+    // Same "needs a deadline to repeat from" rule as solo.
+    const recurrence = dueAt ? getValidRecurrenceValue(recurrenceSelect?.value) : null;
 
     addGroupTask(group.id, currentUser, {
         text: taskText,
         matrix: matrixSelect?.value,
         difficulty: difficultySelect?.value,
         dueAt,
+        recurrence,
         scheduledAt,
         taskType,
         estimateMinutes
     }).catch((error) => console.error('Failed to add task:', error));
+
+    if (recurrenceSelect) {
+        recurrenceSelect.value = '';
+    }
 
     taskInput.value = '';
     updateAddBtnState();
@@ -4209,6 +4299,14 @@ async function commitAiTaskEditsGroup(drafts) {
                 fieldUpdates.completed = willBeCompleted;
                 fieldUpdates.completedAt = willBeCompleted ? new Date().toISOString() : null;
                 justCompleted = willBeCompleted;
+                // Recurring: same advance-in-place behavior as every other
+                // completion path - justCompleted (used for the sound/
+                // milestone/history side effects below) is already captured
+                // above, so overriding fieldUpdates.completed back to false
+                // here doesn't affect whether this occurrence gets credit.
+                if (justCompleted) {
+                    Object.assign(fieldUpdates, getRecurrenceAdvanceFields(realTask) || {});
+                }
             }
         }
 

@@ -276,6 +276,22 @@ body{
     transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
+.recurrenceSelect{
+    width: 100%;
+    height: 50px;
+    padding: 0 10px;
+    border: none;
+    outline: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(103, 159, 255, 0.7);
+    color: #1e1e1e;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
 .matrixSelect:hover{
     border-color: rgba(72, 145, 255, 0.95);
     background: rgba(246, 252, 255, 0.92);
@@ -295,6 +311,13 @@ body{
 
 .difficultySelect:focus,
 .difficultySelect:focus-visible{
+    border-color: rgba(47, 143, 255, 1);
+    box-shadow: 0 0 0 4px rgba(47, 143, 255, 0.18);
+    background: rgba(246, 252, 255, 0.98);
+}
+
+.recurrenceSelect:focus,
+.recurrenceSelect:focus-visible{
     border-color: rgba(47, 143, 255, 1);
     box-shadow: 0 0 0 4px rgba(47, 143, 255, 0.18);
     background: rgba(246, 252, 255, 0.98);
@@ -1219,6 +1242,19 @@ body{
     color: #3a4c8f;
 }
 
+.recurrenceBadge{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid #cbd8ff;
+    background: #eef2ff;
+    color: #3a4c8f;
+}
+
 .snoozeSection{
     width: 100%;
     display: flex;
@@ -1833,6 +1869,7 @@ body{
 
 .editorTaskTypeSelect,
 .editorDifficultySelect,
+.editorRecurrenceSelect,
 .editorDurationInput{
     width: 100%;
     height: 44px;
@@ -2245,12 +2282,14 @@ body::after{
 .taskInput,
 .matrixSelect,
 .difficultySelect,
+.recurrenceSelect,
 .durationInput,
 .deadlineInput,
 .editorTextInput,
 .editorMatrixSelect,
 .editorTaskTypeSelect,
 .editorDifficultySelect,
+.editorRecurrenceSelect,
 .editorDurationInput,
 .editorDeadlineInput,
 .typePill,
@@ -2291,6 +2330,8 @@ body::after{
 .matrixSelect:focus-visible,
 .difficultySelect:focus,
 .difficultySelect:focus-visible,
+.recurrenceSelect:focus,
+.recurrenceSelect:focus-visible,
 .deadlineInput:focus,
 .deadlineInput:focus-visible,
 .taskInput:focus,
@@ -2300,6 +2341,7 @@ body::after{
 .editorDeadlineInput:focus,
 .editorTaskTypeSelect:focus,
 .editorDifficultySelect:focus,
+.editorRecurrenceSelect:focus,
 .editorDurationInput:focus{
     background: rgba(45, 33, 106, 0.98);
     color: #ffffff;
@@ -2437,12 +2479,14 @@ body::after{
 .taskInput,
 .matrixSelect,
 .difficultySelect,
+.recurrenceSelect,
 .durationInput,
 .deadlineInput,
 .editorTextInput,
 .editorMatrixSelect,
 .editorTaskTypeSelect,
 .editorDifficultySelect,
+.editorRecurrenceSelect,
 .editorDurationInput,
 .editorDeadlineInput,
 .typePill,
@@ -2576,6 +2620,7 @@ body::after{
 .taskInput,
 .matrixSelect,
 .difficultySelect,
+.recurrenceSelect,
 .durationInput,
 .deadlineInput,
 .typePill,
@@ -2597,6 +2642,12 @@ body::after{
 .countdownBadge,
 .subtaskProgressBadge,
 .scheduleBadge{
+    background: rgba(233, 238, 255, 0.92);
+    color: #2f3f66;
+    border: 1px solid rgba(184, 198, 232, 0.95);
+}
+
+.recurrenceBadge{
     background: rgba(233, 238, 255, 0.92);
     color: #2f3f66;
     border: 1px solid rgba(184, 198, 232, 0.95);
@@ -2643,7 +2694,9 @@ body::after{
 
 /* Final control icon clarity */
 .matrixSelect,
-.difficultySelect{
+.difficultySelect,
+.recurrenceSelect,
+.editorRecurrenceSelect{
     appearance: auto;
     -webkit-appearance: menulist;
     -moz-appearance: auto;
@@ -2797,6 +2850,7 @@ body::after{
 .taskEditorCard .editorMatrixSelect,
 .taskEditorCard .editorTaskTypeSelect,
 .taskEditorCard .editorDifficultySelect,
+.taskEditorCard .editorRecurrenceSelect,
 .taskEditorCard .editorDurationInput,
 .taskEditorCard .editorDeadlineInput{
     background: linear-gradient(145deg, rgba(53, 39, 120, 0.95), rgba(35, 24, 92, 0.96));
@@ -2888,9 +2942,11 @@ body::after{
 /* Final dropdown popup theming */
 .matrixSelect,
 .difficultySelect,
+.recurrenceSelect,
 .editorMatrixSelect,
 .editorTaskTypeSelect,
 .editorDifficultySelect,
+.editorRecurrenceSelect,
 .groupCreatePrivacySelect,
 .groupSettingsPrivacySelect,
 .brainDumpTaskCardMatrix,
@@ -2901,9 +2957,11 @@ body::after{
 
 .matrixSelect option,
 .difficultySelect option,
+.recurrenceSelect option,
 .editorMatrixSelect option,
 .editorTaskTypeSelect option,
 .editorDifficultySelect option,
+.editorRecurrenceSelect option,
 .groupCreatePrivacySelect option,
 .groupSettingsPrivacySelect option,
 .brainDumpTaskCardMatrix option,
@@ -3389,6 +3447,15 @@ body > .viewTabs{
    row as them. */
 .detailsDeadlinePrimary{
     margin-top: var(--space-3);
+}
+
+.detailsRecurrencePrimary{
+    margin-top: var(--space-3);
+}
+
+.detailsRecurrencePrimary .recurrenceSelect,
+.detailsRecurrencePrimary .editorRecurrenceSelect{
+    width: 100%;
 }
 
 /* Real bug found and fixed while adding the above: .editorPrimaryGrid

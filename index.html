@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260903g">
+    <link rel="stylesheet" href="style.css?v=20260904a">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#050225">
@@ -150,6 +150,19 @@
                         <button class="deadlinePresetBtn" data-preset="eod">End of day</button>
                         <button class="deadlinePresetBtn" data-preset="tomorrow">Tomorrow 9 AM</button>
                         <button class="deadlinePresetBtn" data-preset="clear">No deadline</button>
+                    </div>
+
+                    <!-- Needs a deadline to repeat FROM (see addTaskFromInputs)
+                         - kept right next to it rather than behind More
+                         options, same "closely related fields stay together"
+                         reasoning as the deadline/schedule split. -->
+                    <div class="detailsFieldGroup detailsRecurrencePrimary">
+                        <select class="recurrenceSelect" aria-label="Repeat">
+                            <option value="">Does not repeat</option>
+                            <option value="daily">Repeats daily</option>
+                            <option value="weekly">Repeats weekly</option>
+                            <option value="monthly">Repeats monthly</option>
+                        </select>
                     </div>
 
                     <button type="button" class="detailsMoreToggleBtn" aria-expanded="false" aria-controls="detailsMoreOptions">
@@ -362,10 +375,10 @@
         </div>
     </div>
 
-    <script src="task-shared.js?v=20260831g"></script>
-    <script src="brain-dump.js?v=20260903c"></script>
+    <script src="task-shared.js?v=20260904a"></script>
+    <script src="brain-dump.js?v=20260904a"></script>
     <script src="auth-gate.js?v=20260830a"></script>
-    <script src="script.js?v=20260903c"></script>
+    <script src="script.js?v=20260904a"></script>
     <script type="module" src="firebase-init.js?v=20260831a"></script>
     <script src="settings.js?v=20260903a"></script>
 

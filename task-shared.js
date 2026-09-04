@@ -98,6 +98,59 @@ function isValidDateValue(value) {
     return !Number.isNaN(parsedDate.getTime());
 }
 
+// Recurrence: a repeating task advances IN PLACE (same doc/id) rather than
+// spawning a new task per occurrence - one doc per conceptual recurring
+// task, so activity history/heatmap/leaderboard counts (which already
+// assume one doc per task) need no special handling, and existing signals
+// like snooze-based stall detection reset cleanly each cycle instead of
+// accumulating across occurrences that were never actually a problem.
+// Kept as a plain string field (like matrix/taskType), not an object -
+// v1 is fixed daily/weekly/monthly, no custom interval yet.
+const RECURRENCE_OPTIONS = [
+    { value: '', label: 'Does not repeat' },
+    { value: 'daily', label: 'Daily' },
+    { value: 'weekly', label: 'Weekly' },
+    { value: 'monthly', label: 'Monthly' }
+];
+
+function getValidRecurrenceValue(value) {
+    return RECURRENCE_OPTIONS.some((option) => option.value === value && option.value !== '') ? value : null;
+}
+
+function getRecurrenceLabel(value) {
+    const match = RECURRENCE_OPTIONS.find((option) => option.value === value);
+    return match ? match.label : 'Does not repeat';
+}
+
+// Adds one recurrence interval to a date, anchored to the task's OWN due
+// date (not "today"), so a task due every Monday keeps landing on Monday
+// even if it happens to get completed early or late. Monthly clamps to
+// the target month's real last day instead of letting a naive setMonth
+// silently roll over into the month after (Jan 31 + 1 month would
+// otherwise land on Mar 2/3, skipping February entirely).
+function getNextRecurrenceDueAt(currentDueAtIso, frequency) {
+    const validFrequency = getValidRecurrenceValue(frequency);
+    if (!validFrequency) {
+        return null;
+    }
+    const base = currentDueAtIso && isValidDateValue(currentDueAtIso) ? new Date(currentDueAtIso) : new Date();
+    const next = new Date(base.getTime());
+
+    if (validFrequency === 'daily') {
+        next.setDate(next.getDate() + 1);
+    } else if (validFrequency === 'weekly') {
+        next.setDate(next.getDate() + 7);
+    } else if (validFrequency === 'monthly') {
+        const originalDay = next.getDate();
+        const targetMonthIndex = next.getMonth() + 1;
+        next.setDate(1); // avoid overflow while stepping the month itself
+        next.setMonth(targetMonthIndex);
+        const lastDayOfTargetMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+        next.setDate(Math.min(originalDay, lastDayOfTargetMonth));
+    }
+    return next.toISOString();
+}
+
 function getDeadlineStatus(dueAt) {
     if (!dueAt || !isValidDateValue(dueAt)) {
         return {
