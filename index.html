@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260904d">
+    <link rel="stylesheet" href="style.css?v=20260904e">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#050225">
@@ -56,6 +56,7 @@
 
     <div class="viewTabs" role="tablist" aria-label="Dashboard view">
         <button class="viewTab active" type="button" data-view="tasks" role="tab" aria-selected="true">Tasks</button>
+        <button class="viewTab" type="button" data-view="calendar" role="tab" aria-selected="false">Calendar</button>
         <button class="viewTab" type="button" data-view="activity" role="tab" aria-selected="false">Activity</button>
     </div>
 
@@ -281,6 +282,35 @@
                 </div>
             </div>
         </div>
+
+        <!-- Calendar: the same tasks already on your list, laid out by day.
+             .calendarDayCell is the one piece of markup driving both the
+             desktop month/week grid and the mobile single-column agenda -
+             which layout it becomes is pure CSS (see style.css), so there's
+             one render path, not two. -->
+        <div class="viewPanel hidden" data-view-panel="calendar">
+            <div class="calendarPanel" aria-label="Task calendar">
+                <div class="calendarHeader">
+                    <div class="calendarNav">
+                        <button type="button" class="calendarPrevBtn" aria-label="Previous"><i class="fa-solid fa-chevron-left"></i></button>
+                        <p class="calendarLabel"></p>
+                        <button type="button" class="calendarNextBtn" aria-label="Next"><i class="fa-solid fa-chevron-right"></i></button>
+                    </div>
+                    <div class="calendarControls">
+                        <button type="button" class="calendarTodayBtn">Today</button>
+                        <div class="calendarModeToggle" role="tablist" aria-label="Calendar layout">
+                            <button type="button" class="calendarModeBtn active" data-mode="month" role="tab" aria-selected="true">Month</button>
+                            <button type="button" class="calendarModeBtn" data-mode="week" role="tab" aria-selected="false">Week</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="calendarWeekdayRow" aria-hidden="true">
+                    <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                </div>
+                <div class="calendarGrid"></div>
+                <p class="calendarLegendHint">Solid = due, clock = planned work time, dashed = a future repeat.</p>
+            </div>
+        </div>
     </div>
 
     <div class="activityDetailsOverlay hidden" aria-hidden="true">
@@ -387,10 +417,10 @@
         </div>
     </div>
 
-    <script src="task-shared.js?v=20260904e"></script>
+    <script src="task-shared.js?v=20260904f"></script>
     <script src="brain-dump.js?v=20260904b"></script>
     <script src="auth-gate.js?v=20260830a"></script>
-    <script src="script.js?v=20260904e"></script>
+    <script src="script.js?v=20260904f"></script>
     <script type="module" src="firebase-init.js?v=20260831a"></script>
     <script src="settings.js?v=20260903b"></script>
 

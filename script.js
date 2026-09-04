@@ -35,6 +35,12 @@ const activityDayLabels = document.querySelector('.activityDayLabels');
 const activityGrid = document.querySelector('.activityGrid');
 const activitySummary = document.querySelector('.activitySummary');
 const activityPanel = document.querySelector('.activityPanel');
+const calendarGrid = document.querySelector('.calendarGrid');
+const calendarLabel = document.querySelector('.calendarLabel');
+const calendarPrevBtn = document.querySelector('.calendarPrevBtn');
+const calendarNextBtn = document.querySelector('.calendarNextBtn');
+const calendarTodayBtn = document.querySelector('.calendarTodayBtn');
+const calendarModeButtons = Array.from(document.querySelectorAll('.calendarModeBtn'));
 // .schedulePresetBtn also carries .deadlinePresetBtn (shared pill styling
 // only, not the deadline click handler), so it's excluded here.
 const deadlinePresetButtons = Array.from(document.querySelectorAll('.deadlinePresetBtn:not(.schedulePresetBtn)'));
@@ -106,6 +112,16 @@ const VIEW_CONFIG = {
 let tasks = [];
 let isAutoPrioritize = false;
 let activeView = 'all';
+// Which top-level tab (Tasks/Calendar/Activity) is currently showing -
+// switchSoloView sets this; nothing needed it before Calendar existed,
+// since Tasks/Activity never had to know about each other.
+let currentTopView = 'tasks';
+// 'month' | 'week'; calendarAnchorDate is whichever date the currently
+// shown month/week is built around - Prev/Next/Today move it, the month
+// grid always shows the month CONTAINING it, the week strip always shows
+// the week containing it.
+let calendarViewMode = 'month';
+let calendarAnchorDate = new Date();
 let dragSourceTaskId = null;
 let realtimeIntervalId = null;
 let lastRealtimeBucket = -1;
@@ -242,8 +258,15 @@ const TOUR_STEPS = [
         beforeShow: () => switchSoloView('tasks')
     },
     {
+        selector: '.calendarGrid',
+        title: 'Everything, laid out in time',
+        text: 'This is Calendar. Every task with a deadline or a planned time shows up here automatically, no extra typing. Due dates and planned work time show as separate marks, since they\'re not always the same day. Go ahead, tap any day, an empty one even starts a new task right from here.',
+        action: { event: 'click' },
+        beforeShow: () => switchSoloView('calendar')
+    },
+    {
         selector: '.viewTabs',
-        title: 'Tasks and Activity',
+        title: 'Tasks, Calendar, and Activity',
         text: 'Everything you\'ve been doing lives under Tasks. Go ahead, tap over to Activity, that\'s where your completion history lives whenever you want it.',
         action: { event: 'click' },
         beforeShow: () => switchSoloView('tasks')
@@ -536,6 +559,7 @@ AuthGate.init({
 // step's target lives in, regardless of step order or a manual tab click
 // mid-tour - see TOUR_STEPS below.
 function switchSoloView(view) {
+    currentTopView = view;
     viewTabButtons.forEach((button) => {
         const isActive = button.dataset.view === view;
         button.classList.toggle('active', isActive);
@@ -548,6 +572,8 @@ function switchSoloView(view) {
 
     if (view === 'activity') {
         renderActivityHeatmap();
+    } else if (view === 'calendar') {
+        renderCalendarView();
     }
 }
 
@@ -1123,6 +1149,16 @@ function renderTasks() {
     updateNextTaskPanel();
     updateUrgencyAlert();
     restorePendingSubtaskFocus();
+
+    // Keep Calendar live too, specifically for its own core interaction
+    // (click a chip -> the real task editor opens on top -> save) - the
+    // editor is a modal, not a view switch, so without this the calendar
+    // underneath would still show the pre-edit deadline/schedule until you
+    // left the tab and came back. Cheap to check, only actually re-renders
+    // when Calendar is the visible tab.
+    if (currentTopView === 'calendar') {
+        renderCalendarView();
+    }
 }
 
 function restorePendingSubtaskFocus() {
@@ -3316,6 +3352,305 @@ function pruneActivityHistory() {
         if (activityHistoryByDate[dateKey].length === 0) {
             delete activityHistoryByDate[dateKey];
         }
+    });
+}
+
+// ---------------------------------------------------------------------
+// Calendar view
+// ---------------------------------------------------------------------
+// The same tasks already on the list, laid out by day - no second data
+// entry pass. A task can place up to 3 distinct marks on the calendar,
+// each reusing the exact urgency colors (deadline-normal/-soon/-critical/
+// -overdue) already used on every task row's own badges, not a separately
+// invented color scheme:
+//   - "due": task.dueAt, the literal deadline.
+//   - "planned": task.scheduledAt, when you actually plan to work on it -
+//     a genuinely different day than the deadline, if you set both, and
+//     shown as its own chip rather than being merged into one - this is
+//     the one thing a calendar view of this app can show that a plain
+//     Google Calendar event can't, since GCal has no equivalent split.
+//   - "projected": for a recurring task, its FUTURE occurrences don't
+//     exist as real data (recurrence advances the same doc in place, see
+//     setTaskCompletedState - there's only ever one real dueAt at a time),
+//     so buildCalendarEntriesByDay projects them forward for display only,
+//     using the existing getNextRecurrenceDueAt (task-shared.js). These
+//     never get their own Firestore doc and always open the one real task
+//     on click, same as the other two.
+
+function stepCalendar(direction) {
+    const next = new Date(calendarAnchorDate);
+    if (calendarViewMode === 'month') {
+        next.setDate(1); // avoid month-length overflow while stepping the month itself
+        next.setMonth(next.getMonth() + direction);
+    } else {
+        next.setDate(next.getDate() + (direction * 7));
+    }
+    calendarAnchorDate = next;
+    renderCalendarView();
+}
+
+if (calendarPrevBtn) {
+    calendarPrevBtn.addEventListener('click', () => {
+        playClickSound();
+        stepCalendar(-1);
+    });
+}
+
+if (calendarNextBtn) {
+    calendarNextBtn.addEventListener('click', () => {
+        playClickSound();
+        stepCalendar(1);
+    });
+}
+
+if (calendarTodayBtn) {
+    calendarTodayBtn.addEventListener('click', () => {
+        playClickSound();
+        calendarAnchorDate = new Date();
+        renderCalendarView();
+    });
+}
+
+calendarModeButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+        playClickSound();
+        calendarViewMode = button.dataset.mode === 'week' ? 'week' : 'month';
+        calendarModeButtons.forEach((btn) => {
+            const isActive = btn === button;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        renderCalendarView();
+    });
+});
+
+// The 7-day equivalent of task-shared.js's buildCalendarMonthMatrix - kept
+// local to script.js (unlike the month version) since week view has no
+// "in/out of range" concept to share with group's later port, it's just 7
+// consecutive days.
+function buildCalendarWeekRow(anchorDate) {
+    const start = new Date(anchorDate);
+    start.setDate(anchorDate.getDate() - anchorDate.getDay());
+
+    const cells = [];
+    for (let i = 0; i < 7; i += 1) {
+        const date = new Date(start);
+        date.setDate(start.getDate() + i);
+        cells.push({ date, inMonth: true });
+    }
+    return cells;
+}
+
+function updateCalendarLabel(cells) {
+    if (!calendarLabel) {
+        return;
+    }
+    if (calendarViewMode === 'month') {
+        calendarLabel.textContent = calendarAnchorDate.toLocaleDateString([], { month: 'long', year: 'numeric' });
+        return;
+    }
+
+    const start = cells[0].date;
+    const end = cells[cells.length - 1].date;
+    const sameMonth = start.getMonth() === end.getMonth();
+    const startLabel = start.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const endLabel = end.toLocaleDateString([], sameMonth ? { day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+    calendarLabel.textContent = `${startLabel} – ${endLabel}`;
+}
+
+// Buckets every task onto the day(s) it should show on, within the visible
+// range only (cells[0]..cells[last]) - a recurring task's projection loop
+// stops as soon as it walks past the end of what's actually on screen, so
+// this stays cheap regardless of how far in the future a daily recurrence
+// could otherwise be projected.
+function buildCalendarEntriesByDay(cells) {
+    const byDay = {};
+    const rangeStart = cells[0].date;
+    const rangeEnd = cells[cells.length - 1].date;
+
+    function addEntry(dateKey, entry) {
+        if (!byDay[dateKey]) {
+            byDay[dateKey] = [];
+        }
+        byDay[dateKey].push(entry);
+    }
+
+    tasks.forEach((task) => {
+        if (task.dueAt && isValidDateValue(task.dueAt)) {
+            addEntry(getDateKey(new Date(task.dueAt)), { type: 'due', task });
+        }
+        if (task.scheduledAt && isValidDateValue(task.scheduledAt)) {
+            addEntry(getDateKey(new Date(task.scheduledAt)), { type: 'planned', task });
+        }
+
+        if (task.recurrence && task.dueAt && isValidDateValue(task.dueAt)) {
+            let cursor = task.dueAt;
+            // 60 is a generous safety cap, not a real limit - the range
+            // stop condition below always fires first in practice (even
+            // daily over a 6-week month grid only ever needs ~42 steps).
+            for (let i = 0; i < 60; i += 1) {
+                const next = getNextRecurrenceDueAt(cursor, task.recurrence);
+                if (!next) {
+                    break;
+                }
+                const nextDate = new Date(next);
+                if (nextDate > rangeEnd) {
+                    break;
+                }
+                if (nextDate >= rangeStart) {
+                    addEntry(getDateKey(nextDate), { type: 'projected', task });
+                }
+                cursor = next;
+            }
+        }
+    });
+
+    return byDay;
+}
+
+function createCalendarChip(entry) {
+    const { type, task } = entry;
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.classList.add('calendarChip', `calendarChip-${type}`);
+    if (task.completed) {
+        chip.classList.add('completed');
+    }
+
+    // A projected (not-yet-real) occurrence gets the same neutral treatment
+    // as "no deadline pressure" - urgency coloring on a ghost that might be
+    // weeks out wouldn't mean anything. The two REAL marks (due/planned)
+    // both reuse getTaskDisplayDeadlineStatus, same completed-aware urgency
+    // color every other badge in the app already uses.
+    chip.classList.add(type === 'projected' ? 'deadline-none' : getTaskDisplayDeadlineStatus(task).deadlineClassName);
+
+    const icon = document.createElement('i');
+    icon.classList.add('fa-solid', type === 'planned' ? 'fa-clock' : type === 'projected' ? 'fa-repeat' : 'fa-calendar');
+    chip.appendChild(icon);
+
+    const label = document.createElement('span');
+    label.textContent = task.text;
+    chip.appendChild(label);
+
+    const kindLabel = type === 'planned' ? 'Planned' : type === 'projected' ? 'Repeats' : 'Due';
+    chip.title = `${kindLabel}: ${task.text}`;
+
+    chip.addEventListener('click', (event) => {
+        event.stopPropagation();
+        playClickSound();
+        editTask(task.id);
+    });
+
+    return chip;
+}
+
+const CALENDAR_MAX_VISIBLE_CHIPS = 3;
+
+function renderCalendarDayChips(chipListEl, moreBtnEl, orderedEntries, expanded) {
+    chipListEl.innerHTML = '';
+    const visibleCount = expanded ? orderedEntries.length : Math.min(CALENDAR_MAX_VISIBLE_CHIPS, orderedEntries.length);
+    orderedEntries.slice(0, visibleCount).forEach((entry) => {
+        chipListEl.appendChild(createCalendarChip(entry));
+    });
+
+    if (orderedEntries.length > CALENDAR_MAX_VISIBLE_CHIPS) {
+        moreBtnEl.textContent = expanded ? 'Show less' : `+${orderedEntries.length - CALENDAR_MAX_VISIBLE_CHIPS} more`;
+        moreBtnEl.classList.remove('hidden');
+    } else {
+        moreBtnEl.classList.add('hidden');
+    }
+}
+
+// Sets the deadline field (and opens Prioritize) to that day at a sensible
+// default hour, then hands off to the exact same task-input box the rest
+// of the app already uses - creating a task FROM the calendar is the same
+// one-motion flow as the quick-add box, not a second form.
+function openCalendarQuickAdd(date) {
+    switchSoloView('tasks');
+    setDetailsPanelOpen(true);
+    const prefilled = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 9, 0, 0, 0);
+    deadlineInput.value = toDatetimeLocalValue(prefilled.toISOString());
+    taskInput.focus();
+}
+
+function createCalendarDayCell(cell, entriesByDay) {
+    const dateKey = getDateKey(cell.date);
+    const entries = entriesByDay[dateKey] || [];
+    const isToday = dateKey === getDateKey(new Date());
+
+    const cellEl = document.createElement('div');
+    cellEl.classList.add('calendarDayCell');
+    if (!cell.inMonth) {
+        cellEl.classList.add('outOfMonth');
+    }
+    if (isToday) {
+        cellEl.classList.add('today');
+    }
+    cellEl.dataset.dateKey = dateKey;
+
+    const dateLabel = document.createElement('span');
+    dateLabel.classList.add('calendarDayNumber');
+    dateLabel.textContent = String(cell.date.getDate());
+    cellEl.appendChild(dateLabel);
+
+    // Mobile-only (see style.css) - the plain day number reads fine inside
+    // a grid where the weekday header row already gives context, but not
+    // in the mobile single-column list where each cell IS its own row.
+    const fullLabel = document.createElement('span');
+    fullLabel.classList.add('calendarDayFullLabel');
+    fullLabel.textContent = cell.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    cellEl.appendChild(fullLabel);
+
+    const chipList = document.createElement('div');
+    chipList.classList.add('calendarChipList');
+    cellEl.appendChild(chipList);
+
+    // Due markers first (Serial Position Effect - the most decision-
+    // relevant thing gets primacy, same reasoning already used ordering
+    // task-row badges), then planned chips, then projected repeats.
+    const ordered = [
+        ...entries.filter((entry) => entry.type === 'due'),
+        ...entries.filter((entry) => entry.type === 'planned'),
+        ...entries.filter((entry) => entry.type === 'projected')
+    ];
+
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button';
+    moreBtn.classList.add('calendarMoreBtn', 'hidden');
+    moreBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        playClickSound();
+        const isExpanded = cellEl.classList.toggle('expanded');
+        renderCalendarDayChips(chipList, moreBtn, ordered, isExpanded);
+    });
+    cellEl.appendChild(moreBtn);
+
+    renderCalendarDayChips(chipList, moreBtn, ordered, false);
+
+    if (entries.length === 0) {
+        cellEl.classList.add('empty');
+        cellEl.addEventListener('click', () => openCalendarQuickAdd(cell.date));
+    }
+
+    return cellEl;
+}
+
+function renderCalendarView() {
+    if (!calendarGrid) {
+        return;
+    }
+
+    const cells = calendarViewMode === 'month'
+        ? buildCalendarMonthMatrix(calendarAnchorDate.getFullYear(), calendarAnchorDate.getMonth())
+        : buildCalendarWeekRow(calendarAnchorDate);
+
+    updateCalendarLabel(cells);
+    calendarGrid.classList.toggle('calendarGridWeek', calendarViewMode === 'week');
+
+    const entriesByDay = buildCalendarEntriesByDay(cells);
+    calendarGrid.innerHTML = '';
+    cells.forEach((cell) => {
+        calendarGrid.appendChild(createCalendarDayCell(cell, entriesByDay));
     });
 }
 

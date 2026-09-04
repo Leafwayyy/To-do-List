@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>To-Do List</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
+    <link rel="stylesheet" href="style.css?v=20260904e">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <meta name="theme-color" content="#050225">
+    <style>
+        /* Kept inline (rather than in style.css) so it's self-contained. */
+        .authConsentRow {
+            display: flex;
+            align-items: flex-start;
+            gap: var(--space-2, 8px);
+            font-size: var(--text-sm, 12px);
+            line-height: 1.4;
+            color: rgba(243, 240, 234, 0.75);
+            cursor: pointer;
+        }
+        .authConsentRow input { margin-top: 3px; }
+        .authConsentRow a, .authGoogleConsentNote a { color: #b58bff; }
+        .authGoogleConsentNote {
+            font-size: var(--text-sm, 12px);
+            text-align: center;
+            color: rgba(243, 240, 234, 0.6);
+            margin: var(--space-2, 8px) 0 0;
+        }
+    </style>
+</head>
+<body class="authChecking">
+
+    <div class="authLoadingScreen" aria-hidden="true">
+        <div class="authGlow" aria-hidden="true"></div>
+        <div class="authSpinner"></div>
+    </div>
+
+    <div class="userBadge hidden">
+        <a class="groupNavLink" href="group/browse.html">Groups</a>
+        <button class="helpTourBtn" type="button" title="Restart the tutorial"><i class="fa-solid fa-question"></i> Tutorial</button>
+        <img class="userBadgeAvatar hidden" alt="">
+        <span class="userBadgeName"></span>
+        <button class="userSignOutBtn" type="button" title="Sign out">Sign out</button>
+    </div>
+
+    <!-- Dusty, the Brain Dump mascot - fixed bottom-right (see .brainDumpToggleBtn
+         in style.css). Kept as a standalone element, not inside .userBadge,
+         since position:fixed takes it out of document flow regardless; its
+         portrait/animations/hint are injected by brain-dump.js at startup. -->
+    <button class="brainDumpToggleBtn" type="button"></button>
+
+    <div class="viewTabs" role="tablist" aria-label="Dashboard view">
+        <button class="viewTab active" type="button" data-view="tasks" role="tab" aria-selected="true">Tasks</button>
+        <button class="viewTab" type="button" data-view="calendar" role="tab" aria-selected="false">Calendar</button>
+        <button class="viewTab" type="button" data-view="activity" role="tab" aria-selected="false">Activity</button>
+    </div>
+
+    <div class="container">
+        <div class="viewPanel" data-view-panel="tasks">
+            <section class="mainColumn">
+                <h1 class="title">To-Do List</h1>
+
+                <div class="motivatorContainer">
+
+                    <p class="motivatorText">Keep it up!</p>
+
+                    <div class="progressBarContainer">
+
+                        <div class="progressBar"></div>
+                    </div>
+
+                    <div class="taskAmountContainer">
+
+                        <p class="taskAmount">0/0</p>
+                    </div>
+
+                </div>
+
+                <div class="inputContainer">
+
+                    <input type="text" class="taskInput" placeholder="Type your task...">
+                    <button class="detailsToggleBtn" type="button" aria-expanded="false" aria-controls="taskDetailsPanel" title="Set priority, difficulty, effort, and deadline for smarter task order">
+                        Prioritize
+                    </button>
+                    <button class="addBtn" type="button" title="Add task" aria-label="Add task">
+
+                        <i class="fa-solid fa-plus"></i>
+
+                    </button>
+
+                </div>
+
+                <p class="quickAddHint hidden" aria-live="polite"></p>
+
+                <div class="onboardingHint hidden" role="note" aria-live="polite">
+                    <p class="onboardingHintText"><strong>Quick start:</strong> Add tasks, set matrix/difficulty/deadline, then use <strong>Sort once now</strong> or turn on <strong>Auto-sort list</strong> to always see what to do first.</p>
+                    <div class="onboardingActions">
+                        <button class="onboardingStartTourBtn" type="button">Start tutorial</button>
+                        <button class="onboardingDismissBtn" type="button">Dismiss</button>
+                    </div>
+                </div>
+
+                <div class="taskDetailsPanel" id="taskDetailsPanel">
+                    <p class="detailsHelp">Priority and difficulty help the app decide what should be done first.</p>
+                    <div class="detailsGrid detailsGridPrimary">
+                        <div class="detailsFieldGroup">
+                            <select class="matrixSelect" aria-label="Priority type">
+                                <option value="do">Task Matrix: Important &amp; Urgent</option>
+                                <option value="schedule" selected>Task Matrix: Important</option>
+                                <option value="delegate">Task Matrix: Urgent</option>
+                                <option value="eliminate">Task Matrix: None</option>
+                            </select>
+                            <p class="detailsFieldSubtitle">How urgent, how important</p>
+                        </div>
+
+                        <div class="detailsFieldGroup">
+                            <select class="difficultySelect" aria-label="Difficulty">
+                                <option value="1">Difficulty: 1 (Very Easy)</option>
+                                <option value="2">Difficulty: 2 (Easy)</option>
+                                <option value="3" selected>Difficulty: 3 (Medium)</option>
+                                <option value="4">Difficulty: 4 (Hard)</option>
+                                <option value="5">Difficulty: 5 (Very Hard)</option>
+                            </select>
+                            <p class="detailsFieldSubtitle">How hard this will be</p>
+                        </div>
+                    </div>
+
+                    <!-- Deadline is a third primary field, not behind More
+                         options - it drives sort order/urgency as directly as
+                         matrix and difficulty do (getPriorityScore, the
+                         overdue badge, Do This Next), so it gets the same
+                         always-visible treatment, just on its own row since
+                         its field (icon + label + input) is wider than a
+                         plain select. -->
+                    <div class="detailsFieldGroup detailsDeadlinePrimary">
+                        <div class="deadlineContainer">
+                            <span class="deadlineTag"><i class="fa-solid fa-calendar"></i> Deadline</span>
+                            <input type="datetime-local" class="deadlineInput" aria-label="Deadline" title="Set deadline date and time" placeholder="Set date and time">
+                        </div>
+                        <p class="detailsFieldSubtitle">When it's due</p>
+                    </div>
+
+                    <div class="deadlinePresets" aria-label="Quick deadline presets">
+                        <button class="deadlinePresetBtn" data-preset="hour2">In 2 hours</button>
+                        <button class="deadlinePresetBtn" data-preset="hour6">In 6 hours</button>
+                        <button class="deadlinePresetBtn" data-preset="eod">End of day</button>
+                        <button class="deadlinePresetBtn" data-preset="tomorrow">Tomorrow 9 AM</button>
+                        <button class="deadlinePresetBtn" data-preset="clear">No deadline</button>
+                    </div>
+
+                    <!-- Needs a deadline to repeat FROM (see addTaskFromInputs)
+                         - kept right next to it rather than behind More
+                         options, same "closely related fields stay together"
+                         reasoning as the deadline/schedule split. -->
+                    <div class="detailsFieldGroup detailsRecurrencePrimary">
+                        <select class="recurrenceSelect" aria-label="Repeat">
+                            <option value="">Does not repeat</option>
+                            <option value="daily">Repeats daily</option>
+                            <option value="weekly">Repeats weekly</option>
+                            <option value="monthly">Repeats monthly</option>
+                        </select>
+                    </div>
+
+                    <button type="button" class="detailsMoreToggleBtn" aria-expanded="false" aria-controls="detailsMoreOptions">
+                        <span>More options: estimate, schedule</span>
+                        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                    </button>
+
+                    <div class="detailsMoreOptions" id="detailsMoreOptions">
+                        <div class="detailsGrid">
+                            <div class="effortContainer">
+                                <div class="taskTypePills" aria-label="Time estimate optional">
+                                    <button type="button" class="typePill active" data-type="open" data-tip="No time estimate. Use this when you are not sure how long it will take.">No time estimate</button>
+                                    <button type="button" class="typePill" data-type="timeboxed" data-tip="Set an estimated time in minutes so planning is more accurate.">Estimate time</button>
+                                </div>
+                                <div class="durationWrap">
+                                    <input type="number" class="durationInput hidden" min="5" step="5" placeholder="Mins" aria-label="Estimated minutes">
+                                    <div class="durationChips">
+                                        <button type="button" class="durationChip" data-minutes="15">15m</button>
+                                        <button type="button" class="durationChip" data-minutes="30">30m</button>
+                                        <button type="button" class="durationChip" data-minutes="45">45m</button>
+                                        <button type="button" class="durationChip" data-minutes="60">60m</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="deadlineContainer scheduleContainer">
+                                <span class="deadlineTag scheduleTag"><i class="fa-solid fa-clock"></i> Schedule</span>
+                                <input type="datetime-local" class="deadlineInput scheduleInput" aria-label="Scheduled time" title="Set when you'll actually work on this" placeholder="When will you do this?">
+                            </div>
+                        </div>
+
+                        <div class="schedulePresets" aria-label="Quick schedule presets">
+                            <button class="deadlinePresetBtn schedulePresetBtn" data-preset="morning">This morning</button>
+                            <button class="deadlinePresetBtn schedulePresetBtn" data-preset="afternoon">This afternoon</button>
+                            <button class="deadlinePresetBtn schedulePresetBtn" data-preset="evening">This evening</button>
+                            <button class="deadlinePresetBtn schedulePresetBtn" data-preset="tomorrowMorning">Tomorrow morning</button>
+                            <button class="deadlinePresetBtn schedulePresetBtn" data-preset="clear">No schedule</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="urgencyAlert hidden" role="status" aria-live="polite">
+                    <p class="urgencyAlertText">No urgent deadlines right now.</p>
+                </div>
+
+                <div class="nextTaskPanel hidden" aria-live="polite">
+                    <p class="nextTaskLabel">Do This Next</p>
+                    <p class="nextTaskTitle">No recommendation yet.</p>
+                    <div class="nextTaskReasonWrap">
+                        <p class="nextTaskReasonLabel">Why this is first:</p>
+                        <ul class="nextTaskReasons"></ul>
+                    </div>
+                </div>
+
+                <div class="priorityControls">
+                    <div class="priorityHeaderRow">
+                        <label class="priorityToggleLabel" for="priorityToggle">
+                            <input type="checkbox" class="priorityToggle" id="priorityToggle">
+                            <span>Auto-sort list</span>
+                        </label>
+                        <button class="sortOnceBtn" type="button" title="Apply a one-time smart sort by urgency, priority, and effort">Sort once now</button>
+                        <!-- .alertToggleBtn/.metaVisibilityRow stay real static markup here (script.js
+                             wires them unconditionally at load) but are reparented into Settings by
+                             settings.js's buildOverlay, right after this - see the comment there. -->
+                        <button class="alertToggleBtn" type="button">Popup alerts: Off</button>
+                    </div>
+                    <label class="metaVisibilityRow" for="difficultyVisibilityToggle">
+                        <input type="checkbox" class="difficultyVisibilityToggle" id="difficultyVisibilityToggle" checked>
+                        <span>Show difficulty chip on tasks</span>
+                    </label>
+                    <p class="priorityModeHint">Manual mode: drag to reorder anytime.</p>
+                </div>
+
+                <p class="taskViewsLabel">Filter by deadline</p>
+                <div class="taskViews" aria-label="Task views">
+                    <button class="taskViewBtn active" data-view="all">All</button>
+                    <button class="taskViewBtn" data-view="focus">Focus Now</button>
+                    <button class="taskViewBtn" data-view="overdue" aria-label="Overdue">
+                        <span>Overdue</span>
+                        <span class="overdueCountBadge" aria-hidden="true">0</span>
+                    </button>
+                    <button class="taskViewBtn" data-view="today">Due Today</button>
+                    <button class="taskViewBtn" data-view="week">This Week</button>
+                    <button class="taskViewBtn" data-view="completed">Completed</button>
+                </div>
+
+                <ul class="tasks">
+
+
+
+                </ul>
+            </section>
+        </div>
+
+        <div class="viewPanel hidden" data-view-panel="activity">
+            <div class="activityPanel" aria-label="Daily activity chart">
+                <div class="activityHeader">
+                    <p class="activityTitle">Daily Activity</p>
+                    <p class="activitySummary">Today: 0 | This week: 0 | 0 active days in last 6 months</p>
+                </div>
+                <div class="activityGridWrap">
+                    <div class="activityMonthRow" aria-hidden="true"></div>
+                    <div class="activityBody">
+                        <div class="activityDayLabels" aria-hidden="true"></div>
+                        <div class="activityGrid" role="img" aria-label="Activity heatmap"></div>
+                    </div>
+                </div>
+                <div class="activityLegend">
+                    <span>Less</span>
+                    <span class="heatCell level-0"></span>
+                    <span class="heatCell level-1"></span>
+                    <span class="heatCell level-2"></span>
+                    <span class="heatCell level-3"></span>
+                    <span class="heatCell level-4"></span>
+                    <span>More</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Calendar: the same tasks already on your list, laid out by day.
+             .calendarDayCell is the one piece of markup driving both the
+             desktop month/week grid and the mobile single-column agenda -
+             which layout it becomes is pure CSS (see style.css), so there's
+             one render path, not two. -->
+        <div class="viewPanel hidden" data-view-panel="calendar">
+            <div class="calendarPanel" aria-label="Task calendar">
+                <div class="calendarHeader">
+                    <div class="calendarNav">
+                        <button type="button" class="calendarPrevBtn" aria-label="Previous"><i class="fa-solid fa-chevron-left"></i></button>
+                        <p class="calendarLabel"></p>
+                        <button type="button" class="calendarNextBtn" aria-label="Next"><i class="fa-solid fa-chevron-right"></i></button>
+                    </div>
+                    <div class="calendarControls">
+                        <button type="button" class="calendarTodayBtn">Today</button>
+                        <div class="calendarModeToggle" role="tablist" aria-label="Calendar layout">
+                            <button type="button" class="calendarModeBtn active" data-mode="month" role="tab" aria-selected="true">Month</button>
+                            <button type="button" class="calendarModeBtn" data-mode="week" role="tab" aria-selected="false">Week</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="calendarWeekdayRow" aria-hidden="true">
+                    <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                </div>
+                <div class="calendarGrid"></div>
+                <p class="calendarLegendHint">Solid = due, clock = planned work time, dashed = a future repeat.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="activityDetailsOverlay hidden" aria-hidden="true">
+        <div class="activityDetailsCard" role="dialog" aria-modal="true" aria-label="Completed tasks on selected day">
+            <div class="activityDetailsHeader">
+                <h3 class="activityDetailsTitle">Completed on this day</h3>
+                <button class="activityDetailsCloseBtn" type="button" aria-label="Close activity details">Close</button>
+            </div>
+            <p class="activityDetailsMeta">0 completed tasks</p>
+            <ul class="activityDetailsList"></ul>
+        </div>
+    </div>
+
+    <div class="undoToast hidden" role="status" aria-live="polite">
+        <p class="undoToastText">Task deleted.</p>
+        <button class="undoDeleteBtn" type="button">Undo</button>
+    </div>
+
+    <div class="tourOverlay hidden" aria-hidden="true">
+        <div class="tourCurtain tourCurtainTop"></div>
+        <div class="tourCurtain tourCurtainBottom"></div>
+        <div class="tourCurtain tourCurtainLeft"></div>
+        <div class="tourCurtain tourCurtainRight"></div>
+        <div class="tourCard" role="dialog" aria-modal="true" aria-label="Tutorial with Dusty">
+            <div class="tourHeader">
+                <div class="tourDustyAvatar"></div>
+                <div class="tourHeaderText">
+                    <p class="tourDustyName">Dusty</p>
+                    <p class="tourStepLabel">Step 1 of 4</p>
+                </div>
+            </div>
+            <h3 class="tourTitle">Welcome</h3>
+            <p class="tourText">This tutorial shows exactly what to do.</p>
+            <p class="tourActionHint hidden">Go ahead, try it yourself.</p>
+            <p class="tourActionConfirmed hidden"><i class="fa-solid fa-check"></i> Nice, that's it. Tap Next whenever you're ready.</p>
+            <div class="tourActions">
+                <button class="tourSkipBtn" type="button">Skip</button>
+                <button class="tourNextBtn" type="button">Next</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="rewardOverlay hidden" aria-hidden="true">
+        <div class="rewardCard" role="dialog" aria-modal="true" aria-label="Milestone reached">
+            <div class="confettiField" aria-hidden="true"></div>
+            <p class="rewardKicker">Nice work!</p>
+            <h3 class="rewardTitle">Milestone reached</h3>
+
+            <div class="rewardReelViewport">
+                <div class="rewardReelTrack"></div>
+                <div class="rewardReelPointer" aria-hidden="true"></div>
+            </div>
+
+            <div class="rewardResult">
+                <p class="rewardSuggestionLabel">Treat yourself:</p>
+                <p class="rewardSuggestionText">Take a short break</p>
+            </div>
+
+            <button class="rewardCloseBtn" type="button">Nice!</button>
+        </div>
+    </div>
+
+    <div class="authOverlay">
+        <div class="authGlow" aria-hidden="true"></div>
+
+        <div class="authBrand">
+            <span class="authLogo"><i class="fa-solid fa-list-check"></i></span>
+            <h1 class="authBrandTitle">To-Do List</h1>
+        </div>
+
+        <div class="authCardWrap">
+            <div class="authCard" role="dialog" aria-modal="true" aria-label="Sign in">
+                <form class="authEmailForm">
+                    <input type="email" class="authEmailInput" placeholder="Email" autocomplete="email" required>
+                    <div class="authPasswordWrap">
+                        <input type="password" class="authPasswordInput" placeholder="Password" autocomplete="current-password" required>
+                        <button type="button" class="authPasswordToggleBtn" aria-label="Show password" title="Show password">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="authPasswordStrength hidden" aria-live="polite">
+                        <div class="authPasswordStrengthBar"><span class="authPasswordStrengthFill"></span></div>
+                        <p class="authPasswordStrengthLabel"></p>
+                    </div>
+                    <button type="button" class="authForgotPasswordBtn">Forgot password?</button>
+                    <label class="authConsentRow hidden">
+                        <input type="checkbox" class="authConsentCheckbox">
+                        <span>I agree to the <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a> and <a href="terms.html" target="_blank" rel="noopener">Terms of Service</a></span>
+                    </label>
+                    <p class="authErrorText hidden"></p>
+                    <p class="authInfoText hidden"></p>
+                    <button type="submit" class="authSubmitBtn">Sign in</button>
+                </form>
+
+                <div class="authDivider"><span>or</span></div>
+
+                <button class="authGoogleBtn" type="button">
+                    <i class="fa-brands fa-google"></i> Continue with Google
+                </button>
+                <p class="authGoogleConsentNote">By continuing you agree to the <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a> and <a href="terms.html" target="_blank" rel="noopener">Terms of Service</a>.</p>
+
+                <p class="authModeRow"><span class="authModeLeadText">No account yet?</span> <button type="button" class="authModeToggleBtn">Sign up</button></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="task-shared.js?v=20260904f"></script>
+    <script src="brain-dump.js?v=20260904b"></script>
+    <script src="auth-gate.js?v=20260830a"></script>
+    <script src="script.js?v=20260904f"></script>
+    <script type="module" src="firebase-init.js?v=20260831a"></script>
+    <script src="settings.js?v=20260903b"></script>
+
+
+</body>
+</html>

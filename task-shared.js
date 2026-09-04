@@ -667,6 +667,31 @@ function getDateKey(date) {
     return `${year}-${month}-${day}`;
 }
 
+// A 6x7 (always 42 cells) month grid, Sunday-first, for the calendar view -
+// shared between solo and group (see task-shared.js's module comment at the
+// top of the file) so group's later calendar reuses this unchanged rather
+// than duplicating the date math. 6 weeks is a fixed size (not "however
+// many weeks this month needs") specifically so every month renders the
+// same grid height - a 4-week February next to a 6-week October would
+// otherwise make the tab jump size every time you navigate, which reads as
+// broken far more than a little dead space at the end of a short month.
+// inMonth marks whether a cell's date actually belongs to the requested
+// month (false for the leading/trailing days from the months on either
+// side, shown dimmed so the grid stays a clean rectangle).
+function buildCalendarMonthMatrix(year, month) {
+    const firstOfMonth = new Date(year, month, 1);
+    const gridStart = new Date(firstOfMonth);
+    gridStart.setDate(firstOfMonth.getDate() - firstOfMonth.getDay());
+
+    const cells = [];
+    for (let i = 0; i < 42; i += 1) {
+        const date = new Date(gridStart);
+        date.setDate(gridStart.getDate() + i);
+        cells.push({ date, inMonth: date.getMonth() === month });
+    }
+    return cells;
+}
+
 // Sound effects - shared by solo and group so both play the exact same
 // clips. task-shared.js is always the same physical file at the repo root
 // regardless of whether the page loading it is at the root (index.html) or
