@@ -660,13 +660,24 @@ function commitAiTasksSolo(draftTasks) {
 // commitComments/commitAiSuggestionsGroup in group.js - a draft naming a
 // taskId that no longer exists (deleted mid-conversation, say) is just
 // skipped, not force-created or errored.
+// Real bug found by actually executing this against a fake task list (not
+// just reading it): when draft.taskId didn't match any real task,
+// findTaskById returned undefined and the forEach below just silently
+// `return`ed for that one draft - no error, no throw. The caller
+// (brain-dump.js's applyOneBtn/bulk-apply handlers) only shows "Applied"
+// vs. an error based on whether commitTaskEdits THREW, so a stale/
+// mismatched id (a task deleted or already changed since Dusty's context
+// snapshot was taken, or a genuine model slip) silently did nothing while
+// the UI confidently said "Applied" - exactly the "Dusty said it changed
+// the deadline and it didn't" report. Fix: report a real per-draft outcome
+// instead of a bare undefined return, so the UI can tell the difference.
 function commitAiTaskEditsSolo(draftEdits) {
     let anyCompletionChanged = false;
 
-    draftEdits.forEach((draft) => {
+    const results = draftEdits.map((draft) => {
         const task = findTaskById(draft.taskId);
         if (!task) {
-            return;
+            return { taskId: draft.taskId, applied: false, reason: "Couldn't find that task - it may have been deleted or already changed." };
         }
 
         if (Object.prototype.hasOwnProperty.call(draft, 'matrix') && draft.matrix) {
@@ -691,6 +702,7 @@ function commitAiTaskEditsSolo(draftEdits) {
             anyCompletionChanged = true;
         }
         task.updatedAt = new Date().toISOString();
+        return { taskId: draft.taskId, applied: true };
     });
 
     applyOrdering();
@@ -701,6 +713,7 @@ function commitAiTaskEditsSolo(draftEdits) {
         renderActivityHeatmap();
     }
     saveTasks();
+    return results;
 }
 
 function openCalendar() {

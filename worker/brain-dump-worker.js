@@ -89,7 +89,9 @@ THE HARD RULE: only propose an edit for a task that is unambiguously identifiabl
 
 Only include the specific field(s) actually changing in each taskEdits item - never restate a field that isn't part of what the user asked to change. To explicitly clear a deadline or schedule, set that field to null; to leave a field untouched, omit it from the item entirely.
 
-For each taskEdits item: taskId (the EXACT id string from the list below), taskPreview (a short quote/paraphrase of the task's current text, just so the human reviewing your draft can tell which task you mean), then only whichever of matrix/difficulty/dueAt/scheduledAt/completed are actually changing.`;
+For each taskEdits item: taskId (the EXACT id string from the list below), taskPreview (a short quote/paraphrase of the task's current text, just so the human reviewing your draft can tell which task you mean), then only whichever of matrix/difficulty/dueAt/scheduledAt/completed are actually changing.
+
+Like every other proposal in this app, a taskEdits item is a DRAFT the user still has to confirm below, not something already applied the moment you reply - if "reply" claims a change already happened ("I've pushed it to Friday") but the confirm step never happens, the task genuinely never changes and that's a real, confusing gap. Word "reply" so it stays accurate either way: fine to be brief and natural ("Pushed it to Friday - confirm below and it's set" or similar), just don't state it as a completed fact.`;
 
 // Appended only when a group is actually the currently-open one (see
 // buildGeminiRequest) - keeps the base prompt shorter, and the model's

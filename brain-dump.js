@@ -1256,13 +1256,35 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             header.appendChild(appliedLabel);
         };
 
+        // Real bug this addresses: commitTaskEdits resolving without
+        // throwing was being treated as "it worked" - but a taskId that no
+        // longer matches a real task (deleted, or already changed since
+        // Dusty's context snapshot) used to silently no-op while this card
+        // still said "Applied". commitAiTaskEditsSolo/Group now return a
+        // real per-draft outcome instead of a bare undefined, so this can
+        // actually tell the difference and say so.
+        const markFailed = (reason) => {
+            applyOneBtn.disabled = false;
+            applyOneBtn.textContent = 'Try again';
+            const failedLabel = document.createElement('span');
+            failedLabel.classList.add('brainDumpTaskCardFailedLabel');
+            failedLabel.textContent = reason || "Couldn't apply this - try again.";
+            header.appendChild(failedLabel);
+        };
+
         applyOneBtn.addEventListener('click', async () => {
             const draftNow = read();
             applyOneBtn.disabled = true;
             applyOneBtn.textContent = 'Applying...';
+            header.querySelector('.brainDumpTaskCardFailedLabel')?.remove();
             try {
-                await commitTaskEdits([draftNow]);
-                markApplied();
+                const result = await commitTaskEdits([draftNow]);
+                const outcome = Array.isArray(result) ? result.find((r) => r && r.taskId === draftNow.taskId) : null;
+                if (outcome && outcome.applied === false) {
+                    markFailed(outcome.reason);
+                } else {
+                    markApplied();
+                }
             } catch (error) {
                 console.error('Failed to apply brain-dump task edit:', error);
                 applyOneBtn.disabled = false;
@@ -1348,11 +1370,27 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             bulkBtn.disabled = true;
             bulkBtn.textContent = 'Sending...';
             try {
-                await commit(confirmed);
+                const result = await commit(confirmed);
                 section.innerHTML = '';
                 const done = document.createElement('p');
                 done.classList.add('brainDumpTaskReviewDone');
-                done.textContent = confirmed.length === 1 ? `${doneLabel} 1.` : `${doneLabel} ${confirmed.length}.`;
+                // Only task-edit commits (commitAiTaskEditsSolo/Group) return
+                // this per-draft {taskId, applied} shape - every other review
+                // type's commit function returns nothing meaningful, so this
+                // falls through to the original message unchanged for those.
+                // Real bug this fixes: a not-found taskId used to resolve
+                // without throwing, so this said "Updated N" even when
+                // nothing actually changed.
+                const failed = Array.isArray(result) ? result.filter((r) => r && r.applied === false) : [];
+                if (failed.length > 0) {
+                    const succeededCount = confirmed.length - failed.length;
+                    const reason = failed[0].reason || "couldn't be applied";
+                    done.textContent = succeededCount > 0
+                        ? `Updated ${succeededCount} of ${confirmed.length} - ${failed.length} ${failed.length === 1 ? 'was' : 'were'} skipped (${reason})`
+                        : `Nothing changed - ${reason}`;
+                } else {
+                    done.textContent = confirmed.length === 1 ? `${doneLabel} 1.` : `${doneLabel} ${confirmed.length}.`;
+                }
                 section.appendChild(done);
                 scrollToBottom();
             } catch (error) {

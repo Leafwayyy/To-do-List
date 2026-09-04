@@ -5528,6 +5528,18 @@ body.authGateActive .authOverlay{
     white-space: nowrap;
 }
 
+/* Shown instead of .brainDumpTaskCardAddedLabel when commitTaskEdits
+   reports a draft actually failed to apply (see createTaskEditReviewCard) -
+   e.g. a taskId that no longer matches a real task. Stays next to a
+   re-enabled "Try again" button, unlike the success label which replaces
+   the button entirely. */
+.brainDumpTaskCardFailedLabel{
+    font-size: 10px;
+    font-weight: 700;
+    color: #ff9d9d;
+    white-space: normal;
+}
+
 /* Marks a memory proposal as 'context' (a current situation, not a
    durable trait) - see createMemoryReviewCard. Only ever shown for
    context-type drafts, never for the default preference type, so its

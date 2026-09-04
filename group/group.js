@@ -4153,6 +4153,12 @@ async function commitAiCommentsGroup(drafts) {
 // ownerId is re-checked here too, so even a misbehaving or confused
 // proposal can never edit a teammate's task, regardless of what the model
 // output actually said.
+// Same real bug as solo's commitAiTaskEditsSolo, verified the same way:
+// a not-found or not-your-task draft used to just console.error + continue
+// with no way for the caller to tell - commitTaskEdits still resolved
+// normally, so the review card showed "Applied" even though nothing was
+// written. Now returns a per-draft outcome so brain-dump.js's UI can show
+// what actually happened instead of assuming success from "didn't throw".
 async function commitAiTaskEditsGroup(drafts) {
     const group = getSelectedGroup();
     if (!group || !currentUser) {
@@ -4160,6 +4166,7 @@ async function commitAiTaskEditsGroup(drafts) {
     }
 
     const { doc, updateDoc } = fs();
+    const results = [];
 
     for (const draft of drafts) {
         if (!draft.taskId) {
@@ -4168,10 +4175,12 @@ async function commitAiTaskEditsGroup(drafts) {
         const realTask = groupTasks.find((task) => task.id === draft.taskId);
         if (!realTask) {
             console.error(`Brain Dump: could not find task "${draft.taskId}" for an edit - skipped.`);
+            results.push({ taskId: draft.taskId, applied: false, reason: "Couldn't find that task - it may have been deleted or already changed." });
             continue;
         }
         if (realTask.ownerId !== currentUser.uid) {
             console.error(`Brain Dump: task "${draft.taskId}" does not belong to the current user - skipped.`);
+            results.push({ taskId: draft.taskId, applied: false, reason: "That task belongs to a teammate - you can only edit your own tasks." });
             continue;
         }
 
@@ -4230,7 +4239,11 @@ async function commitAiTaskEditsGroup(drafts) {
                 console.error('Failed to log completion history:', error);
             });
         }
+
+        results.push({ taskId: draft.taskId, applied: true });
     }
+
+    return results;
 }
 
 const brainDumpController = createBrainDumpController({
