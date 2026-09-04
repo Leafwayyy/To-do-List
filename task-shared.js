@@ -790,16 +790,20 @@ function startRewardReelTicking(track, tileStepPx) {
 // "quick start" hint card so it doesn't sit underneath/behind the modal
 // for the whole tour.
 //
-// action (optional): { event: 'click' | 'change' } - makes a step genuinely
-// interactive instead of a slideshow. The Next button still always works
-// (never taken away - a real fallback for anyone who can't or doesn't want
-// to perform the exact action), but doing the real thing on the real
-// element - clicking it, changing it - is what the step is actually
-// asking for, and doing it gives a brief "Nice, that's it" confirmation
-// before moving on, rather than silently jumping ahead. Only steps whose
-// action is low-friction and non-destructive/non-navigating ever set this
-// (see TOUR_STEPS/GROUP_TOUR_STEPS for which) - anything that would
-// change a real setting or navigate away stays informational-only.
+// action (optional): { event: 'click' | 'change' | 'input', validate?(target) }
+// - makes a step genuinely interactive instead of a slideshow. The Next
+// button still always works (never taken away - a real fallback for anyone
+// who can't or doesn't want to perform the exact action), but doing the
+// real thing on the real element - clicking it, changing it, typing into
+// it - is what the step is actually asking for, and doing it gives a brief
+// "Nice, that's it" confirmation before moving on, rather than silently
+// jumping ahead. validate, when given, is checked every time the event
+// fires and the step keeps waiting until it returns true - e.g. an
+// 'input' step requiring real non-whitespace text, not just an empty
+// keystroke. Only steps whose action is low-friction and non-destructive/
+// non-navigating ever set this (see TOUR_STEPS/GROUP_TOUR_STEPS for which)
+// - anything that would change a real setting or navigate away stays
+// informational-only.
 function createTourController({ steps, storageKey, onEnd, onStart }) {
     const tourOverlay = document.querySelector('.tourOverlay');
     const tourCard = document.querySelector('.tourCard');
@@ -877,10 +881,10 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
         tourActionHint?.classList.remove('hidden');
 
         const eventName = step.action.event || 'click';
-        // The last step's action (tapping Dusty herself) opens the real
+        // The last step's action (tapping Dusty himself) opens the real
         // chat panel underneath - that overlay sits at a lower z-index
         // than the tour's own darkened backdrop, so lingering on the usual
-        // confirmation pause here would visibly dim the chat she just
+        // confirmation pause here would visibly dim the chat he just
         // opened for most of a second. Ending almost immediately instead
         // means the tour gets out of the way right as the real thing takes
         // over, rather than the confirmation flash competing with it.
@@ -888,6 +892,14 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
         let fired = false;
         const handler = () => {
             if (fired) {
+                return;
+            }
+            // Some actions (typing real text, not just any keystroke) need
+            // more than "the event fired" - step.action.validate lets a
+            // step check the target's actual state and keep waiting until
+            // it's genuinely met, e.g. the add-a-task step requires real
+            // non-whitespace text, not just an empty input event.
+            if (step.action.validate && !step.action.validate(target)) {
                 return;
             }
             fired = true;

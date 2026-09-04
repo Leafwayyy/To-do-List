@@ -748,7 +748,7 @@ export default {
                 return jsonResponse(
                     {
                         error: 'busy',
-                        reply: "Dusty's hit her shared daily message limit - try again later.",
+                        reply: "Dusty's hit his shared daily message limit - try again later.",
                         resetsAt: getNextQuotaResetIso(),
                         rateLimit: rateLimitSnapshot(rateLimitState)
                     },

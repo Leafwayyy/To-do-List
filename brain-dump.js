@@ -690,7 +690,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         scrollToBottom();
     }
 
-    // Small Dusty portrait shown next to each of her own messages, so the
+    // Small Dusty portrait shown next to each of his own messages, so the
     // conversation visibly reads as chatting with a character rather than
     // a bare utility - not used for the user's own bubbles or system-y
     // error bubbles, only Dusty's actual replies/typing indicator.
@@ -721,7 +721,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     }
 
     // Tappable, one-tap version of whatever multiple-choice-style question
-    // Dusty just asked in her reply (see the Worker's STEP 3 quickReplies
+    // Dusty just asked in his reply (see the Worker's STEP 3 quickReplies
     // rule) - tapping one drops it into the input, still editable, rather
     // than sending it outright, so a slightly-off option can be tweaked
     // before it's actually sent. The whole set removes itself once any one
@@ -814,7 +814,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
                 if (data.error === 'rate_limited') {
                     return `You've used up this session's message budget. It resets around ${resetLabel} your time.`;
                 }
-                return `Dusty's hit her shared daily message limit. She should be back around ${resetLabel} your time.`;
+                return `Dusty's hit his shared daily message limit. He should be back around ${resetLabel} your time.`;
             }
         }
         return (data && data.reply) || 'Something went wrong - try again in a bit.';
@@ -2090,7 +2090,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     // Plain, general greetings - no memory content quoted (tried that,
     // read as a flat, clinical readout no matter how it was phrased, plus
     // duplicated what the static header text already said). Just a warm
-    // hello and a reminder of what she can help with, varied each time.
+    // hello and a reminder of what he can help with, varied each time.
     const WELCOME_BACK_GREETINGS = [
         "Hey! I'm Dusty. Tell me what's going on and I'll help turn it into tasks.",
         "Welcome back! Whenever you're ready, just tell me what's on your mind.",

@@ -139,57 +139,71 @@ const GLOBAL_REMINDER_GAP_MS = 8 * 60 * 1000;
 const MOBILE_LAYOUT_QUERY = window.matchMedia('(max-width: 900px)');
 const UNDO_DELETE_TIMEOUT_MS = 6000;
 
-// Hosted by Dusty now, speaking directly in first person throughout, per
-// direct request - and deliberately walked field by field through
-// Prioritize instead of summarizing it in one line, same reasoning. Commas
-// only, never a hyphen as punctuation, also per direct request (a plain
-// hyphen inside an actual word, like "one-time", is still fine).
-// action-gated steps (see createTourController) are limited to low-
-// friction, non-destructive, non-navigating interactions - changing a
-// select, opening a toggle - never something that changes a real setting
-// (auto-sort) or leaves the page (the Group link).
+// Hosted by Dusty now, speaking to you directly in first and second person
+// throughout, per direct request - he introduces himself up front, then
+// walks you field by field through Prioritize instead of summarizing it in
+// one line. Commas only, never a hyphen as punctuation (a plain hyphen
+// inside an actual word, like "one-time", is still fine).
+// Nearly every step is action-gated (see createTourController) - you type,
+// click, or change the real thing yourself rather than just reading about
+// it, and the whole run culminates in a real task you actually build and
+// add along the way, field by field, then ends with you meeting Dusty for
+// real. The only steps left informational are ones whose "action" would
+// change a real setting (auto-sort) or leave the page (the Group link) -
+// those stay low-friction and non-destructive per the same rule everywhere
+// else in this file.
 const TOUR_STEPS = [
     {
+        selector: '.brainDumpToggleBtn',
+        title: 'Hi, I\'m Dusty',
+        text: 'Hey, I\'m Dusty, nice to meet you. I\'ll be your guide today, and this won\'t just be me talking at you, you\'ll actually try everything yourself as we go. By the time we\'re done, you\'ll already have a real task on your list, built by you, and you\'ll have met me for real too. Ready? Let\'s go.'
+    },
+    {
         selector: '.inputContainer',
-        title: 'Add a task quickly',
-        text: 'Type your task right here, then press + or Enter to add it. Try typing a time too, like tomorrow 3pm, I\'ll pick it up automatically.',
+        title: 'Let\'s add your first task',
+        text: 'Go ahead, type something you actually need to do, right here. Don\'t worry about the details yet, I\'ll help you with those next. Try typing a time too, like tomorrow 3pm, I\'ll pick it up automatically.',
+        action: { event: 'input', validate: (target) => (target.querySelector('.taskInput')?.value.trim() || '') !== '' },
         beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.viewTabs',
         title: 'Tasks and Activity',
-        text: 'Everything you\'re working on lives under Tasks. Switch over to Activity any time you want to see your completion history.',
+        text: 'Everything you\'re working on lives under Tasks, that\'s where we\'ll stay for now. Go ahead, tap over to Activity and back, that\'s where your completion history lives whenever you want it.',
+        action: { event: 'click' },
         beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.detailsToggleBtn',
         title: 'Let\'s open Prioritize',
-        text: 'Tap Prioritize, and I\'ll show you everything that helps me figure out what matters most.',
+        text: 'Now tap Prioritize, and I\'ll show you everything that helps me figure out what matters most for you.',
         action: { event: 'click' },
         beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.matrixSelect',
         title: 'Matrix',
-        text: 'This is matrix, how urgent something is and how important it is. It\'s the biggest single thing I weigh when deciding what should come first.',
+        text: 'This is matrix, how urgent something is and how important it is. It\'s the biggest single thing I weigh when deciding what should come first for you. Go ahead, pick whichever fits your task.',
+        action: { event: 'change' },
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
     {
         selector: '.difficultySelect',
         title: 'Difficulty',
-        text: 'Difficulty is just your own honest guess, from very easy to very hard. It helps me tell the difference between something quick and something that actually needs real effort.',
+        text: 'Difficulty is just your own honest guess, from very easy to very hard. It helps me tell the difference between something quick and something that actually needs real effort. Try picking one now.',
+        action: { event: 'change' },
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
     {
         selector: '.deadlineContainer',
         title: 'Deadline',
-        text: 'Deadline is simply when something is due. Set it here, and I\'ll factor it into everything, sorting, reminders, all of it.',
+        text: 'Deadline is simply when something is due. Tap here, and I\'ll factor whatever you set into everything, sorting, reminders, all of it.',
+        action: { event: 'click' },
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
     {
         selector: '.recurrenceSelect',
         title: 'Repeat',
-        text: 'If something happens again and again, watering plants daily, rent every month, set it to repeat here. I\'ll bring it back for you automatically once it\'s done.',
+        text: 'If something happens again and again, watering plants daily, rent every month, set it to repeat here. I\'ll bring it back for you automatically once it\'s done. Give it a try.',
         action: { event: 'change' },
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
@@ -203,25 +217,34 @@ const TOUR_STEPS = [
     {
         selector: '.effortContainer',
         title: 'Estimate',
-        text: 'Give me a rough time estimate if you have one. It helps me tell you honestly whether your day is actually realistic, not just busy.',
+        text: 'Give me a rough time estimate if you have one, tap one of the quick options here. It helps me tell you honestly whether your day is actually realistic, not just busy.',
+        action: { event: 'click' },
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); setDetailsMoreOptionsOpen(true); }
     },
     {
         selector: '.scheduleContainer',
         title: 'Schedule',
-        text: 'Schedule is different from deadline, it\'s when you actually plan to sit down and work on it, not when it\'s due. Both are optional, and they don\'t have to match.',
+        text: 'Schedule is different from deadline, it\'s when you actually plan to sit down and work on it, not when it\'s due. Both are optional, and they don\'t have to match. Tap here to set one.',
+        action: { event: 'click' },
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); setDetailsMoreOptionsOpen(true); }
+    },
+    {
+        selector: '.addBtn',
+        title: 'Now, add it for real',
+        text: 'You\'ve set it up exactly how you want it. Go ahead, tap + and let\'s actually put this task on your list.',
+        action: { event: 'click' },
+        beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.priorityControls',
         title: 'Choose sorting mode',
-        text: 'Auto-sort keeps your list ranked for you at all times. Sort once just gives you a one-time smart order instead, then leaves it alone.',
+        text: 'Nice, that\'s really on your list now. Auto-sort keeps your list ranked for you at all times. Sort once just gives you a one-time smart order instead, then leaves it alone. Pick whichever fits how you like to work.',
         beforeShow: () => switchSoloView('tasks')
     },
     {
         selector: '.taskViews',
         title: 'Switch views',
-        text: 'Jump straight to what\'s overdue, due today, due this week, or already done. Go ahead and try one, I\'ll actually filter the list for you.',
+        text: 'Jump straight to what\'s overdue, due today, due this week, or already done. Go ahead and try one, you should even see the task you just added.',
         action: { event: 'click' },
         beforeShow: () => switchSoloView('tasks')
     },
@@ -229,6 +252,7 @@ const TOUR_STEPS = [
         selector: '.activityPanel',
         title: 'Track completed work',
         text: 'Tap any day in Daily Activity, and I\'ll show you exactly what you finished that day.',
+        action: { event: 'click' },
         beforeShow: () => switchSoloView('activity')
     },
     {
@@ -239,8 +263,8 @@ const TOUR_STEPS = [
     },
     {
         selector: '.brainDumpToggleBtn',
-        title: 'And that\'s me',
-        text: 'I\'m Dusty. Tell me what\'s on your mind, text, or a photo, or a file, and I\'ll turn it into real tasks for you to check over. I can edit tasks you already have too, and if you\'re ever not sure what to focus on, just ask me, I\'ll answer with your real numbers, not a guess. Go ahead, tap me, let\'s try it.',
+        title: 'Now, come say hi',
+        text: 'That\'s everything, and now it\'s your turn to actually meet me. Tap me, and let\'s talk for real, text me, or send a photo or a file, and I\'ll turn it into real tasks for you to check over. I can edit tasks you already have too, and if you\'re ever not sure what to focus on, just ask me, I\'ll answer with your real numbers, not a guess.',
         action: { event: 'click' },
         beforeShow: () => switchSoloView('tasks')
     }

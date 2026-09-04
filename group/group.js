@@ -4516,52 +4516,65 @@ if (yourNameSaveBtn && yourNameInput) {
 const GROUP_WELCOME_KEY = 'todoGroupWelcomeSeenV1';
 const GROUP_COACH_KEY = 'todoGroupCoachV1';
 
-// Hosted by Dusty now, first person throughout, walked field by field
-// through Prioritize instead of one summary line, same reasoning and same
-// action-gating rules as solo's TOUR_STEPS (script.js) - commas only,
-// never a hyphen as punctuation.
+// Hosted by Dusty now, speaking to you directly in first and second person
+// throughout, same reasoning and same action-gating rules as solo's
+// TOUR_STEPS (script.js) - he introduces himself up front, nearly every
+// step is action-gated so you actually try the real thing rather than just
+// reading about it, the whole run culminates in a real task you build and
+// add along the way, and it ends with you meeting Dusty for real. Commas
+// only, never a hyphen as punctuation.
 const GROUP_TOUR_STEPS = [
     {
+        selector: '.brainDumpToggleBtn',
+        title: 'Hi, I\'m Dusty',
+        text: 'Hey, I\'m Dusty, nice to meet you. I\'ll be your guide to this group, and this won\'t just be me talking at you, you\'ll actually try everything yourself as we go. By the time we\'re done, you\'ll already have a real task on the list, built by you, and you\'ll have met me for real too. Ready? Let\'s go.'
+    },
+    {
         selector: '.inputContainer',
-        title: 'Add a task',
-        text: 'Add your own tasks here, same as solo, matrix, difficulty, deadline, and repeat all carry over.',
+        title: 'Let\'s add your first task',
+        text: 'Go ahead, type something you or the team needs done, right here. Don\'t worry about the details yet, I\'ll help you with those next, matrix, difficulty, deadline, and repeat all carry over from solo.',
+        action: { event: 'input', validate: (target) => (target.querySelector('.taskInput')?.value.trim() || '') !== '' },
         beforeShow: () => switchGroupView('tasks')
     },
     {
         selector: '.viewTabs',
         title: 'Four places, one job each',
-        text: 'Tasks is where you work. Team shows everyone and their roles. Leaderboard ranks completions. Activity is a running log of what just got finished.',
+        text: 'Tasks is where you work, that\'s where we\'ll stay for now. Go ahead, tap through Team, Leaderboard, and Activity and back, everyone\'s roles, rankings, and finished work all live there whenever you want them.',
+        action: { event: 'click' },
         beforeShow: () => switchGroupView('tasks')
     },
     {
         selector: '.detailsToggleBtn',
         title: 'Let\'s open Prioritize',
-        text: 'Tap Prioritize, and I\'ll show you everything that helps me figure out what matters most for a new task.',
+        text: 'Now tap Prioritize, and I\'ll show you everything that helps me figure out what matters most for a new task.',
         action: { event: 'click' },
         beforeShow: () => switchGroupView('tasks')
     },
     {
         selector: '.matrixSelect',
         title: 'Matrix',
-        text: 'This is matrix, how urgent something is and how important it is. It\'s the biggest single thing I weigh when deciding what should come first.',
+        text: 'This is matrix, how urgent something is and how important it is. It\'s the biggest single thing I weigh when deciding what should come first. Go ahead, pick whichever fits your task.',
+        action: { event: 'change' },
         beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); }
     },
     {
         selector: '.difficultySelect',
         title: 'Difficulty',
-        text: 'Difficulty is just your own honest guess, from very easy to very hard. It helps me tell the difference between something quick and something that actually needs real effort.',
+        text: 'Difficulty is just your own honest guess, from very easy to very hard. It helps me tell the difference between something quick and something that actually needs real effort. Try picking one now.',
+        action: { event: 'change' },
         beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); }
     },
     {
         selector: '.deadlineContainer',
         title: 'Deadline',
-        text: 'Deadline is simply when something is due. Set it here, and I\'ll factor it into everything, sorting, alerts, all of it.',
+        text: 'Deadline is simply when something is due. Tap here, and I\'ll factor whatever you set into everything, sorting, alerts, all of it.',
+        action: { event: 'click' },
         beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); }
     },
     {
         selector: '.recurrenceSelect',
         title: 'Repeat',
-        text: 'If something happens again and again, taking out the trash weekly, rent every month, set it to repeat here. I\'ll bring it back automatically once it\'s done.',
+        text: 'If something happens again and again, taking out the trash weekly, rent every month, set it to repeat here. I\'ll bring it back automatically once it\'s done. Give it a try.',
         action: { event: 'change' },
         beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); }
     },
@@ -4575,19 +4588,28 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.effortContainer',
         title: 'Estimate',
-        text: 'Give me a rough time estimate if you have one. It helps me tell you honestly whether the team\'s day is actually realistic, not just busy.',
+        text: 'Give me a rough time estimate if you have one, tap one of the quick options here. It helps me tell you honestly whether the team\'s day is actually realistic, not just busy.',
+        action: { event: 'click' },
         beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); detailsMoreOptions?.classList.add('open'); }
     },
     {
         selector: '.scheduleContainer',
         title: 'Schedule',
-        text: 'Schedule is different from deadline, it\'s when you actually plan to sit down and work on it, not when it\'s due. Both are optional, and they don\'t have to match.',
+        text: 'Schedule is different from deadline, it\'s when you actually plan to sit down and work on it, not when it\'s due. Both are optional, and they don\'t have to match. Tap here to set one.',
+        action: { event: 'click' },
         beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); detailsMoreOptions?.classList.add('open'); }
+    },
+    {
+        selector: '.addBtn',
+        title: 'Now, add it for real',
+        text: 'You\'ve set it up exactly how you want it. Go ahead, tap + and let\'s actually put this task on the list.',
+        action: { event: 'click' },
+        beforeShow: () => switchGroupView('tasks')
     },
     {
         selector: '.groupMemberScopeTabs',
         title: 'Whose tasks',
-        text: 'See everyone\'s tasks together, just your own, or drill into one teammate\'s. Go ahead and try one, a Suggest a task button appears right here for whoever you pick.',
+        text: 'See everyone\'s tasks together, just your own, or drill into one teammate\'s. Go ahead and try one, you should even see the task you just added, and a Suggest a task button appears right here for whoever you pick.',
         action: { event: 'click' },
         // Hidden for a solo group (see renderGroupMemberScopeTabs), skip
         // this step rather than highlighting a hidden, zero-size element.
@@ -4604,13 +4626,15 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.memberRoster',
         title: 'Team',
-        text: 'Everyone in the group, their role, and their current progress. Click a card any time to switch Tasks over to just their work.',
+        text: 'Everyone in the group, their role, and their current progress. Go ahead, click a card, that switches Tasks over to just their work, same as picking them above.',
+        action: { event: 'click' },
         beforeShow: () => switchGroupView('team')
     },
     {
         selector: '.groupLeaderboardPanel',
         title: 'Leaderboard',
-        text: 'Ranked by completions, switch between this week, this month, and all time.',
+        text: 'Ranked by completions. Go ahead, try switching between this week, this month, and all time.',
+        action: { event: 'click' },
         beforeShow: () => switchGroupView('leaderboard')
     },
     {
@@ -4633,8 +4657,8 @@ const GROUP_TOUR_STEPS = [
     },
     {
         selector: '.brainDumpToggleBtn',
-        title: 'And that\'s me',
-        text: 'I\'m Dusty. Tell me what\'s going on and I\'ll turn it into real tasks. I can suggest a task to a teammate, comment on one of their tasks, or edit one of your own, always showing you exactly what I\'d send before anything goes out. I also think ahead, ask who\'s overloaded or where deadlines collide across the team, and I\'ll answer with real numbers, not a guess. Go ahead, tap me, let\'s try it.',
+        title: 'Now, come say hi',
+        text: 'That\'s everything, and now it\'s your turn to actually meet me. Tap me, and let\'s talk for real. I can suggest a task to a teammate, comment on one of their tasks, or edit one of your own, always showing you exactly what I\'d send before anything goes out. I also think ahead, ask who\'s overloaded or where deadlines collide across the team, and I\'ll answer with real numbers, not a guess.',
         action: { event: 'click' },
         beforeShow: () => switchGroupView('tasks')
     }

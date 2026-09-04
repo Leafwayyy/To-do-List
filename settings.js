@@ -485,7 +485,7 @@
     }
 
     // Lets you tell Dusty something directly, without needing to phrase it
-    // in a chat message and hope she offers to save it - the only OTHER
+    // in a chat message and hope he offers to save it - the only OTHER
     // way a memory gets created (see brain-dump.js's commitMemories).
     // Writes to the exact same users/{uid}/dustyMemory collection, so both
     // paths are indistinguishable once saved.
