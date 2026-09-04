@@ -4520,7 +4520,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.inputContainer',
         title: 'Add a task',
-        text: 'Add your own tasks here, same as solo - matrix, difficulty, and deadline all carry over.',
+        text: 'Add your own tasks here, same as solo - matrix, difficulty, deadline, and repeat all carry over.',
         beforeShow: () => switchGroupView('tasks')
     },
     {
@@ -4532,7 +4532,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.detailsToggleBtn',
         title: 'Prioritize',
-        text: 'Set matrix, difficulty, and deadline for a new task - the three that matter most for sort order. More options underneath adds a time estimate and a separate schedule.',
+        text: 'Set matrix, difficulty, deadline, and repeat for a new task - the fields that matter most for sort order and staying on top of recurring tasks. More options underneath adds a time estimate and a separate schedule.',
         beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); }
     },
     {
@@ -4583,7 +4583,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.brainDumpToggleBtn',
         title: 'Meet Dusty',
-        text: 'Tap Dusty any time to brain-dump what\'s going on - she can also suggest a task to a teammate or comment on one of their tasks if you ask her to, always showing you exactly what she\'d send before anything actually goes out.',
+        text: 'Tap Dusty any time to brain-dump what\'s going on. She can suggest a task to a teammate, comment on one of their tasks, or edit one of your own - always showing exactly what she\'d send before anything goes out. She also thinks ahead: ask who\'s overloaded or where deadlines collide across the team, and she\'ll answer with real numbers, not a guess.',
         beforeShow: () => switchGroupView('tasks')
     }
 ];

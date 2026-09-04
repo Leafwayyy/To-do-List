@@ -155,7 +155,7 @@ const TOUR_STEPS = [
     {
         selector: '.detailsToggleBtn',
         title: 'Open smart options',
-        text: 'Use Prioritize to set matrix, difficulty, and deadline - the three that matter most for sort order. More options underneath adds a time estimate and a separate schedule.',
+        text: 'Use Prioritize to set matrix, difficulty, deadline, and repeat - the fields that matter most for sort order and staying on top of recurring tasks. More options underneath adds a time estimate and a separate schedule.',
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
     {
@@ -196,7 +196,7 @@ const TOUR_STEPS = [
     {
         selector: '.brainDumpToggleBtn',
         title: 'Meet Dusty',
-        text: 'Tap Dusty any time to brain-dump what\'s on your mind - type it all out, attach a photo or file if that\'s easier, and she\'ll turn it into real tasks for you to review before anything gets added.',
+        text: 'Tap Dusty any time to brain-dump what\'s on your mind - text, or a photo or file - and she\'ll turn it into real tasks to review. She can also edit tasks you already have, and answer real planning questions like "what should I focus on this week" using your actual numbers, not a guess.',
         beforeShow: () => switchSoloView('tasks')
     }
 ];
