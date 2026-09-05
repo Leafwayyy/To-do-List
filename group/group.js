@@ -4850,6 +4850,14 @@ async function commitAiTaskEditsGroup(drafts) {
         if (Object.prototype.hasOwnProperty.call(draft, 'scheduledAt')) {
             fieldUpdates.scheduledAt = isValidDateValue(draft.scheduledAt) ? new Date(draft.scheduledAt).toISOString() : null;
         }
+        if (Object.prototype.hasOwnProperty.call(draft, 'text') && draft.text && draft.text.trim()) {
+            fieldUpdates.text = draft.text.trim().slice(0, 2000);
+        }
+        if (Object.prototype.hasOwnProperty.call(draft, 'subtasks') && Array.isArray(draft.subtasks)) {
+            // applyEditedSubtasks (task-shared.js) - full replace, preserving
+            // id/completed for any step whose text still matches.
+            fieldUpdates.subtasks = applyEditedSubtasks(realTask.subtasks, draft.subtasks);
+        }
         if (Object.keys(fieldUpdates).length > 0) {
             fieldUpdates.updatedAt = new Date().toISOString();
             await updateDoc(doc(db(), 'groups', group.id, 'tasks', realTask.id), fieldUpdates);

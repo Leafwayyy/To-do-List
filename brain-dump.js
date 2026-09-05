@@ -132,7 +132,16 @@ function brainDumpSummarizeTask(task) {
         difficulty: task.difficulty || null,
         dueAt: task.dueAt || null,
         scheduledAt: task.scheduledAt || null,
-        owner: task.ownerName || null // only meaningful for group tasks - absent on solo ones
+        owner: task.ownerName || null, // only meaningful for group tasks - absent on solo ones
+        // Existing steps - Dusty needs to actually SEE these to rewrite them
+        // sensibly (carry forward whatever it has no reason to change,
+        // rather than guessing at what's already there). Capped same as
+        // every other list sent here; a task with more than this many steps
+        // is already an edge case the AI editing path doesn't need to
+        // handle perfectly.
+        subtasks: Array.isArray(task.subtasks)
+            ? task.subtasks.slice(0, 20).map((subtask) => ({ text: subtask.text, completed: Boolean(subtask.completed) }))
+            : []
     };
 }
 
@@ -510,6 +519,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     let pendingAttachments = []; // [{ mimeType, data, name }] for the NEXT send only
     let isSending = false;
     let rateCountdownIntervalId = null;
+    let typingStageIntervalId = null;
 
     // Dusty, the floating bottom-right mascot that opens this chat. Both
     // script.js and group/group.js already look up the SAME
@@ -752,9 +762,20 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         row.appendChild(buildAvatarEl());
         const bubble = document.createElement('div');
         bubble.classList.add('brainDumpMsg', 'brainDumpMsgAssistant');
-        const p = document.createElement('p');
-        p.textContent = replyText;
-        bubble.appendChild(p);
+        // Split into paragraphs (the Worker's prompt now asks for a blank
+        // line between genuinely distinct parts of a reply) so a multi-part
+        // answer gets real visual spacing instead of running together as
+        // one dense block - direct feedback. Still textContent per
+        // paragraph, same safety as before, just more than one of them.
+        // Any single \n a model reply keeps within one paragraph (a
+        // numbered list it didn't blank-line-separate) still renders as a
+        // real line break via .brainDumpMsg p's white-space:pre-wrap.
+        const paragraphs = String(replyText || '').split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
+        (paragraphs.length > 0 ? paragraphs : ['']).forEach((paragraph) => {
+            const p = document.createElement('p');
+            p.textContent = paragraph;
+            bubble.appendChild(p);
+        });
         row.appendChild(bubble);
         messagesEl.appendChild(row);
 
@@ -918,17 +939,56 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         if (attachBtn) attachBtn.disabled = disabled;
     }
 
+    // Real feedback: a single static "Dusty is thinking..." with nothing
+    // moving read as broken/stuck on a slower reply (a real brain dump, a
+    // planning question, an attachment) - this is one plain request/
+    // response, not a stream, so there's no real progress to report, but an
+    // animated dots pulse plus status text that visibly changes over time
+    // is enough to signal "still actively working" even without true
+    // progress, the same perceived-performance trick most AI chat UIs use.
+    const BRAIN_DUMP_THINKING_STAGES = [
+        'Reading your message',
+        'Thinking it through',
+        'Still working on it',
+        'Almost there'
+    ];
+
     function appendTypingIndicator() {
         const row = document.createElement('div');
         row.classList.add('brainDumpMsgRow');
         row.appendChild(buildAvatarEl());
         const bubble = document.createElement('div');
         bubble.classList.add('brainDumpMsg', 'brainDumpMsgAssistant', 'brainDumpTyping');
-        bubble.textContent = 'Dusty is thinking...';
+        const statusText = document.createElement('span');
+        statusText.classList.add('brainDumpTypingText');
+        statusText.textContent = BRAIN_DUMP_THINKING_STAGES[0];
+        bubble.appendChild(statusText);
+        const dots = document.createElement('span');
+        dots.classList.add('brainDumpTypingDots');
+        dots.setAttribute('aria-hidden', 'true');
+        dots.innerHTML = '<span></span><span></span><span></span>';
+        bubble.appendChild(dots);
         row.appendChild(bubble);
         messagesEl.appendChild(row);
         scrollToBottom();
+
+        let stageIndex = 0;
+        clearInterval(typingStageIntervalId);
+        typingStageIntervalId = setInterval(() => {
+            stageIndex = Math.min(stageIndex + 1, BRAIN_DUMP_THINKING_STAGES.length - 1);
+            statusText.textContent = BRAIN_DUMP_THINKING_STAGES[stageIndex];
+        }, 4500);
+
         return row;
+    }
+
+    // Both call sites below (success and error) call this instead of a bare
+    // typingBubble.remove() - the interval above keeps ticking (updating a
+    // detached, invisible node forever) if nothing ever clears it.
+    function removeTypingIndicator(row) {
+        clearInterval(typingStageIntervalId);
+        typingStageIntervalId = null;
+        row.remove();
     }
 
     // Returns { element, read() } rather than stashing state on the DOM
@@ -1178,10 +1238,11 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     // "Edit an existing task" draft - only ever populated when the user
     // explicitly asked to change a specific task (see the EDITING EXISTING
     // TASKS rule in the Worker's system instruction). Only whichever of
-    // matrix/difficulty/dueAt/scheduledAt/completed Gemini actually
-    // proposed changing get a control here - never a field the draft didn't
-    // touch, so confirming this can't silently reset something the user
-    // never asked about. taskId is the only thing that actually matters for
+    // matrix/difficulty/dueAt/scheduledAt/completed/text/subtasks Gemini
+    // actually proposed changing get a control here - never a field the
+    // draft didn't touch, so confirming this can't silently reset something
+    // the user never asked about. taskId is the only thing that actually
+    // matters for
     // the write; commitTaskEdits (script.js/group.js) independently
     // re-checks it against the real, already-loaded task list before
     // applying anything - never trusted blind, same discipline as
@@ -1221,6 +1282,27 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         // explicit dueAt:null (clear the deadline) still gets its own row
         // instead of being silently skipped like an omitted field would be.
         const fieldReaders = {};
+
+        // text/subtasks - Dusty can now rename a task or rewrite its steps,
+        // not just its priority/dates/completion (direct feedback: "I
+        // cannot edit a task's subtasks or text directly" was a real,
+        // reported gap). Same hasOwnProperty-gated pattern as every other
+        // field here - only shows up when the draft actually touches it.
+        if (Object.prototype.hasOwnProperty.call(draft, 'text') && draft.text) {
+            const row = document.createElement('label');
+            row.classList.add('brainDumpTaskEditRow');
+            const labelSpan = document.createElement('span');
+            labelSpan.textContent = 'Task';
+            row.appendChild(labelSpan);
+            const textInput = document.createElement('input');
+            textInput.type = 'text';
+            textInput.classList.add('brainDumpTaskCardText');
+            textInput.maxLength = 240;
+            textInput.value = draft.text;
+            row.appendChild(textInput);
+            fields.appendChild(row);
+            fieldReaders.text = () => textInput.value;
+        }
 
         if (Object.prototype.hasOwnProperty.call(draft, 'matrix') && draft.matrix) {
             const row = document.createElement('label');
@@ -1316,6 +1398,31 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             fieldReaders.completed = () => completedCheckbox.checked;
         }
 
+        // subtasks is a full REPLACEMENT of the task's step list (the
+        // Worker's prompt tells Dusty to carry forward any existing step it
+        // has no reason to change, not just the ones the user asked about),
+        // so the review card shows exactly that - editable, one step per
+        // line, same control as the new-task card's subtasks field.
+        if (Object.prototype.hasOwnProperty.call(draft, 'subtasks') && Array.isArray(draft.subtasks)) {
+            const row = document.createElement('label');
+            row.classList.add('brainDumpTaskEditRow', 'brainDumpTaskEditSubtasksRow');
+            const labelSpan = document.createElement('span');
+            labelSpan.textContent = 'Steps';
+            row.appendChild(labelSpan);
+            const subtasksInputEl = document.createElement('textarea');
+            subtasksInputEl.classList.add('brainDumpTaskCardSubtasks');
+            subtasksInputEl.placeholder = 'Steps (one per line)';
+            subtasksInputEl.value = draft.subtasks.filter(Boolean).join('\n');
+            const resizeSubtasksInput = () => {
+                subtasksInputEl.rows = Math.min(8, Math.max(2, subtasksInputEl.value.split('\n').length));
+            };
+            resizeSubtasksInput();
+            subtasksInputEl.addEventListener('input', resizeSubtasksInput);
+            row.appendChild(subtasksInputEl);
+            fields.appendChild(row);
+            fieldReaders.subtasks = () => subtasksInputEl.value.split('\n').map((line) => line.trim()).filter(Boolean);
+        }
+
         card.appendChild(header);
         card.appendChild(fields);
 
@@ -1326,7 +1433,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         };
 
         const markApplied = () => {
-            fields.querySelectorAll('input, select').forEach((el) => { el.disabled = true; });
+            fields.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; });
             checkbox.disabled = true;
             checkbox.checked = false;
             applyOneBtn.remove();
@@ -2015,7 +2122,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             });
 
             const data = await response.json().catch(() => null);
-            typingBubble.remove();
+            removeTypingIndicator(typingBubble);
 
             updateRateStatus(data?.rateLimit);
 
@@ -2044,7 +2151,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             appendMemoryReview(data.memoryProposals);
         } catch (error) {
             console.error('Brain dump request failed:', error);
-            typingBubble.remove();
+            removeTypingIndicator(typingBubble);
             appendErrorBubble("Couldn't reach the AI - check your connection and try again.");
         } finally {
             isSending = false;

@@ -6036,6 +6036,19 @@ body.authGateActive .authOverlay{
 
 .brainDumpMsg p{
     margin: 0;
+    /* Renders a real \n a reply keeps within one paragraph (e.g. a numbered
+       list the model didn't blank-line-separate) as an actual line break -
+       default white-space collapses it to a space, which is a real part of
+       why a multi-part reply used to read as one dense block. */
+    white-space: pre-wrap;
+}
+
+/* appendAssistantBubble (brain-dump.js) now splits a reply into one <p> per
+   paragraph (blank-line-separated) instead of always one - this is the
+   actual visual gap between them; margin:0 above only zeroes the DEFAULT
+   browser paragraph margin, not spacing between sibling paragraphs here. */
+.brainDumpMsg p + p{
+    margin-top: 8px;
 }
 
 .brainDumpMsgUser{
@@ -6058,8 +6071,54 @@ body.authGateActive .authOverlay{
 }
 
 .brainDumpTyping{
+    display: flex;
+    align-items: center;
+    gap: 6px;
     color: rgba(217, 206, 255, 0.72);
     font-style: italic;
+}
+
+/* Cycles through BRAIN_DUMP_THINKING_STAGES (brain-dump.js) - not real
+   progress (one request/response, not a stream), just visible motion +
+   changing status so a slower reply doesn't read as stuck. */
+.brainDumpTypingText{
+    transition: opacity 0.2s ease;
+}
+
+.brainDumpTypingDots{
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: 0 0 auto;
+}
+
+.brainDumpTypingDots span{
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.35;
+    animation: brainDumpTypingBounce 1.1s ease-in-out infinite;
+}
+
+.brainDumpTypingDots span:nth-child(2){
+    animation-delay: 0.15s;
+}
+
+.brainDumpTypingDots span:nth-child(3){
+    animation-delay: 0.3s;
+}
+
+@keyframes brainDumpTypingBounce{
+    0%, 60%, 100%{ opacity: 0.35; transform: translateY(0); }
+    30%{ opacity: 1; transform: translateY(-3px); }
+}
+
+@media (prefers-reduced-motion: reduce){
+    .brainDumpTypingDots span{
+        animation: none;
+        opacity: 0.7;
+    }
 }
 
 .brainDumpMsgError{
@@ -6300,6 +6359,26 @@ body.authGateActive .authOverlay{
 .brainDumpTaskEditRow .brainDumpTaskCardDeadlineWrap{
     flex: 1 1 auto;
     max-width: 220px;
+}
+
+/* .brainDumpTaskCardText/.brainDumpTaskCardSubtasks are shared with the
+   new-task review card (width:100%, meant to be the sole field in its own
+   row) - narrowed back down here so they sit next to their label instead of
+   fighting it for space in this row's justify-content:space-between. */
+.brainDumpTaskEditRow .brainDumpTaskCardText{
+    width: auto;
+    flex: 1 1 auto;
+    max-width: 220px;
+    height: 30px;
+}
+
+/* Steps is a multi-line field - stacked (label above, full-width textarea
+   below) instead of the side-by-side row every other field here uses,
+   since a textarea fighting a label for horizontal space reads cramped. */
+.brainDumpTaskEditSubtasksRow{
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
 }
 
 .brainDumpTaskEditCompletedRow{

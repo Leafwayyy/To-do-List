@@ -810,6 +810,13 @@ function commitAiTaskEditsSolo(draftEdits) {
             setTaskCompletedState(task, Boolean(draft.completed));
             anyCompletionChanged = true;
         }
+        if (Object.prototype.hasOwnProperty.call(draft, 'text') && draft.text && draft.text.trim()) {
+            task.text = draft.text.trim().slice(0, 2000);
+        }
+        if (Object.prototype.hasOwnProperty.call(draft, 'subtasks') && Array.isArray(draft.subtasks)) {
+            task.subtasks = applyEditedSubtasks(task.subtasks, draft.subtasks);
+            task.subtasksExpanded = task.subtasks.length > 0;
+        }
         task.updatedAt = new Date().toISOString();
         return { taskId: draft.taskId, applied: true };
     });

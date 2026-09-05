@@ -1106,3 +1106,32 @@ function generateTaskId() {
 function generateSubtaskId() {
     return `sub-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
+// Dusty's taskEdits can now rewrite a task's whole step list (direct
+// feedback - it couldn't touch subtasks at all before). That's a full
+// REPLACEMENT of the array, not a merge, so a step whose exact text still
+// matches an existing one keeps its real id/completed/dueAt/createdAt
+// (re-submitting the same list, or only tweaking one line, shouldn't wipe
+// out progress on the others); anything new gets a fresh subtask object,
+// same shape/caps manual entry already uses. Shared by solo (script.js) and
+// group (group.js) since both need identical merge semantics here.
+function applyEditedSubtasks(existingSubtasks, newSubtaskTexts) {
+    const timestamp = new Date().toISOString();
+    const existingByText = new Map(
+        (Array.isArray(existingSubtasks) ? existingSubtasks : []).map((subtask) => [subtask.text, subtask])
+    );
+
+    return newSubtaskTexts
+        .map((subtaskText) => (subtaskText || '').trim())
+        .filter(Boolean)
+        .slice(0, 200)
+        .map((subtaskText) => {
+            const truncated = subtaskText.slice(0, 240);
+            return existingByText.get(truncated) || {
+                id: generateSubtaskId(),
+                text: truncated,
+                completed: false,
+                createdAt: timestamp
+            };
+        });
+}

@@ -79,6 +79,8 @@ STEP 2 - For EACH candidate, decide: is this fully specified enough to propose p
 
 STEP 3 - Write "reply": briefly acknowledge whatever you ARE proposing this turn (if anything), THEN, if you left anything out in step 2, ask about it - as 1-3 short, concrete questions, each ideally offering 2-3 likely options rather than being fully open-ended (e.g. "For the gym - are you thinking right after your 1pm class, or later in the evening?" beats "When do you want to go to the gym?"). If literally everything was fully specified, don't force a question - just confirm what you added. If this turn was a workload question (see above), this is where the actual answer goes.
 
+FORMAT "reply" FOR READABILITY - it renders in a narrow chat bubble, and a long answer written as one dense, run-on paragraph is genuinely hard to read there (direct feedback - this has been a real problem). Use actual newline characters, not just sentences run together: put a blank line (two newlines) between genuinely distinct parts of the answer (e.g. between a brief acknowledgment and a longer explanation, or between the "here's what I found" part and a recommended plan). Whenever you give a numbered or step-by-step sequence of more than 2 items (a multi-day plan, an ordered list of actions), put EACH item on its own line - a newline before every number - never run them together in one sentence separated by only "1. ... 2. ... 3. ...". Short confirmations and single-sentence replies don't need any of this, only genuinely multi-part answers do.
+
 Whenever "reply" ends on a question that has natural discrete choices (per the guidance just above), ALSO fill "quickReplies" with those exact same options as short standalone labels (max 4, each a few words, no leading "or"/punctuation - e.g. ["Right after class", "Later this evening"] for the gym example) so the UI can offer them as one-tap buttons. Leave "quickReplies" as an empty array whenever the reply is NOT that kind of multiple-choice-style question - a plain confirmation, a fully open-ended question, or a workload answer all get an empty array.
 
 Never let "tasks" be empty AND "reply" say nothing useful (no questions, no answer, no acknowledgment) - if you're not proposing anything, not asking anything, and not answering anything, you did nothing useful. Also never ask about something you can already reasonably infer - only genuine gaps that would actually change what gets proposed.
@@ -103,11 +105,13 @@ For each proposed task, fill in:
 
 EDITING EXISTING TASKS - a separate capability from proposing new ones. You may propose "taskEdits" (changes to a task that ALREADY EXISTS, from the workload list below) when the user's CURRENT message clearly asks to change something about a specific existing task (e.g. "push my dentist appointment to Friday", "mark the grocery run as done", "that report is actually pretty hard, bump the difficulty up", "clear the deadline on the laundry task"). Never propose one as a side effect of a general planning/brain-dump message, never because you think a task's priority looks off, never unprompted - only when the user is clearly asking to change that specific task right now.
 
-THE HARD RULE: only propose an edit for a task that is unambiguously identifiable from the list below by its exact "id" - never invent or guess an id, and never edit a task assigned to someone else in a group (only the user's own tasks, solo or in a group). If more than one task in the list could plausibly match what the user described, or nothing matches clearly enough, leave it out and ask which task they mean instead of guessing (same STEP 2/3 rule as under-specified new tasks). You can only change matrix, difficulty, dueAt, scheduledAt, and completed - never the task's own text or its subtasks, and never delete a task; if the user wants either of those, say so in "reply" and point them to editing it directly instead.
+THE HARD RULE: only propose an edit for a task that is unambiguously identifiable from the list below by its exact "id" - never invent or guess an id, and never edit a task assigned to someone else in a group (only the user's own tasks, solo or in a group). If more than one task in the list could plausibly match what the user described, or nothing matches clearly enough, leave it out and ask which task they mean instead of guessing (same STEP 2/3 rule as under-specified new tasks). You can change matrix, difficulty, dueAt, scheduledAt, completed, text (the task's own title), and subtasks (its steps) - never delete a task itself; if the user wants that, say so in "reply" and point them to deleting it directly instead.
 
 Only include the specific field(s) actually changing in each taskEdits item - never restate a field that isn't part of what the user asked to change. To explicitly clear a deadline or schedule, set that field to null; to leave a field untouched, omit it from the item entirely.
 
-For each taskEdits item: taskId (the EXACT id string from the list below), taskPreview (a short quote/paraphrase of the task's current text, just so the human reviewing your draft can tell which task you mean), then only whichever of matrix/difficulty/dueAt/scheduledAt/completed are actually changing.
+subtasks is a full REPLACEMENT of the task's step list, not a merge - the task list above shows each task's current steps (and which are already done) specifically so you can do this well. When the user asks to change/add/remove one or a few steps, include the COMPLETE new list: repeat back every existing step you have no reason to change exactly as given, and only actually add/remove/reword the specific one(s) the user asked about - dropping an unrelated step by leaving it out of the array would delete it, which is never the intent unless the user asked to remove it. Only propose subtasks when the user is clearly asking to change this task's steps specifically, same "only when clearly asked" rule as every other edit here.
+
+For each taskEdits item: taskId (the EXACT id string from the list below), taskPreview (a short quote/paraphrase of the task's current text, just so the human reviewing your draft can tell which task you mean), then only whichever of matrix/difficulty/dueAt/scheduledAt/completed/text/subtasks are actually changing.
 
 Like every other proposal in this app, a taskEdits item is a DRAFT the user still has to confirm below, not something already applied the moment you reply - if "reply" claims a change already happened ("I've pushed it to Friday") but the confirm step never happens, the task genuinely never changes and that's a real, confusing gap. Word "reply" so it stays accurate either way: fine to be brief and natural ("Pushed it to Friday - confirm below and it's set" or similar), just don't state it as a completed fact.`;
 
@@ -319,6 +323,15 @@ function describeContextTask(task, includeId) {
     if (task.matrix) parts.push(`matrix=${task.matrix}`);
     if (task.difficulty) parts.push(`difficulty=${task.difficulty}`);
     if (task.owner) parts.push(`assigned to ${task.owner}`);
+    // Needed for the EDITING EXISTING TASKS "subtasks" capability - the
+    // model can't sensibly rewrite a step list (carrying forward whatever
+    // it has no reason to change) if it can't see what's already there.
+    if (Array.isArray(task.subtasks) && task.subtasks.length > 0) {
+        const stepList = task.subtasks
+            .map((subtask) => `${subtask.completed ? '[done] ' : ''}${String(subtask.text || '').slice(0, 120)}`)
+            .join(' | ');
+        parts.push(`steps: ${stepList}`);
+    }
     return parts.join(', ');
 }
 
@@ -602,7 +615,12 @@ function buildGeminiRequest(body) {
                     difficulty: { type: 'STRING', nullable: true },
                     dueAt: { type: 'STRING', nullable: true },
                     scheduledAt: { type: 'STRING', nullable: true },
-                    completed: { type: 'BOOLEAN', nullable: true }
+                    completed: { type: 'BOOLEAN', nullable: true },
+                    text: { type: 'STRING', nullable: true },
+                    // Full replacement, not a merge - see the prompt's own
+                    // "subtasks is a full REPLACEMENT" rule for why this
+                    // isn't just the steps being added/removed.
+                    subtasks: { type: 'ARRAY', items: { type: 'STRING' } }
                 },
                 required: ['taskId', 'taskPreview']
             }
