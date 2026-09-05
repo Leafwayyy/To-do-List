@@ -2070,19 +2070,54 @@ body{
  * Semantic color: --color-danger/--color-warning/--color-success/--color-info,
  *   for meaning (delete, overdue, success, focus), not decoration.
  */
-/* Premium violet gradient mode */
+/* Premium violet gradient mode - re-skinned toward a near-black,
+   consulting.com-style "editorial dark" canvas: the accent violet is the
+   one saturated color in the system (like their gold), everything else
+   is close to true black with only a whisper of violet cast, and surfaces
+   read as hairline-bordered cards rather than glowing panels. */
 :root{
-    --violet-bg-1: #050225;
-    --violet-bg-2: #0a0537;
-    --violet-bg-3: #140a46;
-    --violet-surface: rgba(20, 13, 56, 0.82);
-    --violet-surface-soft: rgba(24, 16, 66, 0.72);
-    --violet-border: rgba(170, 152, 255, 0.44);
-    --violet-border-soft: rgba(170, 152, 255, 0.28);
+    /* These three need real spread between them, not just three near-
+       identical near-black hexes - #030204→#060409→#0a0712 all sit within
+       a few RGB units of each other, so the page's 150deg gradient was
+       rendering as a flat black rectangle with no visible sweep at all.
+       Still near-black-violet overall (bg-1 stays almost pure black), but
+       bg-3 is now a genuinely darker-but-distinct violet so the gradient
+       across the page is actually visible, not just present in the code. */
+    --violet-bg-1: #030204;
+    --violet-bg-2: #0a0620;
+    --violet-bg-3: #170b3e;
+    --violet-surface: rgba(28, 19, 58, 0.85);
+    --violet-surface-soft: rgba(24, 16, 50, 0.6);
+    --violet-border: rgba(181, 139, 255, 0.24);
+    --violet-border-soft: rgba(181, 139, 255, 0.13);
     --violet-text: #f6f4ff;
     --violet-muted: #d7d0ff;
     --violet-accent: #b58bff;
     --violet-accent-2: #7f86ff;
+
+    /* Shared "dark card" recipe - the one surface treatment every modal/
+       panel/task-row should use, instead of each repeating its own
+       near-identical literal gradient (see .tasks li, .taskEditorCard,
+       .brainDumpCard, .activityDetailsCard, .tourCard, .rewardCard,
+       .authCard, .groupHistoryPanel, .leaderboardMemberModalCard,
+       .nextTaskPanel below). Dark, but still a real violet gradient, not
+       a near-monochrome one - per feedback, going near-black flattened
+       these out more than intended; the ambient page background/orbs stay
+       quiet, but the cards themselves keep visible color and contrast
+       between their gradient stops. */
+    --card-1: rgba(42, 28, 88, 0.95);
+    --card-2: rgba(26, 17, 62, 0.96);
+    --card-3: rgba(12, 8, 42, 0.97);
+    --card-border: rgba(181, 139, 255, 0.22);
+    --card-top-accent: rgba(181, 139, 255, 0.55);
+    --card-shadow: 0 22px 54px rgba(0, 0, 0, 0.65);
+
+    /* Subtle noise tile layered under body's background gradient - a tiny
+       inline SVG (feTurbulence, alpha dropped to ~0.025 via feColorMatrix)
+       so the canvas reads as textured "editorial smoke" rather than a flat
+       vector gradient. Purely additive; safe to blank out (set to `none`)
+       if it doesn't read well at real screen size/DPI. */
+    --grain-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.025 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 
     /* Type scale */
     --text-2xs: 10px;
@@ -2129,31 +2164,36 @@ html{
     background: linear-gradient(150deg, var(--violet-bg-1), var(--violet-bg-2), var(--violet-bg-3));
 }
 
+/* Quieter, single-tone corner glow instead of the old mixed purple+blue
+   double-stop orbs - this is most of what read as "AI-generated gradient
+   template": less size, half the opacity, one color fading straight to
+   transparent so most of the screen reads as flat black canvas with just
+   a whisper of violet at the corners. */
 html::before,
 html::after{
     content: '';
     position: fixed;
-    width: 62vmax;
-    height: 62vmax;
+    width: 52vmax;
+    height: 52vmax;
     border-radius: 50%;
-    filter: blur(72px);
+    filter: blur(80px);
     pointer-events: none;
     z-index: 0;
-    opacity: 0.46;
+    opacity: 0.22;
     will-change: transform;
 }
 
 html::before{
-    top: -28vmax;
-    right: -20vmax;
-    background: radial-gradient(circle at 36% 32%, rgba(174, 140, 255, 0.95), rgba(98, 79, 228, 0.42) 48%, rgba(0, 0, 0, 0) 72%);
+    top: -26vmax;
+    right: -18vmax;
+    background: radial-gradient(circle at 36% 32%, rgba(150, 110, 240, 0.9), rgba(0, 0, 0, 0) 70%);
     animation: orbFloatC 26s ease-in-out infinite alternate;
 }
 
 html::after{
-    left: -24vmax;
-    bottom: -26vmax;
-    background: radial-gradient(circle at 42% 42%, rgba(125, 154, 255, 0.9), rgba(95, 77, 225, 0.36) 46%, rgba(0, 0, 0, 0) 74%);
+    left: -22vmax;
+    bottom: -24vmax;
+    background: radial-gradient(circle at 42% 42%, rgba(120, 120, 220, 0.8), rgba(0, 0, 0, 0) 70%);
     animation: orbFloatD 30s ease-in-out infinite alternate;
 }
 
@@ -2161,38 +2201,37 @@ body{
     position: relative;
     overflow-x: hidden;
     color: var(--violet-text);
-    background: linear-gradient(150deg, var(--violet-bg-1), var(--violet-bg-2), var(--violet-bg-3));
+    background:
+        var(--grain-texture),
+        linear-gradient(150deg, var(--violet-bg-1), var(--violet-bg-2), var(--violet-bg-3));
+    background-repeat: repeat, no-repeat;
 }
 
 body::before,
 body::after{
     content: '';
     position: fixed;
-    width: 74vmax;
-    height: 74vmax;
+    width: 58vmax;
+    height: 58vmax;
     border-radius: 50%;
-    filter: blur(70px);
+    filter: blur(76px);
     pointer-events: none;
     z-index: 0;
     will-change: transform;
-    opacity: 0.48;
+    opacity: 0.24;
 }
 
 body::before{
-    top: -26vmax;
-    left: -22vmax;
-    background:
-        radial-gradient(circle at 28% 30%, rgba(179, 144, 255, 0.9), rgba(89, 76, 222, 0.46) 38%, rgba(0, 0, 0, 0) 66%),
-        radial-gradient(circle at 74% 56%, rgba(147, 165, 255, 0.78), rgba(76, 93, 214, 0.34) 36%, rgba(0, 0, 0, 0) 67%);
+    top: -24vmax;
+    left: -20vmax;
+    background: radial-gradient(circle at 30% 32%, rgba(160, 120, 240, 0.85), rgba(0, 0, 0, 0) 68%);
     animation: orbFloatA 24s ease-in-out infinite alternate;
 }
 
 body::after{
-    right: -22vmax;
-    bottom: -24vmax;
-    background:
-        radial-gradient(circle at 38% 44%, rgba(198, 150, 255, 0.88), rgba(109, 85, 232, 0.42) 37%, rgba(0, 0, 0, 0) 66%),
-        radial-gradient(circle at 72% 28%, rgba(134, 159, 255, 0.72), rgba(77, 95, 214, 0.28) 34%, rgba(0, 0, 0, 0) 68%);
+    right: -20vmax;
+    bottom: -22vmax;
+    background: radial-gradient(circle at 40% 44%, rgba(140, 120, 235, 0.8), rgba(0, 0, 0, 0) 68%);
     animation: orbFloatB 32s ease-in-out infinite alternate;
 }
 
@@ -2634,7 +2673,12 @@ body::after{
         linear-gradient(145deg, rgba(39, 27, 92, 0.9), rgba(27, 18, 72, 0.9));
 }
 
-/* Calmer badge palette: neutral by default, color only for urgency */
+/* Dark outlined pills, not solid pastel fills - consulting.com's small
+   stat pills ("13.1% ↗") are a dark/transparent chip with a colored border
+   and colored text, not a solid light fill; neutral badges use the violet
+   brand tokens, urgency badges reuse the semantic --color-warning/-danger
+   tokens already defined at :root (previously hardcoded their own hex
+   instead of using them). */
 .matrixBadge,
 .difficultyBadge,
 .effortBadge,
@@ -2642,15 +2686,15 @@ body::after{
 .countdownBadge,
 .subtaskProgressBadge,
 .scheduleBadge{
-    background: rgba(233, 238, 255, 0.92);
-    color: #2f3f66;
-    border: 1px solid rgba(184, 198, 232, 0.95);
+    background: rgba(181, 139, 255, 0.1);
+    color: var(--violet-muted);
+    border: 1px solid var(--violet-border);
 }
 
 .recurrenceBadge{
-    background: rgba(233, 238, 255, 0.92);
-    color: #2f3f66;
-    border: 1px solid rgba(184, 198, 232, 0.95);
+    background: rgba(181, 139, 255, 0.1);
+    color: var(--violet-muted);
+    border: 1px solid var(--violet-border);
 }
 
 .matrix-do,
@@ -2666,30 +2710,30 @@ body::after{
 .countdown-none,
 .deadline-normal,
 .countdown-normal{
-    background: rgba(233, 238, 255, 0.92);
-    color: #2f3f66;
-    border: 1px solid rgba(184, 198, 232, 0.95);
+    background: rgba(181, 139, 255, 0.1);
+    color: var(--violet-muted);
+    border: 1px solid var(--violet-border);
 }
 
 .deadline-soon,
 .countdown-soon{
-    background: #ffeccd;
-    color: #7d4f0e;
-    border-color: #f3ca8e;
+    background: var(--color-warning-soft);
+    color: var(--color-warning);
+    border-color: rgba(255, 184, 77, 0.45);
 }
 
 .deadline-critical,
 .countdown-critical{
-    background: #ffdcca;
-    color: #884315;
-    border-color: #efb48f;
+    background: rgba(255, 140, 66, 0.16);
+    color: #ff9a52;
+    border-color: rgba(255, 140, 66, 0.48);
 }
 
 .deadline-overdue,
 .countdown-overdue{
-    background: #ffd6d6;
-    color: #8b2020;
-    border-color: #efaaaa;
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
+    border-color: rgba(255, 107, 107, 0.48);
 }
 
 /* Final control icon clarity */
@@ -2836,9 +2880,10 @@ body::after{
 
 .taskEditorCard{
     background:
-        linear-gradient(160deg, rgba(33, 22, 86, 0.96) 0%, rgba(24, 16, 67, 0.96) 52%, rgba(16, 11, 52, 0.97) 100%);
-    border: 2px solid rgba(178, 161, 255, 0.52);
-    box-shadow: 0 22px 52px rgba(8, 4, 30, 0.62), inset 0 1px 0 rgba(235, 229, 255, 0.09);
+        linear-gradient(160deg, var(--card-1) 0%, var(--card-2) 52%, var(--card-3) 100%);
+    border: 1px solid var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    box-shadow: var(--card-shadow);
 }
 
 .taskEditorCard h2,
@@ -3021,8 +3066,9 @@ body::after{
     width: 92%;
     margin-top: 10px;
     border-radius: 12px;
-    border: 1px solid rgba(189, 172, 255, 0.54);
-    background: linear-gradient(155deg, rgba(62, 46, 140, 0.84), rgba(37, 26, 96, 0.88));
+    border: 1px solid var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    background: linear-gradient(155deg, var(--card-1), var(--card-2));
     padding: 10px 12px;
 }
 
@@ -3765,15 +3811,38 @@ body > .viewTabs{
     grid-auto-rows: minmax(104px, auto);
 }
 
+/* Week's cap is CALENDAR_MAX_VISIBLE_CHIPS_WEEK (6, script.js), so its
+   uniform floor needs to be taller than month's - same reasoning as
+   .calendarDayCell's min-height above, just sized for up to 6 chips
+   instead of 3. */
+.calendarGrid.calendarGridWeek .calendarDayCell{
+    min-height: 190px;
+}
+
+/* A white-based overlay tint (not a flat violet rgba) so every cell lifts
+   off the page by the same relative amount no matter where it sits on the
+   page's own background gradient - a fixed violet fill happened to blend
+   into the gradient in some corners and not others, which is what made the
+   grid read as "can't tell the cells apart." Border bumped from -soft to a
+   clearly visible full-strength violet line so the grid itself is legible,
+   not just implied by gaps. */
+/* min-height raised to comfortably fit the capped default case (3 chips,
+   see CALENDAR_MAX_VISIBLE_CHIPS in script.js) - at 88px a 0-chip day sat
+   at the floor while a 3-chip day grew past it, so every row looked
+   uneven ("ruined the rhythm"). Every un-expanded cell now clamps to the
+   same floor regardless of chip count (0-3 all fit under it); only a
+   cell a visitor actually expands (.expanded, see script.js's "+N more")
+   grows past this floor on its own, without dragging its row-mates
+   (align-items:start on .calendarGrid, above). */
 .calendarDayCell{
     display: flex;
     flex-direction: column;
     gap: 6px;
     padding: 8px;
     border-radius: var(--radius-md);
-    border: 1px solid var(--violet-border-soft);
-    background: var(--violet-surface-soft);
-    min-height: 88px;
+    border: 1px solid var(--violet-border);
+    background: rgba(255, 255, 255, 0.045);
+    min-height: 116px;
 }
 
 .calendarDayCell.outOfMonth{
@@ -3782,7 +3851,7 @@ body > .viewTabs{
 
 .calendarDayCell.today{
     border-color: var(--violet-accent);
-    background: rgba(181, 139, 255, 0.16);
+    background: rgba(181, 139, 255, 0.22);
 }
 
 .calendarDayCell.empty{
@@ -3790,8 +3859,8 @@ body > .viewTabs{
 }
 
 .calendarDayCell.empty:hover{
-    border-color: var(--violet-border);
-    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--violet-accent);
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .calendarDayNumber{
@@ -3854,6 +3923,60 @@ body > .viewTabs{
 
 .calendarChip.completed span{
     text-decoration: line-through;
+}
+
+/* Group calendar only (group.js) - a chip for a teammate's task instead of
+   your own: no edit permission exists for it anywhere else in the app
+   either, so it stays visually present but inert rather than pretending
+   to be clickable. */
+.calendarChip.notEditable{
+    cursor: default;
+    opacity: 0.82;
+}
+
+/* Small per-member color dot, prepended to a group calendar chip before its
+   icon - a second, independent visual channel from the chip's own urgency
+   border/background (due/soon/critical/overdue), which stays exactly as
+   themed for everyone. 8 fixed hues (getGroupMemberColorIndex in group.js
+   deterministically hashes each ownerId onto one of them), chosen to read
+   clearly against the dark cards and to stay distinct from each other. */
+.calendarChipMemberDot{
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+
+/* Evenly spaced around the full hue wheel (45deg apart, fixed saturation/
+   lightness) rather than 8 hand-picked hex values - two of the old picks
+   (violet/blue-violet) sat only ~25deg apart and read as "the same color"
+   at a 7px dot size, which is the actual bug report. 45deg steps keep
+   every neighbor clearly distinct regardless of which two members end up
+   next to each other. */
+.calendarMemberColor-0{ background: hsl(0, 78%, 64%); }
+.calendarMemberColor-1{ background: hsl(45, 78%, 58%); }
+.calendarMemberColor-2{ background: hsl(90, 55%, 52%); }
+.calendarMemberColor-3{ background: hsl(150, 60%, 52%); }
+.calendarMemberColor-4{ background: hsl(190, 70%, 55%); }
+.calendarMemberColor-5{ background: hsl(220, 80%, 68%); }
+.calendarMemberColor-6{ background: hsl(265, 78%, 72%); }
+.calendarMemberColor-7{ background: hsl(320, 75%, 68%); }
+
+/* Legend row above the grid - color alone doesn't say whose task is whose,
+   so the mapping gets spelled out once here instead of left to memory. */
+.calendarMemberLegend{
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    margin-bottom: var(--space-3);
+}
+
+.calendarMemberLegendItem{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-xs);
+    color: var(--violet-muted);
 }
 
 .calendarMoreBtn{
@@ -3935,15 +4058,17 @@ body > .viewTabs{
 /* Task slot visual separation: active vs completed */
 .tasks li{
     background:
-        linear-gradient(160deg, rgba(47, 31, 111, 0.88) 0%, rgba(30, 21, 86, 0.9) 52%, rgba(22, 15, 68, 0.92) 100%);
-    border-color: rgba(168, 154, 243, 0.62);
+        linear-gradient(160deg, var(--card-1) 0%, var(--card-2) 52%, var(--card-3) 100%);
+    border-color: var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
 }
 
 .tasks li.completed{
     background:
-        linear-gradient(160deg, rgba(33, 27, 70, 0.8) 0%, rgba(26, 21, 57, 0.82) 52%, rgba(21, 18, 46, 0.84) 100%);
-    border-color: rgba(137, 136, 175, 0.48);
-    box-shadow: inset 0 1px 0 rgba(221, 214, 255, 0.08);
+        linear-gradient(160deg, rgba(28, 22, 52, 0.82) 0%, rgba(20, 16, 40, 0.85) 52%, rgba(10, 8, 26, 0.88) 100%);
+    border-color: rgba(137, 136, 175, 0.32);
+    border-top-color: rgba(181, 139, 255, 0.3);
+    box-shadow: inset 0 1px 0 rgba(221, 214, 255, 0.06);
 }
 
 .tasks li.completed .taskText,
@@ -4244,9 +4369,10 @@ body > .viewTabs{
     overflow-y: auto;
     overflow-x: hidden;
     border-radius: 14px;
-    border: 1px solid rgba(205, 194, 255, 0.56);
-    background: linear-gradient(165deg, rgba(43, 30, 105, 0.97), rgba(24, 16, 72, 0.98));
-    box-shadow: 0 20px 52px rgba(8, 4, 31, 0.58);
+    border: 1px solid var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    background: linear-gradient(165deg, var(--card-1), var(--card-3));
+    box-shadow: var(--card-shadow);
     padding: 14px;
 }
 
@@ -4404,9 +4530,10 @@ body > .viewTabs{
     top: 12px;
     width: min(340px, calc(100vw - 24px));
     border-radius: var(--radius-lg);
-    border: 1px solid rgba(209, 197, 255, 0.64);
-    background: linear-gradient(165deg, rgba(60, 44, 136, 0.98), rgba(34, 24, 95, 0.99));
-    box-shadow: 0 18px 48px rgba(6, 3, 25, 0.56);
+    border: 1px solid var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    background: linear-gradient(165deg, var(--card-1), var(--card-3));
+    box-shadow: var(--card-shadow);
     padding: 12px;
     color: #f7f4ff;
     /* .tourOverlay (this card's parent) is pointer-events:none now that the
@@ -4955,7 +5082,11 @@ body.authChecking .authLoadingScreen{
     align-items: center;
     padding: clamp(28px, 8vh, 72px) 20px 20px;
     overflow: hidden;
-    background: linear-gradient(160deg, #070b16 0%, #131a30 55%, #0a0e1c 100%);
+    /* Was its own standalone navy palette (#070b16/#131a30/#0a0e1c),
+       unrelated to the app's violet tokens - unified here so the sign-in
+       gate reads as the same canvas as everything else, not a different
+       product. */
+    background: linear-gradient(160deg, var(--violet-bg-1) 0%, var(--violet-bg-2) 55%, var(--violet-bg-3) 100%);
 }
 
 body.authGateActive .authOverlay{
@@ -4966,25 +5097,25 @@ body.authGateActive .authOverlay{
 .authOverlay::after{
     content: '';
     position: absolute;
-    width: 65vmax;
-    height: 65vmax;
+    width: 55vmax;
+    height: 55vmax;
     border-radius: var(--radius-circle);
-    filter: blur(70px);
-    opacity: 0.8;
+    filter: blur(78px);
+    opacity: 0.24;
     pointer-events: none;
 }
 
 .authOverlay::before{
     top: -24vmax;
     left: -20vmax;
-    background: radial-gradient(circle, rgba(198, 168, 255, 0.9) 0%, rgba(143, 111, 232, 0.55) 28%, rgba(181, 139, 255, 0.32) 54%, transparent 76%);
+    background: radial-gradient(circle, rgba(170, 130, 250, 0.85) 0%, rgba(0, 0, 0, 0) 70%);
     animation: authOrbFloatA 20s ease-in-out infinite alternate;
 }
 
 .authOverlay::after{
     bottom: -26vmax;
     right: -22vmax;
-    background: radial-gradient(circle, rgba(163, 195, 255, 0.9) 0%, rgba(127, 134, 255, 0.6) 28%, rgba(74, 146, 246, 0.32) 54%, transparent 76%);
+    background: radial-gradient(circle, rgba(130, 140, 240, 0.8) 0%, rgba(0, 0, 0, 0) 70%);
     animation: authOrbFloatB 24s ease-in-out infinite alternate;
 }
 
@@ -5008,7 +5139,7 @@ body.authGateActive .authOverlay{
     width: min(620px, 100vw);
     height: min(620px, 100vw);
     border-radius: var(--radius-circle);
-    background: radial-gradient(circle, rgba(198, 168, 255, 0.6) 0%, rgba(143, 111, 232, 0.42) 26%, rgba(127, 134, 255, 0.3) 52%, transparent 74%);
+    background: radial-gradient(circle, rgba(170, 130, 250, 0.4) 0%, rgba(0, 0, 0, 0) 70%);
     filter: blur(45px);
     animation: authGlowPulse 4.5s ease-in-out infinite;
     pointer-events: none;
@@ -5391,9 +5522,10 @@ body.authGateActive .authOverlay{
 }
 
 .rewardCard{
-    background: linear-gradient(165deg, rgba(60, 44, 136, 0.98), rgba(34, 24, 95, 0.99));
-    border-color: rgba(170, 152, 255, 0.5);
-    box-shadow: 0 24px 58px rgba(6, 3, 25, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    background: linear-gradient(165deg, var(--card-1), var(--card-3));
+    border-color: var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    box-shadow: var(--card-shadow);
 }
 
 .rewardKicker{
@@ -5447,9 +5579,10 @@ body.authGateActive .authOverlay{
 
 /* Sign-in gate + signed-in user badge */
 .authCard{
-    background: linear-gradient(165deg, rgba(60, 44, 136, 0.98), rgba(34, 24, 95, 0.99));
-    border-color: rgba(170, 152, 255, 0.5);
-    box-shadow: 0 24px 58px rgba(6, 3, 25, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    background: linear-gradient(165deg, var(--card-1), var(--card-3));
+    border-color: var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    box-shadow: var(--card-shadow);
 }
 
 .authGoogleBtn{
@@ -5496,40 +5629,44 @@ body.authGateActive .authOverlay{
 }
 
 .userBadge{
-    background: rgba(19, 26, 40, 0.72);
-    border-color: rgba(170, 152, 255, 0.4);
+    background: var(--violet-surface);
+    border-color: var(--violet-border-soft);
 }
 
 .userBadgeName{
     color: #f2edff;
 }
 
+/* .groupNavLink/.userSignOutBtn/.helpTourBtn used to hardcode their own
+   separate navy-gray family (rgba(20,30,45,...)), unrelated to the rest of
+   the app's violet tokens - folded into the shared surface/border tokens
+   here so this floating badge reads as the same system as everything else. */
 .groupNavLink{
-    background: rgba(20, 30, 45, 0.95);
-    border-color: rgba(142, 197, 255, 0.34);
+    background: var(--violet-surface);
+    border-color: var(--violet-border-soft);
     color: #dce8fb;
 }
 
 .groupNavLink:hover{
-    background: rgba(35, 40, 49, 0.96);
+    background: var(--violet-surface-soft);
 }
 
 .userSignOutBtn{
-    background: rgba(20, 30, 45, 0.95);
-    border-color: rgba(142, 197, 255, 0.34);
+    background: var(--violet-surface);
+    border-color: var(--violet-border-soft);
     color: #dce8fb;
 }
 
 .userSignOutBtn:hover{
-    background: rgba(35, 40, 49, 0.96);
+    background: var(--violet-surface-soft);
 }
 
 .helpTourBtn{
     height: 32px;
     padding: 0 var(--space-3);
     border-radius: var(--radius-sm);
-    border: 1px solid rgba(142, 197, 255, 0.34);
-    background: rgba(20, 30, 45, 0.95);
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface);
     color: #dce8fb;
     font-size: var(--text-sm);
     font-weight: 700;
@@ -5548,8 +5685,8 @@ body.authGateActive .authOverlay{
 }
 
 .helpTourBtn:hover{
-    background: rgba(35, 40, 49, 0.96);
-    border-color: var(--violet-accent, #d7b778);
+    background: var(--violet-surface-soft);
+    border-color: var(--violet-accent);
 }
 
 /* Dusty - the Brain Dump mascot. Fixed bottom-right on both Solo and Group
@@ -5732,9 +5869,10 @@ body.authGateActive .authOverlay{
     display: flex;
     flex-direction: column;
     border-radius: 16px;
-    border: 2px solid rgba(178, 161, 255, 0.52);
-    background: linear-gradient(160deg, rgba(33, 22, 86, 0.96) 0%, rgba(24, 16, 67, 0.96) 52%, rgba(16, 11, 52, 0.97) 100%);
-    box-shadow: 0 22px 52px rgba(8, 4, 30, 0.62), inset 0 1px 0 rgba(235, 229, 255, 0.09);
+    border: 1px solid var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    background: linear-gradient(160deg, var(--card-1) 0%, var(--card-2) 52%, var(--card-3) 100%);
+    box-shadow: var(--card-shadow);
     padding: 16px;
     overflow: hidden;
 }
@@ -7624,9 +7762,10 @@ body.authGateActive .authOverlay{
    card sitting directly in that view, not an overlay. */
 .groupHistoryPanel{
     border-radius: var(--radius-lg);
-    border: 1px solid rgba(205, 194, 255, 0.56);
-    background: linear-gradient(165deg, rgba(43, 30, 105, 0.97), rgba(24, 16, 72, 0.98));
-    box-shadow: 0 20px 52px rgba(8, 4, 31, 0.58);
+    border: 1px solid var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    background: linear-gradient(165deg, var(--card-1), var(--card-3));
+    box-shadow: var(--card-shadow);
     padding: 16px;
 }
 
@@ -7711,9 +7850,10 @@ body.authGateActive .authOverlay{
     display: flex;
     flex-direction: column;
     border-radius: var(--radius-lg);
-    border: 1px solid rgba(205, 194, 255, 0.56);
-    background: linear-gradient(165deg, rgba(43, 30, 105, 0.97), rgba(24, 16, 72, 0.98));
-    box-shadow: 0 20px 52px rgba(8, 4, 31, 0.58);
+    border: 1px solid var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    background: linear-gradient(165deg, var(--card-1), var(--card-3));
+    box-shadow: var(--card-shadow);
     padding: 16px;
 }
 
@@ -8134,6 +8274,843 @@ body.authGateActive .authOverlay{
     color: var(--violet-muted);
     font-size: 11px;
     font-weight: 700;
+}
+
+/* ===================================================================
+   Marketing landing page (index.html). Static, no app state - body/html's
+   existing ambient violet gradient + floating orbs (see the DESIGN SYSTEM
+   :root block above) already cover the whole-page background for free,
+   so nothing here redeclares a hero background. Every size/space/radius
+   below comes from that same token block; the one deliberate exception is
+   the hero headline, sized past --text-2xl on purpose (see the DESIGN
+   SYSTEM comment's own note that a landing page wants looser sizing than
+   the dashboard scale), using the exact clamp() pattern .authBrandTitle
+   already established rather than inventing a new sizing approach.
+   =================================================================== */
+
+/* body's own base rule (line 7 above) sets display:flex/flex-direction:
+   column for the app's centered .container layout, with align-items:
+   center (shrink-wraps children to their own content width) and a padded
+   min-height:100svh - none of that is right for a normal top-to-bottom
+   marketing page with full-width sections, so this overrides it
+   explicitly rather than relying on what the app happens to leave
+   unset. Class beats the bare body element selector regardless of
+   source order, so this reliably wins. */
+.landingPage{
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    min-height: 100vh;
+    padding: 0;
+    overflow-x: hidden;
+}
+
+.landingHeader{
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-5) clamp(var(--space-5), 6vw, var(--space-9));
+}
+
+.landingBrand{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+
+.landingLogo{
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--text-lg);
+    background: linear-gradient(135deg, var(--violet-accent), var(--violet-accent-2));
+    color: #120b30;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.landingLogoSmall{
+    width: 32px;
+    height: 32px;
+    font-size: var(--text-md);
+}
+
+.landingBrandName{
+    font-family: 'Playfair Display', serif;
+    font-weight: 700;
+    font-size: var(--text-lg);
+    color: var(--violet-text);
+}
+
+/* Not a nav menu - the attention-ratio principle this whole page is built
+   around (one page, one job, one CTA) means every other exit from this
+   page is deliberately absent; a returning user still needs a way back
+   in, so this stays. Given a filled pill + solid border (not the old
+   ghost-text treatment) so it actually reads against the hero gradient
+   instead of disappearing into it - it just needs to be findable, not
+   loud, so it still stays well under .landingCtaBtn's visual weight. */
+.landingSignInLink{
+    font-size: var(--text-sm);
+    font-weight: 700;
+    color: var(--violet-text);
+    text-decoration: none;
+    padding: var(--space-2) var(--space-5);
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--violet-border);
+    background: var(--violet-surface-soft);
+    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.landingSignInLink:hover{
+    color: var(--violet-text);
+    border-color: var(--violet-accent);
+    background: var(--violet-surface);
+}
+
+.landingEyebrow{
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--violet-accent);
+    background: var(--color-info-soft);
+    padding: var(--space-1) var(--space-4);
+    border-radius: var(--radius-pill);
+    margin: 0 0 var(--space-4);
+}
+
+.landingHero{
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-9);
+    padding: clamp(var(--space-6), 6vw, var(--space-9)) clamp(var(--space-5), 6vw, var(--space-9)) var(--space-9);
+    max-width: 1180px;
+    margin: 0 auto;
+}
+
+.landingHeroCopy{
+    flex: 1 1 420px;
+    max-width: 560px;
+}
+
+.landingHeadline{
+    font-family: 'Playfair Display', serif;
+    font-weight: 700;
+    font-size: clamp(32px, 5.2vw, 52px);
+    line-height: 1.12;
+    color: var(--violet-text);
+    margin: 0 0 var(--space-4);
+}
+
+.landingSubhead{
+    font-size: var(--text-md);
+    line-height: 1.55;
+    color: var(--violet-muted);
+    margin: 0 0 var(--space-6);
+}
+
+.landingCtaRow{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-5);
+    margin-bottom: var(--space-3);
+}
+
+/* The single most saturated, boldest thing on the page (Von Restorff
+   Effect) - identical everywhere it appears (hero, final CTA), Fitts's-Law
+   sized (large, generous padding) since this is the one button that
+   matters. */
+.landingCtaBtn{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 56px;
+    padding: 0 var(--space-7);
+    border-radius: var(--radius-pill);
+    background: linear-gradient(135deg, var(--violet-accent), var(--violet-accent-2));
+    color: #120b30;
+    font-size: var(--text-md);
+    font-weight: 800;
+    text-decoration: none;
+    box-shadow: 0 16px 36px rgba(127, 111, 232, 0.4);
+    transition: transform 0.16s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.landingCtaBtn:hover{
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+    box-shadow: 0 20px 42px rgba(127, 111, 232, 0.5);
+}
+
+.landingCtaBtn:active{
+    transform: translateY(0);
+}
+
+/* Deliberately subordinate - ghost/text styling, never the same visual
+   weight as the primary CTA. */
+.landingSecondaryLink{
+    font-size: var(--text-sm);
+    font-weight: 700;
+    color: var(--violet-muted);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.landingSecondaryLink:hover{
+    color: var(--violet-text);
+}
+
+.landingCtaNote{
+    font-size: var(--text-xs);
+    color: var(--violet-muted);
+    opacity: 0.8;
+    margin: 0;
+}
+
+/* Hero content fades/slides in on load (not on scroll - it's already on
+   screen at first paint, so an IntersectionObserver would fire instantly
+   anyway; a plain keyframe is simpler and looks identical). Guarded inside
+   prefers-reduced-motion so the default, unconditional state is simply
+   "visible" - motion is progressive enhancement, never a requirement to
+   see the content. */
+@media (prefers-reduced-motion: no-preference){
+    @keyframes landingFadeUp{
+        from{ opacity: 0; transform: translateY(20px); }
+        to{ opacity: 1; transform: translateY(0); }
+    }
+
+    .landingEyebrow{ animation: landingFadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .landingHeadline{ animation: landingFadeUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both 0.06s; }
+    .landingSubhead{ animation: landingFadeUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both 0.14s; }
+    .landingCtaRow{ animation: landingFadeUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both 0.22s; }
+    .landingCtaNote{ animation: landingFadeUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both 0.28s; }
+    .landingMockWrap{ animation: landingFadeUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) both 0.2s; }
+}
+
+.landingMockWrap{
+    position: relative;
+    flex: 1 1 380px;
+    max-width: 420px;
+    padding: var(--space-6);
+    border-radius: var(--radius-lg);
+    background: var(--violet-surface-soft);
+    border: 1px solid var(--violet-border-soft);
+    box-shadow: 0 30px 70px rgba(5, 2, 30, 0.45);
+}
+
+/* Soft ambient glow behind the mock card, same visual DNA as the
+   html::before/::after orbs - makes the one piece of "product proof" on
+   the page feel like the focal point it is, instead of a flat card. */
+.landingMockWrap::before{
+    content: '';
+    position: absolute;
+    inset: -32px;
+    z-index: -1;
+    background: radial-gradient(circle at 28% 20%, rgba(181, 139, 255, 0.18), rgba(0, 0, 0, 0) 62%);
+    pointer-events: none;
+}
+
+.landingMockHeader{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+}
+
+.landingMockLabel{
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    color: var(--violet-muted);
+}
+
+.landingMockLabel i{
+    color: var(--violet-accent);
+}
+
+.landingMockLive{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-2xs);
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--color-success);
+    background: var(--color-success-soft);
+    padding: 3px var(--space-2);
+    border-radius: var(--radius-pill);
+}
+
+.landingMockLive::before{
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-success);
+    box-shadow: 0 0 0 3px var(--color-success-soft);
+}
+
+/* Real component reuse, not a mockup image - .tasks/.tasks li/.taskMeta/
+   the badge classes are the app's own, unmodified. Perfect message match:
+   the very first visual proof a visitor sees is pixel-identical to what
+   they get one click later. */
+.landingMockTasks{
+    transform: none;
+}
+
+.landingMockTasks li{
+    width: 100%;
+    padding-left: 44px;
+    cursor: default;
+}
+
+/* Rank badges are what actually sells "this is ranked, not just listed" -
+   color descends from urgent (red) to neutral (violet) so the ordering
+   reads at a glance, reinforcing the same urgency colors already on the
+   deadline badges beside it rather than inventing a second color code. */
+.landingRankBadge{
+    position: absolute;
+    left: 10px;
+    top: 12px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--text-2xs);
+    font-weight: 800;
+}
+
+.landingRankBadge.rank-1{
+    background: linear-gradient(135deg, #ffb3b3, var(--color-danger));
+    color: #3a0d0d;
+}
+
+.landingRankBadge.rank-2{
+    background: linear-gradient(135deg, #ffd08a, var(--color-warning));
+    color: #3a2400;
+}
+
+.landingRankBadge.rank-3{
+    background: linear-gradient(135deg, var(--violet-accent), var(--violet-accent-2));
+    color: #120b30;
+}
+
+.landingBenefits{
+    position: relative;
+    z-index: 1;
+    padding: var(--space-8) clamp(var(--space-5), 6vw, var(--space-9));
+}
+
+/* Frames the four cards inside one large dark panel (consulting.com's
+   product-tier layout) instead of four cards floating loose on the page -
+   a thin accent "tab" centered at the top edge and a faint dot-texture
+   give the section a designed edge, same "editorial" DNA as the body's
+   own grain layer. */
+.landingBenefitsPanel{
+    position: relative;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: var(--space-9) clamp(var(--space-5), 6vw, var(--space-8)) var(--space-8);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--card-border);
+    background: linear-gradient(165deg, var(--card-1), var(--card-3));
+    box-shadow: var(--card-shadow);
+    overflow: hidden;
+}
+
+.landingBenefitsPanelTab{
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--violet-accent), transparent);
+}
+
+.landingBenefitsPanel::before{
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1.5px);
+    background-size: 22px 22px;
+    pointer-events: none;
+}
+
+.landingBenefitsGrid{
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: var(--space-5);
+}
+
+.landingBenefitCard{
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: var(--space-7) var(--space-5) var(--space-6);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--violet-border-soft);
+    overflow: hidden;
+}
+
+/* Short accent line at the corner, not a full-width border - the detail
+   that makes a card read as deliberately designed rather than just a
+   bordered box. */
+.landingBenefitCard::before{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: var(--space-5);
+    width: 28px;
+    height: 2px;
+    background: var(--violet-accent);
+}
+
+/* Soft corner glow, same technique as .landingMockWrap's. */
+.landingBenefitCard::after{
+    content: '';
+    position: absolute;
+    top: -30%;
+    right: -30%;
+    width: 70%;
+    height: 70%;
+    background: radial-gradient(circle, rgba(181, 139, 255, 0.14), transparent 70%);
+    pointer-events: none;
+}
+
+.landingBenefitIcon{
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: 1px solid var(--violet-border);
+    background: rgba(181, 139, 255, 0.08);
+    color: var(--violet-accent);
+    font-size: var(--text-lg);
+    margin-bottom: var(--space-5);
+}
+
+.landingBenefitTitle{
+    position: relative;
+    z-index: 1;
+    font-size: var(--text-md);
+    font-weight: 800;
+    color: var(--violet-text);
+    margin: 0 0 var(--space-2);
+}
+
+.landingBenefitText{
+    position: relative;
+    z-index: 1;
+    font-size: var(--text-sm);
+    line-height: 1.6;
+    color: var(--violet-muted);
+    margin: 0;
+}
+
+.landingSectionTitle{
+    text-align: center;
+    font-family: 'Playfair Display', serif;
+    font-weight: 700;
+    font-size: var(--text-xl);
+    color: var(--violet-text);
+    margin: 0 0 var(--space-7);
+}
+
+.landingHow{
+    position: relative;
+    z-index: 1;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: var(--space-9) clamp(var(--space-5), 6vw, var(--space-9));
+}
+
+/* A connecting line through the row of number badges, not boxed cards -
+   deliberately a different visual device than .landingBenefitCard so the
+   page doesn't read as the same card repeated in every section. Ties the
+   three steps together as one continuous process instead. */
+.landingHowSteps{
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--space-6);
+}
+
+.landingHowSteps::before{
+    content: '';
+    position: absolute;
+    top: 18px;
+    left: 8%;
+    right: 8%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--violet-border) 15%, var(--violet-border) 85%, transparent);
+    z-index: 0;
+}
+
+.landingHowStep{
+    position: relative;
+    z-index: 1;
+    text-align: center;
+}
+
+.landingHowNumber{
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-circle);
+    background: linear-gradient(135deg, var(--violet-accent), var(--violet-accent-2));
+    color: #120b30;
+    font-weight: 800;
+    font-size: var(--text-md);
+    /* The connecting line above passes right through this circle's vertical
+       center - the circle's own solid fill naturally occludes it, which is
+       what makes it read as "dots on a line" instead of a line crossing
+       through empty text. */
+    box-shadow: 0 0 0 6px var(--violet-bg-2);
+    margin-bottom: var(--space-4);
+}
+
+.landingHowTitle{
+    position: relative;
+    z-index: 1;
+    font-size: var(--text-md);
+    font-weight: 800;
+    color: var(--violet-text);
+    margin: 0 0 var(--space-2);
+}
+
+.landingHowText{
+    position: relative;
+    z-index: 1;
+    font-size: var(--text-sm);
+    line-height: 1.6;
+    color: var(--violet-muted);
+    margin: 0;
+}
+
+.landingFounderNote{
+    position: relative;
+    z-index: 1;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: var(--space-7) clamp(var(--space-5), 6vw, var(--space-9));
+    text-align: center;
+}
+
+.landingFounderText{
+    font-size: var(--text-md);
+    line-height: 1.6;
+    font-style: italic;
+    color: var(--violet-text);
+    margin: 0 0 var(--space-3);
+}
+
+.landingFounderSign{
+    font-size: var(--text-sm);
+    color: var(--violet-muted);
+    margin: 0;
+}
+
+.landingFaq{
+    position: relative;
+    z-index: 1;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: var(--space-8) clamp(var(--space-5), 6vw, var(--space-9));
+}
+
+.landingFaqEyebrow{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+    font-size: var(--text-xs);
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--violet-accent);
+}
+
+.landingFaqEyebrowLine{
+    width: 40px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--violet-border));
+}
+
+.landingFaqEyebrowLine + span + .landingFaqEyebrowLine{
+    background: linear-gradient(90deg, var(--violet-border), transparent);
+}
+
+.landingFaq .landingSectionTitle{
+    margin-bottom: var(--space-3);
+}
+
+.landingFaqAccent{
+    color: var(--violet-accent);
+}
+
+.landingFaqSubtitle{
+    text-align: center;
+    font-size: var(--text-sm);
+    color: var(--violet-muted);
+    max-width: 460px;
+    margin: 0 auto var(--space-7);
+    line-height: 1.6;
+}
+
+/* <details>/<summary> instead of always-expanded text: direct feedback was
+   that the FAQ read as "way too much to read" up front. A native accordion
+   needs zero JS (keyboard/screen-reader behavior comes for free from the
+   browser) and means only the questions themselves are visible until a
+   visitor actually wants an answer - Hick's Law applied to reading, not
+   just clicking. Each question is now its own boxed pill (not a plain
+   divider-separated list) - a third distinct "container" language from
+   the benefit cards and the how-it-works timeline, so no two sections on
+   the page end up looking like the same component reused. */
+.landingFaqItem{
+    border: 1px solid var(--violet-border-soft);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.025);
+    padding: 0 var(--space-5);
+    margin-bottom: var(--space-3);
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.landingFaqItem:last-child{
+    margin-bottom: 0;
+}
+
+.landingFaqItem:hover{
+    border-color: var(--violet-border);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.landingFaqItem[open]{
+    border-color: var(--violet-accent);
+}
+
+.landingFaqQuestion{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    list-style: none;
+    cursor: pointer;
+    padding: var(--space-4) 0;
+    font-size: var(--text-base);
+    font-weight: 700;
+    color: var(--violet-text);
+    transition: color 0.2s ease;
+}
+
+.landingFaqQuestion::-webkit-details-marker{
+    display: none;
+}
+
+.landingFaqQuestion::marker{
+    content: '';
+}
+
+.landingFaqItem:hover .landingFaqQuestion{
+    color: var(--violet-accent);
+}
+
+.landingFaqChevron{
+    flex: 0 0 auto;
+    font-size: var(--text-sm);
+    color: var(--violet-muted);
+    transition: transform 0.25s ease, color 0.2s ease;
+}
+
+.landingFaqItem[open] .landingFaqQuestion{
+    color: var(--violet-accent);
+}
+
+.landingFaqItem[open] .landingFaqChevron{
+    transform: rotate(180deg);
+    color: var(--violet-accent);
+}
+
+.landingFaqAnswer{
+    font-size: var(--text-sm);
+    line-height: 1.55;
+    color: var(--violet-muted);
+    margin: 0;
+    padding: 0 0 var(--space-4);
+}
+
+.landingFaqAnswer a{
+    color: var(--violet-accent);
+}
+
+.landingFaqAnswer a:hover{
+    color: var(--violet-text);
+}
+
+/* Matches the .editorCancelBtn/.editorSaveBtn:focus-visible ring
+   established elsewhere - every new interactive element on this page gets
+   the same visible keyboard-focus signal as the rest of the app, not just
+   whatever the browser default happens to be. */
+.landingCtaBtn:focus-visible,
+.landingSignInLink:focus-visible,
+.landingSecondaryLink:focus-visible,
+.landingFooterLinks a:focus-visible,
+.landingFaqQuestion:focus-visible,
+.landingFaqAnswer a:focus-visible{
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(181, 139, 255, 0.4);
+    border-radius: var(--radius-sm);
+}
+
+/* Serial Position Effect: the same CTA, same wording, repeated here - top
+   and bottom are what's remembered best. */
+.landingFinalCta{
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-6);
+    max-width: 640px;
+    margin: 0 auto;
+    padding: var(--space-9) clamp(var(--space-5), 6vw, var(--space-9));
+    text-align: center;
+}
+
+.landingFinalCtaTitle{
+    font-family: 'Playfair Display', serif;
+    font-weight: 700;
+    font-size: clamp(24px, 4vw, 32px);
+    color: var(--violet-text);
+    margin: 0;
+}
+
+.landingFooter{
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-5);
+    padding: var(--space-6) var(--space-5);
+    border-top: 1px solid var(--violet-border-soft);
+}
+
+.landingFooterLinks{
+    display: flex;
+    gap: var(--space-5);
+}
+
+.landingFooterLinks a{
+    font-size: var(--text-sm);
+    color: var(--violet-muted);
+    text-decoration: none;
+}
+
+.landingFooterLinks a:hover{
+    color: var(--violet-text);
+}
+
+.landingFooterCopy{
+    font-size: var(--text-xs);
+    color: var(--violet-muted);
+    opacity: 0.7;
+    margin: 0;
+    width: 100%;
+    text-align: center;
+}
+
+@media (max-width: 640px){
+    .landingHeader{
+        padding: var(--space-4);
+    }
+
+    .landingHero{
+        flex-direction: column;
+        text-align: center;
+        padding-top: var(--space-6);
+    }
+
+    .landingCtaRow{
+        justify-content: center;
+    }
+
+    .landingMockWrap{
+        width: 100%;
+    }
+}
+
+/* Scroll-reveal for everything below the fold (JS toggles .isVisible via
+   IntersectionObserver, index.html). Default state here is plain visible -
+   the animated state only exists inside prefers-reduced-motion:no-preference,
+   so a visitor with reduced motion on, or a browser where the observer script
+   fails to run, still just sees the content normally instead of it getting
+   stuck invisible. Motion is a progressive enhancement on top of that, never
+   a requirement to see the page. */
+@media (prefers-reduced-motion: no-preference){
+    .scrollReveal{
+        opacity: 0;
+        transform: translateY(26px);
+        transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .scrollReveal.isVisible{
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    /* Staggered reveal within each grid/list - Serial Position Effect reads
+       better when items visibly arrive in the order they're listed, not
+       all at once. */
+    .landingBenefitCard:nth-child(2){ transition-delay: 0.08s; }
+    .landingBenefitCard:nth-child(3){ transition-delay: 0.16s; }
+    .landingBenefitCard:nth-child(4){ transition-delay: 0.24s; }
+
+    .landingHowStep:nth-child(2){ transition-delay: 0.1s; }
+    .landingHowStep:nth-child(3){ transition-delay: 0.2s; }
+
+    /* nth-of-type, not nth-child: the section heading above these is a
+       sibling too, and it's a different tag - nth-of-type counts only
+       among same-tag (<details>) siblings, so it still lines up with
+       each FAQ item's actual list position. */
+    .landingFaqItem:nth-of-type(2){ transition-delay: 0.06s; }
+    .landingFaqItem:nth-of-type(3){ transition-delay: 0.12s; }
+    .landingFaqItem:nth-of-type(4){ transition-delay: 0.18s; }
 }
 
 

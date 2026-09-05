@@ -314,6 +314,13 @@ async function applySubtaskDrivenUpdate(groupId, task, subtasks) {
     // marked done. justCompleted (captured before that override) is the
     // real signal for "did this transition to completed just now".
     if (justCompleted) {
+        // Direct bug report: checking off the last step completed the task
+        // but played no sound at all - this path (auto-complete via steps)
+        // never mirrored the direct-checkbox path's playTaskCompleteSound()/
+        // checkGroupMilestone() calls (see the .checkBtn handler above),
+        // only its history log.
+        playTaskCompleteSound();
+        checkGroupMilestone(groupId, task.id);
         logGroupTaskCompletion(groupId, task, historyCompletedAt).catch((error) => {
             console.error('Failed to log completion history:', error);
         });
@@ -431,6 +438,71 @@ groupViewTabButtons.forEach((button) => {
         switchGroupView(button.dataset.view || 'tasks');
     });
 });
+
+// Group calendar - same .calendarPanel markup/CSS as solo's app.html (see
+// renderGroupCalendarView further down); the member-color legend is the one
+// piece solo never needed. Declared here, before the nav wiring right below
+// that references them (const isn't hoisted like a function declaration -
+// this order matters, an earlier version of this block referencing these
+// before their declaration threw a ReferenceError that halted the whole
+// script, which is what caused the dashboard to hang on the loading spinner).
+const groupCalendarGrid = document.querySelector('.calendarGrid');
+const groupCalendarLabel = document.querySelector('.calendarLabel');
+const groupCalendarPrevBtn = document.querySelector('.calendarPrevBtn');
+const groupCalendarNextBtn = document.querySelector('.calendarNextBtn');
+const groupCalendarTodayBtn = document.querySelector('.calendarTodayBtn');
+const groupCalendarModeButtons = Array.from(document.querySelectorAll('.calendarModeBtn'));
+const groupCalendarLegend = document.querySelector('.calendarMemberLegend');
+
+// Calendar nav - direct port of solo script.js's stepCalendar/prev/next/
+// Today/mode-toggle wiring, just renamed and pointed at renderGroupCalendarView.
+function stepGroupCalendar(direction) {
+    const next = new Date(groupCalendarAnchorDate);
+    if (groupCalendarViewMode === 'month') {
+        next.setDate(1); // avoid month-length overflow while stepping the month itself
+        next.setMonth(next.getMonth() + direction);
+    } else {
+        next.setDate(next.getDate() + (direction * 7));
+    }
+    groupCalendarAnchorDate = next;
+    renderGroupCalendarView();
+}
+
+if (groupCalendarPrevBtn) {
+    groupCalendarPrevBtn.addEventListener('click', () => {
+        playClickSound();
+        stepGroupCalendar(-1);
+    });
+}
+
+if (groupCalendarNextBtn) {
+    groupCalendarNextBtn.addEventListener('click', () => {
+        playClickSound();
+        stepGroupCalendar(1);
+    });
+}
+
+if (groupCalendarTodayBtn) {
+    groupCalendarTodayBtn.addEventListener('click', () => {
+        playClickSound();
+        groupCalendarAnchorDate = new Date();
+        renderGroupCalendarView();
+    });
+}
+
+groupCalendarModeButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+        playClickSound();
+        groupCalendarViewMode = button.dataset.mode === 'week' ? 'week' : 'month';
+        groupCalendarModeButtons.forEach((btn) => {
+            const isActive = btn === button;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        renderGroupCalendarView();
+    });
+});
+
 const groupInviteCode = document.querySelector('.groupInviteCode');
 const groupCopyInviteBtn = document.querySelector('.groupCopyInviteBtn');
 const groupRenameBtn = document.querySelector('.groupRenameBtn');
@@ -541,6 +613,12 @@ let currentUser = null;
 let groups = undefined; // undefined = loading, [] = none yet
 let selectedGroupId = null;
 let groupTasks = [];
+// 'month' | 'week'; groupCalendarAnchorDate is whichever date the currently
+// visible month/week is anchored to - same state shape as solo's script.js,
+// kept in this file's own module scope (no shared state between the two
+// apps anywhere else either).
+let groupCalendarViewMode = 'month';
+let groupCalendarAnchorDate = new Date();
 let groupSuggestions = [];
 let groupHistoryEntries = [];
 let groupHistoryLoadError = null; // set on a failed history load (e.g. rules not published yet) - see watchSelectedGroupTasks
@@ -2743,7 +2821,13 @@ function renderGroupMemberScopeTabs(group) {
     // currently read as one longer list). "Everyone" gets a person-group
     // icon in the same avatar slot rather than a single-letter initial,
     // since it represents a set of members, not one.
-    const makeTab = (scope, label, avatarContent) => {
+    // isMarkup: true only for the one static icon string ('Everyone') -
+    // the per-member case passes a name-derived initial, which is user-
+    // controlled data and must never go through innerHTML, even truncated
+    // to one character (security audit flagged this as fragile-but-not-
+    // currently-exploitable; hardening it now rather than leaving the one
+    // remaining innerHTML site that touches user data at all).
+    const makeTab = (scope, label, avatarContent, isMarkup = false) => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.classList.add('taskViewBtn', 'groupScopeTabBtn');
@@ -2754,7 +2838,11 @@ function renderGroupMemberScopeTabs(group) {
         const avatar = document.createElement('span');
         avatar.classList.add('scopeTabAvatar');
         avatar.setAttribute('aria-hidden', 'true');
-        avatar.innerHTML = avatarContent;
+        if (isMarkup) {
+            avatar.innerHTML = avatarContent;
+        } else {
+            avatar.textContent = avatarContent;
+        }
         btn.appendChild(avatar);
 
         const text = document.createElement('span');
@@ -2768,13 +2856,312 @@ function renderGroupMemberScopeTabs(group) {
         groupMemberScopeTabs.appendChild(btn);
     };
 
-    makeTab('all', 'Everyone', '<i class="fa-solid fa-people-group"></i>');
+    makeTab('all', 'Everyone', '<i class="fa-solid fa-people-group"></i>', true);
 
     memberIds.forEach((memberId, index) => {
         const isYou = memberId === currentUser?.uid;
         const label = isYou ? 'Me' : resolveMemberName(memberId, memberNames[index], groupTasks);
         const initial = (label || '?').trim().charAt(0).toUpperCase() || '?';
         makeTab(memberId, label, initial);
+    });
+}
+
+// ---------------------------------------------------------------------
+// Group calendar - direct port of solo script.js's calendar (month/week
+// grid, due/planned/projected-recurrence chips, click-to-edit, click-
+// empty-day-to-quick-add), plus the one genuinely new piece group needs:
+// color-coding each chip by which member owns it. See the plan file's
+// "Group calendar (Phase 2)" section for the reasoning behind each
+// decision below.
+// ---------------------------------------------------------------------
+
+const GROUP_CALENDAR_MAX_VISIBLE_CHIPS = 3;
+const GROUP_CALENDAR_MAX_VISIBLE_CHIPS_WEEK = 6;
+
+// The 7-day equivalent of task-shared.js's buildCalendarMonthMatrix - kept
+// local, same reasoning as solo's buildCalendarWeekRow (script.js): week
+// view has no "in/out of range" concept worth sharing, it's just 7
+// consecutive days.
+function buildGroupCalendarWeekRow(anchorDate) {
+    const start = new Date(anchorDate);
+    start.setDate(anchorDate.getDate() - anchorDate.getDay());
+
+    const cells = [];
+    for (let i = 0; i < 7; i += 1) {
+        const date = new Date(start);
+        date.setDate(start.getDate() + i);
+        cells.push({ date, inMonth: true });
+    }
+    return cells;
+}
+
+function updateGroupCalendarLabel(cells) {
+    if (!groupCalendarLabel) {
+        return;
+    }
+    if (groupCalendarViewMode === 'month') {
+        groupCalendarLabel.textContent = groupCalendarAnchorDate.toLocaleDateString([], { month: 'long', year: 'numeric' });
+        return;
+    }
+
+    const start = cells[0].date;
+    const end = cells[cells.length - 1].date;
+    const sameMonth = start.getMonth() === end.getMonth();
+    const startLabel = start.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const endLabel = end.toLocaleDateString([], sameMonth ? { day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+    groupCalendarLabel.textContent = `${startLabel} – ${endLabel}`;
+}
+
+// Same bucketing as solo's buildCalendarEntriesByDay, over groupTasks
+// instead of tasks - entries keep task.ownerId along for the ride so chips
+// can be colored by member.
+function buildGroupCalendarEntriesByDay(cells) {
+    const byDay = {};
+    const rangeStart = cells[0].date;
+    const rangeEnd = cells[cells.length - 1].date;
+
+    function addEntry(dateKey, entry) {
+        if (!byDay[dateKey]) {
+            byDay[dateKey] = [];
+        }
+        byDay[dateKey].push(entry);
+    }
+
+    groupTasks.forEach((task) => {
+        if (task.dueAt && isValidDateValue(task.dueAt)) {
+            addEntry(getDateKey(new Date(task.dueAt)), { type: 'due', task });
+        }
+        if (task.scheduledAt && isValidDateValue(task.scheduledAt)) {
+            addEntry(getDateKey(new Date(task.scheduledAt)), { type: 'planned', task });
+        }
+
+        if (task.recurrence && task.dueAt && isValidDateValue(task.dueAt)) {
+            let cursor = task.dueAt;
+            for (let i = 0; i < 60; i += 1) {
+                const next = getNextRecurrenceDueAt(cursor, task.recurrence);
+                if (!next) {
+                    break;
+                }
+                const nextDate = new Date(next);
+                if (nextDate > rangeEnd) {
+                    break;
+                }
+                if (nextDate >= rangeStart) {
+                    addEntry(getDateKey(nextDate), { type: 'projected', task });
+                }
+                cursor = next;
+            }
+        }
+    });
+
+    return byDay;
+}
+
+// Real bug, reported live: hashing each ownerId independently (the original
+// approach here) can - and did - land two different members on the same or
+// a visually adjacent color purely by chance, with nothing keeping them
+// apart. A member's fixed POSITION in the group's own memberIds array has
+// no such risk: every member already has a distinct index, so keying off
+// that instead guarantees no two members in a group of up to 8 ever share
+// a color. Only degrades (repeats) past 8 members, which the legend still
+// spells out by name regardless.
+function getGroupMemberColorIndex(ownerId, group) {
+    const memberIds = group?.memberIds || [];
+    const index = memberIds.indexOf(ownerId);
+    return index >= 0 ? index % 8 : 0;
+}
+
+function renderGroupCalendarMemberLegend(group) {
+    if (!groupCalendarLegend) {
+        return;
+    }
+    const memberIds = group.memberIds || [];
+    const memberNames = group.memberNames || [];
+    groupCalendarLegend.innerHTML = '';
+
+    memberIds.forEach((memberId, index) => {
+        const item = document.createElement('span');
+        item.classList.add('calendarMemberLegendItem');
+
+        const dot = document.createElement('span');
+        dot.classList.add('calendarChipMemberDot', `calendarMemberColor-${getGroupMemberColorIndex(memberId, group)}`);
+        item.appendChild(dot);
+
+        const name = document.createElement('span');
+        const isYou = memberId === currentUser?.uid;
+        name.textContent = isYou ? 'You' : resolveMemberName(memberId, memberNames[index], groupTasks);
+        item.appendChild(name);
+
+        groupCalendarLegend.appendChild(item);
+    });
+}
+
+// Sets the deadline field (and opens Prioritize) to that day, then hands
+// off to group's own quick-add task input - direct port of solo's
+// openCalendarQuickAdd (script.js), same one-motion-flow reasoning. The
+// task this creates is owned by whoever adds it (same as every other
+// quick-add path in this file), same as clicking a day with no one's
+// tasks on it yet.
+function openGroupCalendarQuickAdd(date) {
+    switchGroupView('tasks');
+    taskDetailsPanel?.classList.add('open');
+    detailsToggleBtn?.setAttribute('aria-expanded', 'true');
+    const prefilled = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 9, 0, 0, 0);
+    if (deadlineInput) {
+        deadlineInput.value = toDatetimeLocalValue(prefilled.toISOString());
+    }
+    taskInput?.focus();
+}
+
+function renderGroupCalendarDayChips(chipListEl, moreBtnEl, orderedEntries, expanded, maxVisible, group) {
+    chipListEl.innerHTML = '';
+    const visibleCount = expanded ? orderedEntries.length : Math.min(maxVisible, orderedEntries.length);
+    orderedEntries.slice(0, visibleCount).forEach((entry) => {
+        chipListEl.appendChild(createGroupCalendarChip(entry, group));
+    });
+
+    if (orderedEntries.length > maxVisible) {
+        moreBtnEl.textContent = expanded ? 'Show less' : `+${orderedEntries.length - maxVisible} more`;
+        moreBtnEl.classList.remove('hidden');
+    } else {
+        moreBtnEl.classList.add('hidden');
+    }
+}
+
+// Port of solo's createCalendarChip, plus a leading member-color dot and
+// ownership-gated click behavior: a chip for a task you own opens the real
+// editor (same as the Tasks tab's Edit button, which is itself only ever
+// shown for your own tasks - see createGroupTaskItem above); a teammate's
+// chip stays inert, since no edit permission exists for it anywhere else
+// in the app either.
+function createGroupCalendarChip(entry, group) {
+    const { type, task } = entry;
+    const isMine = task.ownerId === currentUser?.uid;
+
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.classList.add('calendarChip', `calendarChip-${type}`);
+    if (!isMine) {
+        chip.classList.add('notEditable');
+    }
+    if (task.completed) {
+        chip.classList.add('completed');
+    }
+    chip.classList.add(type === 'projected' ? 'deadline-none' : getTaskDisplayDeadlineStatus(task).deadlineClassName);
+
+    const dot = document.createElement('span');
+    dot.classList.add('calendarChipMemberDot', `calendarMemberColor-${getGroupMemberColorIndex(task.ownerId, group)}`);
+    chip.appendChild(dot);
+
+    const icon = document.createElement('i');
+    icon.classList.add('fa-solid', type === 'planned' ? 'fa-clock' : type === 'projected' ? 'fa-repeat' : 'fa-calendar');
+    chip.appendChild(icon);
+
+    const label = document.createElement('span');
+    label.textContent = task.text;
+    chip.appendChild(label);
+
+    // task.ownerName is re-stamped on every write by its owner (see
+    // groups-data.js's resolveMemberName comment) - reading it straight off
+    // this task is simpler and just as fresh as looking it up again.
+    const ownerName = isMine ? 'You' : (task.ownerName || 'Teammate');
+    const kindLabel = type === 'planned' ? 'Planned' : type === 'projected' ? 'Repeats' : 'Due';
+    chip.setAttribute('aria-label', `${kindLabel}: ${task.text} (${ownerName})`);
+    chip.title = `${ownerName} · ${kindLabel}`;
+
+    if (isMine) {
+        chip.addEventListener('click', (event) => {
+            event.stopPropagation();
+            playClickSound();
+            openGroupTaskEditor(group.id, task);
+        });
+    } else {
+        chip.disabled = true;
+    }
+
+    return chip;
+}
+
+function createGroupCalendarDayCell(cell, entriesByDay, group) {
+    const dateKey = getDateKey(cell.date);
+    const entries = entriesByDay[dateKey] || [];
+    const isToday = dateKey === getDateKey(new Date());
+
+    const cellEl = document.createElement('div');
+    cellEl.classList.add('calendarDayCell');
+    if (!cell.inMonth) {
+        cellEl.classList.add('outOfMonth');
+    }
+    if (isToday) {
+        cellEl.classList.add('today');
+    }
+    cellEl.dataset.dateKey = dateKey;
+
+    const dateLabel = document.createElement('span');
+    dateLabel.classList.add('calendarDayNumber');
+    dateLabel.textContent = String(cell.date.getDate());
+    cellEl.appendChild(dateLabel);
+
+    const fullLabel = document.createElement('span');
+    fullLabel.classList.add('calendarDayFullLabel');
+    fullLabel.textContent = cell.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    cellEl.appendChild(fullLabel);
+
+    const chipList = document.createElement('div');
+    chipList.classList.add('calendarChipList');
+    cellEl.appendChild(chipList);
+
+    const ordered = [
+        ...entries.filter((entry) => entry.type === 'due'),
+        ...entries.filter((entry) => entry.type === 'planned'),
+        ...entries.filter((entry) => entry.type === 'projected')
+    ];
+
+    const maxVisible = groupCalendarViewMode === 'week' ? GROUP_CALENDAR_MAX_VISIBLE_CHIPS_WEEK : GROUP_CALENDAR_MAX_VISIBLE_CHIPS;
+
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button';
+    moreBtn.classList.add('calendarMoreBtn', 'hidden');
+    moreBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        playClickSound();
+        const isExpanded = cellEl.classList.toggle('expanded');
+        renderGroupCalendarDayChips(chipList, moreBtn, ordered, isExpanded, maxVisible, group);
+    });
+    cellEl.appendChild(moreBtn);
+
+    renderGroupCalendarDayChips(chipList, moreBtn, ordered, false, maxVisible, group);
+
+    if (entries.length === 0) {
+        cellEl.classList.add('empty');
+        cellEl.addEventListener('click', () => openGroupCalendarQuickAdd(cell.date));
+    }
+
+    return cellEl;
+}
+
+function renderGroupCalendarView() {
+    if (!groupCalendarGrid) {
+        return;
+    }
+    const group = getSelectedGroup();
+    if (!group) {
+        return;
+    }
+
+    renderGroupCalendarMemberLegend(group);
+
+    const cells = groupCalendarViewMode === 'month'
+        ? buildCalendarMonthMatrix(groupCalendarAnchorDate.getFullYear(), groupCalendarAnchorDate.getMonth())
+        : buildGroupCalendarWeekRow(groupCalendarAnchorDate);
+
+    updateGroupCalendarLabel(cells);
+    groupCalendarGrid.classList.toggle('calendarGridWeek', groupCalendarViewMode === 'week');
+
+    const entriesByDay = buildGroupCalendarEntriesByDay(cells);
+    groupCalendarGrid.innerHTML = '';
+    cells.forEach((cell) => {
+        groupCalendarGrid.appendChild(createGroupCalendarDayCell(cell, entriesByDay, group));
     });
 }
 
@@ -3389,6 +3776,7 @@ function renderApp() {
         renderSuggestForMemberBanner(group);
         renderSuggestionsForYou(group.id);
         renderGroupTasks();
+        renderGroupCalendarView();
         // The 6-button deadline-filter row isn't worth much with barely any
         // tasks to filter - condense it down to just All/Overdue (Overdue
         // stays regardless of count, since it's meaningful even at 1 task
@@ -4778,6 +5166,12 @@ const GROUP_TOUR_STEPS = [
         title: 'Activity',
         text: 'A running log of what the team has been finishing, newest first.',
         beforeShow: () => switchGroupView('activity')
+    },
+    {
+        selector: '.calendarPanel',
+        title: 'Calendar',
+        text: 'Everyone\'s due dates and planned work, laid out by day, each teammate gets their own color so whose task is on what day reads at a glance. Only your own tasks are clickable to edit.',
+        beforeShow: () => switchGroupView('calendar')
     },
     {
         selector: '.groupBrowseAllLink',

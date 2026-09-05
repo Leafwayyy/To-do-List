@@ -1731,7 +1731,10 @@ function createSubtaskItem(taskId, subtask) {
 
     checkBtn.addEventListener('click', () => {
         playClickSound();
-        toggleSubtaskCompletion(taskId, subtask.id);
+        const justCompletedTask = toggleSubtaskCompletion(taskId, subtask.id);
+        if (justCompletedTask) {
+            playTaskCompleteSound();
+        }
     });
 
     deleteBtn.addEventListener('click', () => {
@@ -2283,17 +2286,23 @@ function recomputeParentCompletionFromSubtasks(task) {
     }
 }
 
+// Returns whether THIS toggle is what just pushed the parent task from
+// incomplete to fully completed (all steps done) - callers use that to
+// decide whether to play the task-complete sound, so it fires exactly once
+// on the step that finishes the task, not on every step along the way and
+// not when un-checking a step drops the task back to incomplete.
 function toggleSubtaskCompletion(taskId, subtaskId) {
     const task = findTaskById(taskId);
     if (!task) {
-        return;
+        return false;
     }
 
     const subtask = (task.subtasks || []).find((item) => item.id === subtaskId);
     if (!subtask) {
-        return;
+        return false;
     }
 
+    const wasCompleted = task.completed;
     subtask.completed = !subtask.completed;
     task.updatedAt = new Date().toISOString();
     recomputeParentCompletionFromSubtasks(task);
@@ -2304,6 +2313,8 @@ function toggleSubtaskCompletion(taskId, subtaskId) {
     updateUrgencyAlert();
     renderActivityHeatmap();
     saveTasks();
+
+    return !wasCompleted && task.completed;
 }
 
 function addSubtaskToTask(taskId, text) {

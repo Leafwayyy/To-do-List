@@ -11,7 +11,7 @@
     <!-- Same stylesheet as the solo app, loaded once, the normal way - no
          second build/bundle for this page, so there's nothing for its rules
          to collide with. -->
-    <link rel="stylesheet" href="../style.css?v=20260904e">
+    <link rel="stylesheet" href="../style.css?v=20260904r">
 </head>
 <body class="authChecking">
 
@@ -21,7 +21,7 @@
     </div>
 
     <div class="userBadge hidden">
-        <a class="groupNavLink" href="../">My Tasks</a>
+        <a class="groupNavLink" href="../app.html">My Tasks</a>
         <button class="helpTourBtn" type="button" title="Restart the group tutorial"><i class="fa-solid fa-question"></i> Tutorial</button>
         <div class="navAttentionWrap">
             <button class="navAttentionBadge" type="button" title="" aria-haspopup="true" aria-expanded="false" aria-label="Notifications">
@@ -131,6 +131,7 @@
                 <div class="viewTabs" role="tablist" aria-label="Group dashboard view">
                     <button class="viewTab active" type="button" data-view="tasks" role="tab" aria-selected="true"><i class="fa-solid fa-list-check" aria-hidden="true"></i> Tasks</button>
                     <button class="viewTab" type="button" data-view="team" role="tab" aria-selected="false"><i class="fa-solid fa-people-group" aria-hidden="true"></i> Team</button>
+                    <button class="viewTab" type="button" data-view="calendar" role="tab" aria-selected="false"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Calendar</button>
                     <button class="viewTab" type="button" data-view="leaderboard" role="tab" aria-selected="false"><i class="fa-solid fa-trophy" aria-hidden="true"></i> Leaderboard</button>
                     <button class="viewTab" type="button" data-view="activity" role="tab" aria-selected="false"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Activity<span class="historyUnreadDot hidden" aria-label="Unread"></span></button>
                 </div>
@@ -296,6 +297,37 @@
                     <p class="memberRosterInviteHint hidden">Working alone for now - share the invite code above to add teammates.</p>
                 </div>
 
+                <!-- Same .calendarPanel markup as solo's app.html - one set of
+                     grid/cell/chip CSS serves both. The one group-only addition
+                     is the member-color legend above the grid (see
+                     renderGroupCalendarMemberLegend in group.js): color alone
+                     doesn't say whose task is whose, so the mapping is spelled
+                     out once here rather than left to memory. -->
+                <div class="viewPanel hidden" data-view-panel="calendar">
+                    <div class="calendarPanel" aria-label="Group task calendar">
+                        <div class="calendarMemberLegend" aria-label="Member colors"></div>
+                        <div class="calendarHeader">
+                            <div class="calendarNav">
+                                <button type="button" class="calendarPrevBtn" aria-label="Previous"><i class="fa-solid fa-chevron-left"></i></button>
+                                <p class="calendarLabel"></p>
+                                <button type="button" class="calendarNextBtn" aria-label="Next"><i class="fa-solid fa-chevron-right"></i></button>
+                            </div>
+                            <div class="calendarControls">
+                                <button type="button" class="calendarTodayBtn">Today</button>
+                                <div class="calendarModeToggle" role="tablist" aria-label="Calendar layout">
+                                    <button type="button" class="calendarModeBtn" data-mode="week" role="tab" aria-selected="false">Week</button>
+                                    <button type="button" class="calendarModeBtn active" data-mode="month" role="tab" aria-selected="true">Month</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="calendarWeekdayRow" aria-hidden="true">
+                            <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                        </div>
+                        <div class="calendarGrid"></div>
+                        <p class="calendarLegendHint">Solid = due, clock = planned work time, dashed = a future repeat. Only your own tasks are clickable to edit.</p>
+                    </div>
+                </div>
+
                 <div class="viewPanel hidden" data-view-panel="leaderboard">
                     <div class="groupLeaderboardPanel">
                         <div class="groupLeaderboardHeader">
@@ -397,7 +429,7 @@
     <script src="../brain-dump.js?v=20260904b"></script>
     <script src="../auth-gate.js?v=20260830a"></script>
     <script src="groups-data.js?v=20260830c"></script>
-    <script src="group.js?v=20260904f"></script>
+    <script src="group.js?v=20260904k"></script>
     <script type="module" src="../firebase-init.js?v=20260831a"></script>
     <script src="../settings.js?v=20260903b"></script>
 </body>

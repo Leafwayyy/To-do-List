@@ -2,11 +2,11 @@
   "name": "To-Do List",
   "short_name": "To-Do List",
   "description": "A prioritized, cloud-synced to-do list with shared group workspaces.",
-  "start_url": ".",
+  "start_url": "app.html",
   "scope": ".",
   "display": "standalone",
-  "background_color": "#050225",
-  "theme_color": "#050225",
+  "background_color": "#030204",
+  "theme_color": "#030204",
   "icons": [
     {
       "src": "icon.svg",

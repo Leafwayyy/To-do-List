@@ -28,8 +28,9 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      # Everything (solo app at /, group workspace at /group/) is plain
-      # HTML/CSS/JS served straight from the repo - no build step needed.
+      # Everything (marketing landing page at /, the solo app at /app.html,
+      # group workspace at /group/) is plain HTML/CSS/JS served straight
+      # from the repo - no build step needed.
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

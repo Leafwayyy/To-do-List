@@ -1,3 +1,13 @@
 .DS_Store
 node_modules/
 .wrangler/
+
+# Secrets - none of these exist in the repo today (the Gemini key is set via
+# `wrangler secret put`, never a file), but ignored defensively so one never
+# gets committed by accident later.
+.env
+.env.*
+worker/.dev.vars
+worker/.dev.vars.*
+*.pem
+serviceAccountKey*.json
