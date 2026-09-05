@@ -4681,6 +4681,10 @@ async function commitAiTasksGroup(draftTasks) {
             difficulty: draft.difficulty,
             dueAt: isValidDateValue(draft.dueAt) ? new Date(draft.dueAt).toISOString() : null,
             scheduledAt: isValidDateValue(draft.scheduledAt) ? new Date(draft.scheduledAt).toISOString() : null,
+            // addGroupTask already null-guards this against a missing dueAt
+            // (see its own "recurrence: dueAt ? ... : null" line) - Dusty
+            // just needed a way to populate it at all, which it never had.
+            recurrence: draft.recurrence,
             taskType,
             estimateMinutes: taskType === 'timeboxed' ? parseDurationMinutes(draft.estimateMinutes) : null,
             subtasks: draft.subtasks

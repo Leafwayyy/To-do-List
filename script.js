@@ -720,6 +720,9 @@ function commitAiTasksSolo(draftTasks) {
         const estimateMinutes = taskType === 'timeboxed' ? parseDurationMinutes(draft.estimateMinutes) : null;
         const dueAt = isValidDateValue(draft.dueAt) ? new Date(draft.dueAt).toISOString() : null;
         const scheduledAt = isValidDateValue(draft.scheduledAt) ? new Date(draft.scheduledAt).toISOString() : null;
+        // Same "needs a dueAt to repeat from" rule manual entry already
+        // follows - a recurrence with no deadline would silently never fire.
+        const recurrence = dueAt ? getValidRecurrenceValue(draft.recurrence) : null;
         const subtasks = (Array.isArray(draft.subtasks) ? draft.subtasks : [])
             .map((subtaskText) => (subtaskText || '').trim())
             .filter(Boolean)
@@ -741,6 +744,7 @@ function commitAiTasksSolo(draftTasks) {
             estimateMinutes,
             dueAt,
             scheduledAt,
+            recurrence,
             createdAt: timestamp,
             updatedAt: timestamp,
             manualOrder: nextManualOrder,
