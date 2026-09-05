@@ -26,27 +26,27 @@ const JWKS = createRemoteJWKSet(new URL(
 // pointed straight at the replacement), not from documentation that may
 // already be stale again by the time you're reading this.
 const GEMINI_MODEL = 'gemini-3.6-flash';
-// Keeps one oversized attachment from burning a disproportionate share of
-// the shared daily Gemini free-tier quota - checked before Gemini is ever
-// called, not enforced by Gemini itself. Raised alongside brain-dump.js's
-// own BRAIN_DUMP_MAX_FILE_BYTES (4MB -> 8MB per direct request) - base64
-// inflates a file by ~1.33x, and Gemini's own documented ceiling for
-// inline (non-Files-API) request data is around 20MB total, everything
-// included (attachments, history, task context, memory). 20MB here leaves
-// real headroom under that for the rest of the request while still
-// comfortably fitting 2 max-sized attachments (2 x 8MB x ~1.33 =~ 21.3MB
-// worst case on the attachments alone - MAX_ATTACHMENTS below is the
-// actual backstop against stacking more than that). If this and Gemini's
-// own ceiling ever collide in practice, the fix is fewer/smaller
-// attachments, not raising this further - the Files API (a real upload
-// endpoint instead of inline base64) is the correct path past ~20MB, and
-// isn't implemented here.
+// Keeps one oversized request from burning a disproportionate share of the
+// shared daily Gemini free-tier quota - checked before Gemini is ever
+// called, not enforced by Gemini itself. The real per-message attachment
+// budget is enforced client-side (brain-dump.js's own
+// BRAIN_DUMP_MAX_TOTAL_ATTACHMENT_BYTES, 10MB raw =~ 13.3MB of base64) -
+// this is the backstop, not the primary limiter, so it's set with real
+// headroom above that for everything else in the request (conversation
+// history, task-context/memory blocks) rather than being the tight number
+// itself. Gemini's own documented ceiling for inline (non-Files-API)
+// request data is around 20MB total, everything included - if this and
+// that ceiling ever collide in practice, the fix is a smaller client-side
+// budget, not raising this further; the Files API (a real upload endpoint
+// instead of inline base64) is the correct path past ~20MB, and isn't
+// implemented here.
 const MAX_BODY_BYTES = 20 * 1024 * 1024;
 const MAX_HISTORY_TURNS = 10;
-// Lowered from 5 alongside the per-file size increase above, to keep the
-// worst-case total bounded - fewer, larger attachments suits real
-// documents better than many small ones anyway.
-const MAX_ATTACHMENTS = 3;
+// Matches brain-dump.js's own BRAIN_DUMP_MAX_ATTACHMENTS - per direct
+// request, up to 10 (typically small) attachments per message, real
+// enforcement is the aggregate byte budget on the client side, this is
+// just the count backstop.
+const MAX_ATTACHMENTS = 10;
 
 const SYSTEM_INSTRUCTION = `You are a task-extraction assistant for a to-do list app, having a real back-and-forth conversation - not a one-shot form-filler that dumps every possible task on the first message. The user will ramble, brain-dump, or attach images/PDFs/text about what's going on in their life. Never invent tasks that aren't really there (general venting, background info, or something already done isn't a task).
 

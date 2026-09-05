@@ -49,18 +49,32 @@ const BRAIN_DUMP_DIFFICULTY_OPTIONS = [
 ];
 
 const BRAIN_DUMP_ACCEPTED_TYPES = 'image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain';
-// Doubled from 4MB per direct request (a real scanned/multi-page document
-// was hitting this) - kept well under Gemini's own ~20MB total-request
-// ceiling for inline base64 data even in the worst case, since base64
-// itself inflates size by ~1.33x and the Worker's own MAX_ATTACHMENTS/
-// MAX_BODY_BYTES (worker/brain-dump-worker.js) were lowered/raised to
-// match - see that file's own comment for the actual math.
-const BRAIN_DUMP_MAX_FILE_BYTES = 8 * 1024 * 1024; // 8MB per attachment, checked client-side
-// Matches the Worker's own MAX_ATTACHMENTS (worker/brain-dump-worker.js) -
-// kept in sync manually, same independent-per-file convention this app
-// already uses for other small cross-file numbers (see settings.js's
-// MEMORY_SOFT_LIMIT).
-const BRAIN_DUMP_MAX_ATTACHMENTS = 3;
+// Per direct request: up to 10 attachments per message again (was cut to 3
+// in an earlier pass), but that only actually works alongside a real
+// AGGREGATE budget (BRAIN_DUMP_MAX_TOTAL_ATTACHMENT_BYTES below) - "10
+// pictures" and "one big document" both have to fit under the SAME total,
+// not 10 independent slots each allowed to be huge, or the request would
+// blow past what a single call can carry. Matches the Worker's own
+// MAX_ATTACHMENTS (worker/brain-dump-worker.js) - kept in sync manually,
+// same independent-per-file convention this app already uses for other
+// small cross-file numbers (see settings.js's MEMORY_SOFT_LIMIT).
+const BRAIN_DUMP_MAX_ATTACHMENTS = 10;
+// Per-file ceiling - mainly catches one absurdly large file early with a
+// clear reason, distinct from "doesn't fit alongside what's already
+// attached" below. Raised from 8MB per direct request (a real document was
+// still hitting that).
+const BRAIN_DUMP_MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB per attachment, checked client-side
+// The real budget for a batch: base64 inflates raw bytes by ~1.33x, and
+// Gemini's own documented ceiling for inline (non-Files-API) request data
+// is around 20MB total, everything included - attachments, conversation
+// history, task-context/memory blocks. 10MB raw here becomes ~13.3MB of
+// base64, leaving real headroom under that ceiling for the rest of the
+// request instead of spending the whole budget on files alone. In
+// practice this comfortably fits 10 typical photos/screenshots (each
+// usually well under 1MB) OR one document near the per-file cap above -
+// exactly the "many small or one big" flexibility a flat per-file x count
+// multiplication can't give you.
+const BRAIN_DUMP_MAX_TOTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const BRAIN_DUMP_MAX_HISTORY_TURNS = 10;
 const BRAIN_DUMP_MAX_CONTEXT_TASKS = 150; // per list (solo, or each group) - a defensive cap, not a realistic ceiling
 const BRAIN_DUMP_MAX_MEMORIES = 60; // how many saved memories get sent as context per message - a defensive cap
@@ -1889,6 +1903,15 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     }
 
     async function handleFilesSelected(fileList) {
+        // Running total across whatever's already pending (from an earlier
+        // pick/paste this same message) plus whatever this batch adds -
+        // the real budget is BRAIN_DUMP_MAX_TOTAL_ATTACHMENT_BYTES, not
+        // "N files of the max size each," so 10 small photos and one big
+        // document both have a real shot depending on what's actually
+        // being attached, not a number picked for one case that starves
+        // the other.
+        let runningTotal = pendingAttachments.reduce((sum, attachment) => sum + (attachment.size || 0), 0);
+
         for (const file of Array.from(fileList)) {
             // The Worker only ever keeps the first MAX_ATTACHMENTS
             // (worker/brain-dump-worker.js) and silently drops the rest -
@@ -1900,12 +1923,17 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
                 continue;
             }
             if (file.size > BRAIN_DUMP_MAX_FILE_BYTES) {
-                appendErrorBubble(`"${file.name}" is too large (max 8MB) - skipped.`);
+                appendErrorBubble(`"${file.name}" is too large (max 10MB) - skipped.`);
+                continue;
+            }
+            if (runningTotal + file.size > BRAIN_DUMP_MAX_TOTAL_ATTACHMENT_BYTES) {
+                appendErrorBubble(`"${file.name}" would push this message's attachments over the size limit - skipped. Send it on its own, or remove something else first.`);
                 continue;
             }
             try {
                 const data = await readFileAsBase64(file);
-                pendingAttachments.push({ mimeType: file.type || 'application/octet-stream', data, name: file.name });
+                pendingAttachments.push({ mimeType: file.type || 'application/octet-stream', data, name: file.name, size: file.size });
+                runningTotal += file.size;
             } catch (error) {
                 console.error('Failed to read attachment:', error);
                 appendErrorBubble(`Couldn't read "${file.name}" - skipped.`);
