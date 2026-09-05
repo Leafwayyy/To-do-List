@@ -49,7 +49,18 @@ const BRAIN_DUMP_DIFFICULTY_OPTIONS = [
 ];
 
 const BRAIN_DUMP_ACCEPTED_TYPES = 'image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain';
-const BRAIN_DUMP_MAX_FILE_BYTES = 4 * 1024 * 1024; // 4MB per attachment, checked client-side
+// Doubled from 4MB per direct request (a real scanned/multi-page document
+// was hitting this) - kept well under Gemini's own ~20MB total-request
+// ceiling for inline base64 data even in the worst case, since base64
+// itself inflates size by ~1.33x and the Worker's own MAX_ATTACHMENTS/
+// MAX_BODY_BYTES (worker/brain-dump-worker.js) were lowered/raised to
+// match - see that file's own comment for the actual math.
+const BRAIN_DUMP_MAX_FILE_BYTES = 8 * 1024 * 1024; // 8MB per attachment, checked client-side
+// Matches the Worker's own MAX_ATTACHMENTS (worker/brain-dump-worker.js) -
+// kept in sync manually, same independent-per-file convention this app
+// already uses for other small cross-file numbers (see settings.js's
+// MEMORY_SOFT_LIMIT).
+const BRAIN_DUMP_MAX_ATTACHMENTS = 3;
 const BRAIN_DUMP_MAX_HISTORY_TURNS = 10;
 const BRAIN_DUMP_MAX_CONTEXT_TASKS = 150; // per list (solo, or each group) - a defensive cap, not a realistic ceiling
 const BRAIN_DUMP_MAX_MEMORIES = 60; // how many saved memories get sent as context per message - a defensive cap
@@ -1879,8 +1890,17 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
 
     async function handleFilesSelected(fileList) {
         for (const file of Array.from(fileList)) {
+            // The Worker only ever keeps the first MAX_ATTACHMENTS
+            // (worker/brain-dump-worker.js) and silently drops the rest -
+            // matching that limit here too so a dropped attachment is
+            // visible right away instead of just never showing up in
+            // Dusty's reply with no explanation.
+            if (pendingAttachments.length >= BRAIN_DUMP_MAX_ATTACHMENTS) {
+                appendErrorBubble(`Only ${BRAIN_DUMP_MAX_ATTACHMENTS} attachments per message - "${file.name}" was skipped.`);
+                continue;
+            }
             if (file.size > BRAIN_DUMP_MAX_FILE_BYTES) {
-                appendErrorBubble(`"${file.name}" is too large (max 4MB) - skipped.`);
+                appendErrorBubble(`"${file.name}" is too large (max 8MB) - skipped.`);
                 continue;
             }
             try {
@@ -2069,6 +2089,26 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
                 handleFilesSelected(fileInput.files);
             }
             fileInput.value = '';
+        });
+
+        // Pasting a copied image (a screenshot, an image copied from
+        // another app or a webpage) straight into the composer, requested
+        // live - was file-picker-only before. Goes through the exact same
+        // handleFilesSelected the picker uses, so size/type limits and the
+        // attachment-chip UI behave identically either way, nothing
+        // duplicated. Only intercepts the paste when the clipboard
+        // actually carries a file - a normal text paste (the overwhelming
+        // common case) falls through untouched.
+        textInput.addEventListener('paste', (event) => {
+            const files = Array.from(event.clipboardData?.items || [])
+                .filter((item) => item.kind === 'file')
+                .map((item) => item.getAsFile())
+                .filter(Boolean);
+            if (files.length === 0) {
+                return;
+            }
+            event.preventDefault();
+            handleFilesSelected(files);
         });
 
         closeBtn.addEventListener('click', close);
