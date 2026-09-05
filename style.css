@@ -6184,21 +6184,53 @@ body.authGateActive .authOverlay{
     white-space: normal;
 }
 
-/* Marks a memory proposal as 'context' (a current situation, not a
-   durable trait) - see createMemoryReviewCard. Only ever shown for
-   context-type drafts, never for the default preference type, so its
-   mere presence already communicates "this one expires". */
-.brainDumpMemoryTypeBadge{
+/* A memory just auto-saved from chat (see brain-dump.js's
+   appendMemorySavedNotice) - a plain inline row, not a card, since there's
+   nothing left to confirm, only a real Forget (undo) if it's wrong. */
+.brainDumpMemorySaved{
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(181, 139, 255, 0.1);
+    border: 1px solid rgba(181, 139, 255, 0.32);
+    border-radius: var(--radius-md, 12px);
+    padding: 8px 12px;
+    font-size: var(--text-sm, 12px);
+}
+
+.brainDumpMemorySavedIcon{
+    flex: 0 0 auto;
+}
+
+.brainDumpMemorySavedText{
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--violet-muted, #d7d0ff);
+}
+
+.brainDumpMemoryForgetBtn{
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: var(--violet-accent, #b58bff);
     font-size: var(--text-2xs, 10px);
     font-weight: 700;
-    text-align: center;
-    color: var(--violet-accent, #b58bff);
-    background: rgba(181, 139, 255, 0.16);
-    border: 1px solid rgba(181, 139, 255, 0.4);
-    border-radius: var(--radius-pill);
-    padding: 2px 8px;
-    white-space: nowrap;
-    cursor: help;
+    cursor: pointer;
+    padding: 2px 4px;
+}
+
+.brainDumpMemoryForgetBtn:hover{
+    text-decoration: underline;
+}
+
+.brainDumpMemorySaved.forgotten{
+    opacity: 0.55;
+}
+
+.brainDumpMemorySaved.forgotten .brainDumpMemorySavedText{
+    text-decoration: line-through;
+    text-decoration-color: rgba(215, 208, 255, 0.4);
 }
 
 .brainDumpTaskCardFields{
@@ -6289,7 +6321,8 @@ body.authGateActive .authOverlay{
 }
 
 .brainDumpTaskCardMatrix,
-.brainDumpTaskCardDifficulty{
+.brainDumpTaskCardDifficulty,
+.brainDumpTaskCardRecurrence{
     flex: 1 1 100px;
     height: 30px;
     padding: 0 6px;

@@ -47,6 +47,13 @@
     let memoryAddBtn = null;
     let memoryAddStatus = null;
     let currentMemoryTotal = 0;
+    let memoryImportToggleBtn = null;
+    let memoryImportPanel = null;
+    let memoryImportText = null;
+    let memoryImportFile = null;
+    let memoryImportBtn = null;
+    let memoryImportStatus = null;
+    let memoryImportResults = null;
 
     function injectStyles() {
         const style = document.createElement('style');
@@ -252,6 +259,78 @@
                 padding: 2px 4px;
             }
             .settingsMemoryForgetBtn:hover { color: #e08a8a; }
+            .settingsMemoryImportToggleBtn {
+                background: transparent;
+                border: none;
+                color: #b58bff;
+                font: inherit;
+                font-size: 0.82rem;
+                font-weight: 700;
+                cursor: pointer;
+                padding: 4px 0;
+                margin-bottom: 4px;
+            }
+            .settingsMemoryImportToggleBtn:hover { text-decoration: underline; }
+            .settingsMemoryImportPanel {
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(170, 152, 255, 0.24);
+                border-radius: 10px;
+                padding: 12px;
+                margin-bottom: 14px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .settingsMemoryImportPanel.hidden { display: none; }
+            .settingsMemoryImportText {
+                width: 100%;
+                min-height: 80px;
+                resize: vertical;
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(170, 152, 255, 0.3);
+                border-radius: 8px;
+                color: #f6f4ff;
+                padding: 8px 10px;
+                font: inherit;
+                font-size: 0.86rem;
+                box-sizing: border-box;
+            }
+            .settingsMemoryImportFileRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+            .settingsMemoryImportFile { flex: 1; min-width: 0; font-size: 0.8rem; color: #d7d0ff; }
+            .settingsMemoryImportBtn { padding: 8px 16px; white-space: nowrap; }
+            .settingsMemoryImportStatus { margin: 0; }
+            .settingsMemoryImportStatus.hidden { display: none; }
+            .settingsMemoryImportResults:empty { display: none; }
+            .settingsMemoryImportList {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                margin-bottom: 8px;
+            }
+            .settingsMemoryImportRow {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(170, 152, 255, 0.24);
+                border-radius: 8px;
+                padding: 8px 10px;
+                font-size: 0.86rem;
+                cursor: pointer;
+            }
+            .settingsMemoryImportRow span:first-of-type { flex: 1; min-width: 0; word-break: break-word; }
+            .settingsMemoryImportTypeBadge {
+                flex: 0 0 auto;
+                font-size: 0.68rem;
+                font-weight: 700;
+                color: #d7d0ff;
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(170, 152, 255, 0.3);
+                border-radius: 999px;
+                padding: 2px 8px;
+                white-space: nowrap;
+            }
+            .settingsMemoryImportSaveBtn { padding: 8px 16px; }
         `;
         document.head.appendChild(style);
     }
@@ -444,13 +523,25 @@
                     <h2>Dusty's memory</h2>
                     <button type="button" class="settingsCloseBtn" aria-label="Close">&times;</button>
                 </div>
-                <p class="settingsHint">Facts Dusty has saved about you, with your OK, to help future chats - nothing here unless you confirmed it first.</p>
+                <p class="settingsHint">Facts Dusty has saved about you, to help future chats. He may add one himself when something useful comes up in chat - you'll always see it happen, with a one-tap way to remove it. Delete anything below you don't want him to know.</p>
 
                 <div class="settingsMemoryAddRow">
                     <input type="text" class="settingsMemoryAddInput" maxlength="300" placeholder="Tell Dusty something to remember...">
                     <button type="button" class="settingsMemoryAddBtn">Add</button>
                 </div>
                 <p class="settingsMemoryAddStatus settingsHint hidden" aria-live="polite"></p>
+
+                <button type="button" class="settingsMemoryImportToggleBtn">Import from text or a file</button>
+                <div class="settingsMemoryImportPanel hidden">
+                    <p class="settingsHint">Paste something long (notes, a journal entry, a bio) or attach a file - Dusty will read the whole thing and pull out everything durable he can find, for you to pick from.</p>
+                    <textarea class="settingsMemoryImportText" rows="4" maxlength="20000" placeholder="Paste text here..."></textarea>
+                    <div class="settingsMemoryImportFileRow">
+                        <input type="file" class="settingsMemoryImportFile" accept=".txt,.md,.pdf,image/*">
+                        <button type="button" class="settingsMemoryImportBtn">Extract memories</button>
+                    </div>
+                    <p class="settingsMemoryImportStatus settingsHint hidden" aria-live="polite"></p>
+                    <div class="settingsMemoryImportResults"></div>
+                </div>
 
                 <p class="settingsMemoryCount settingsHint hidden"></p>
                 <ul class="settingsMemoryList"></ul>
@@ -480,6 +571,19 @@
                 addMemoryManually();
             }
         });
+
+        memoryImportToggleBtn = node.querySelector('.settingsMemoryImportToggleBtn');
+        memoryImportPanel = node.querySelector('.settingsMemoryImportPanel');
+        memoryImportText = node.querySelector('.settingsMemoryImportText');
+        memoryImportFile = node.querySelector('.settingsMemoryImportFile');
+        memoryImportBtn = node.querySelector('.settingsMemoryImportBtn');
+        memoryImportStatus = node.querySelector('.settingsMemoryImportStatus');
+        memoryImportResults = node.querySelector('.settingsMemoryImportResults');
+
+        memoryImportToggleBtn.addEventListener('click', () => {
+            memoryImportPanel.classList.toggle('hidden');
+        });
+        memoryImportBtn.addEventListener('click', runMemoryImport);
 
         return node;
     }
@@ -530,6 +634,147 @@
         } finally {
             memoryAddBtn.disabled = false;
         }
+    }
+
+    // Matches BRAIN_DUMP_MEMORY_CONTEXT_EXPIRY_DAYS in brain-dump.js - same
+    // independent-per-file convention as MEMORY_SOFT_LIMIT above.
+    const MEMORY_IMPORT_CONTEXT_EXPIRY_DAYS = 90;
+
+    // Sends the pasted text/file to Dusty (via window.DustyMemory,
+    // published by whichever brain-dump.js controller is active on this
+    // page - solo or group) in extraction mode, then renders whatever
+    // comes back as a checkbox list to confirm. Unlike a normal chat
+    // memory (auto-saved now), an import stays confirm-first - reviewing
+    // 20+ things extracted from one big document at once is exactly the
+    // "want to skim and reject a few" case worth a real look before they
+    // land in memory.
+    async function runMemoryImport() {
+        if (!currentUser || !memoryImportBtn) {
+            return;
+        }
+        const text = memoryImportText.value.trim();
+        const file = memoryImportFile.files?.[0] || null;
+        if (!text && !file) {
+            memoryImportStatus.textContent = 'Paste some text or choose a file first.';
+            memoryImportStatus.classList.remove('hidden');
+            return;
+        }
+        if (!window.DustyMemory?.requestMemoryImport) {
+            memoryImportStatus.textContent = "Dusty isn't available right now.";
+            memoryImportStatus.classList.remove('hidden');
+            return;
+        }
+
+        memoryImportBtn.disabled = true;
+        memoryImportBtn.textContent = 'Reading...';
+        memoryImportStatus.classList.add('hidden');
+        memoryImportResults.innerHTML = '';
+
+        const { proposals, error } = await window.DustyMemory.requestMemoryImport(text, file);
+
+        memoryImportBtn.disabled = false;
+        memoryImportBtn.textContent = 'Extract memories';
+
+        if (error) {
+            memoryImportStatus.textContent = error;
+            memoryImportStatus.classList.remove('hidden');
+            return;
+        }
+        if (!proposals || proposals.length === 0) {
+            memoryImportStatus.textContent = "Didn't find anything durable in that - try a longer or more personal document.";
+            memoryImportStatus.classList.remove('hidden');
+            return;
+        }
+
+        renderImportResults(proposals);
+    }
+
+    // A small local checkbox-list-plus-bulk-button, same spirit as
+    // brain-dump.js's appendReviewSection but simpler (no editable text
+    // field, this file doesn't need it) and scoped to Settings' own
+    // .settingsMemoryImportResults container rather than a chat log.
+    function renderImportResults(proposals) {
+        memoryImportResults.innerHTML = '';
+
+        const list = document.createElement('div');
+        list.className = 'settingsMemoryImportList';
+        const checkboxes = proposals.map((proposal) => {
+            const row = document.createElement('label');
+            row.className = 'settingsMemoryImportRow';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = true;
+            row.appendChild(checkbox);
+            const text = document.createElement('span');
+            text.textContent = proposal.text || '';
+            row.appendChild(text);
+            if (proposal.type === 'context') {
+                const badge = document.createElement('span');
+                badge.className = 'settingsMemoryImportTypeBadge';
+                badge.textContent = 'Current situation';
+                row.appendChild(badge);
+            }
+            list.appendChild(row);
+            return { checkbox, proposal };
+        });
+        memoryImportResults.appendChild(list);
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'settingsMemoryImportSaveBtn';
+        saveBtn.textContent = 'Save checked';
+        saveBtn.addEventListener('click', async () => {
+            const checked = checkboxes.filter((row) => row.checkbox.checked).map((row) => row.proposal);
+            if (checked.length === 0) {
+                memoryImportStatus.textContent = 'Nothing checked.';
+                memoryImportStatus.classList.remove('hidden');
+                return;
+            }
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+            try {
+                const savedCount = await saveImportedMemories(checked);
+                memoryImportResults.innerHTML = '';
+                memoryImportText.value = '';
+                memoryImportFile.value = '';
+                memoryImportStatus.textContent = `Saved ${savedCount} ${savedCount === 1 ? 'memory' : 'memories'}.`;
+                memoryImportStatus.classList.remove('hidden');
+                refreshMemoryList();
+            } catch (error) {
+                console.error('Failed to save imported memories:', error);
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Try again';
+            }
+        });
+        memoryImportResults.appendChild(saveBtn);
+    }
+
+    // Same write shape brain-dump.js's own commitMemories uses (text/type/
+    // expiresAt/createdAt) - richer than addMemoryManually's plain-text
+    // shape above, since these came with a real type from Gemini worth
+    // keeping, unlike a bare manually-typed fact.
+    async function saveImportedMemories(drafts) {
+        const { doc, setDoc, collection, serverTimestamp } = window.ToDoAuth.firestore;
+        let savedCount = 0;
+        for (const draft of drafts) {
+            const trimmedText = String(draft.text || '').trim();
+            if (!trimmedText || currentMemoryTotal >= MEMORY_SOFT_LIMIT) {
+                continue;
+            }
+            const memoryType = draft.type === 'context' ? 'context' : 'preference';
+            const expiresAt = memoryType === 'context'
+                ? new Date(Date.now() + MEMORY_IMPORT_CONTEXT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString()
+                : null;
+            await setDoc(doc(collection(window.ToDoAuth.db, 'users', currentUser.uid, 'dustyMemory')), {
+                text: trimmedText.slice(0, 300),
+                type: memoryType,
+                expiresAt,
+                createdAt: serverTimestamp()
+            });
+            currentMemoryTotal += 1;
+            savedCount += 1;
+        }
+        return savedCount;
     }
 
     function openMemoryOverlay() {

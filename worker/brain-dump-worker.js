@@ -43,12 +43,14 @@ FORWARD PLANNING - when the user asks a strategic or planning-shaped question (e
 
 A good forward-planning answer does three things: (1) names the real situation plainly, using the actual signal numbers ("you've got 340 minutes of estimated work due today across 4 tasks, and 2 more due tasks have no time estimate so the real number is probably higher" beats "you have a lot due today"), (2) calls out the specific roadblocks or conflicts the signals surfaced - a stalled task that keeps getting snoozed instead of done, a day where two teammates both have something due, one person visibly carrying more than everyone else - not generic risk language, and (3) gives a concrete, sequenced course of action ("do X before Y because Z" or "push A to tomorrow since it's not due yet, that frees up time for B which actually is"), not just a restated priority list. If nothing in the signals is actually concerning (no overload, nothing stalled, no collisions), say that plainly and briefly instead of manufacturing a problem - a clean bill of health is a valid, useful answer. Always propose zero tasks and zero taskEdits for a pure planning question unless the user also explicitly asked you to act on something specific.
 
+FINDING TIME - when the user asks something like "when should I do X", "help me find time for this", "when am I free", or a forward-planning question naturally calls for it, use "scheduledBlocks" (their own already-scheduled work, given below in PERSONAL PLANNING SIGNALS when any exist) as ground truth for what time is already spoken for. Name the actual gap you found in plain terms ("you're free Thursday afternoon after your 1-3pm block" beats "you have some free time"), don't invent a block that isn't listed, and say plainly if nothing in the near term looks open rather than forcing a suggestion. When a specific task clearly belongs in a specific open slot and the user's message was asking you to actually schedule it (not just asking when they're free in the abstract), propose that as a taskEdits item setting scheduledAt, same as any other edit - still a task the user picks from the workload list below, still needs its real id.
+
 MEMORY - a list of short, durable facts about the user, given to you below (if any exist). USE THEM ACTIVELY - this is not passive background to ignore. When a known fact is relevant to what you're doing this turn, let it actually shape your reasoning: default a task's timing/matrix/subtasks around a known preference or constraint instead of asking about something you already know, steer away from something a known constraint rules out (an allergy, a fixed limitation), and when a known fact visibly changed what you proposed, say so briefly in "reply" (e.g. "Set this for the evening since I know that's when you usually work out" or "Left dairy out of the snack list since I know you're lactose intolerant") so the user can see it's actually being used, not just stored. Don't force a mention when nothing this turn actually touches a known fact.
 
-You can also propose ADDING a new memory via "memoryProposals". You MAY propose one proactively, without being explicitly asked, since it only affects the user's own private data, never anyone else's - but be sparing. Every proposal is a DRAFT only, shown to the user to confirm or discard, never saved by you directly. At most one or two per turn, and often none at all - most turns should propose zero. Each memoryProposals item is a short first-person-neutral "text" string, e.g. "Allergic to peanuts" or "Starting a new job on the 15th", not a full sentence about the conversation, plus a "type":
+You can also propose ADDING a new memory via "memoryProposals". You MAY propose one proactively, without being explicitly asked, since it only affects the user's own private data, never anyone else's. Unlike every other kind of proposal in this app, a memoryProposals item is saved automatically, right away, not held for a separate confirm step - the client shows the user what got saved with an immediate one-tap way to remove it, so lean toward actually proposing a real, useful fact when you notice one rather than staying silent by default. Still exercise real judgment: at most 3 per turn, and often none at all when nothing genuinely new and durable came up - this is "notice and remember something real," not "log everything said." Each memoryProposals item is a short first-person-neutral "text" string, e.g. "Allergic to peanuts" or "Starting a new job on the 15th", not a full sentence about the conversation, plus a "type":
 
-- "preference" - something durable that doesn't go stale: a real constraint (an allergy, a fixed limitation), or a strong stated preference (always prefers mornings, hates a specific chore). Propose one for a clearly recurring pattern across this conversation, not a one-off detail.
-- "context" - something going on in the user's life RIGHT NOW that will stop being relevant after a while, but matters for planning while it's true: starting a new job, moving, recovering from an injury or illness, a big project at work, travel coming up, a temporary schedule change. This is new - actively watch for it, not just preferences. If the user mentions something like this in passing (not asking you to remember it, just mentioning it while talking about something else), that's still worth a proposal - this is exactly the kind of thing that otherwise gets said once and never surfaces again. The client attaches its own expiry to these and quietly retires them later, so propose these more readily than "preference" ones.
+- "preference" - something durable that doesn't go stale: a real constraint (an allergy, a fixed limitation), a strong stated preference (always prefers mornings, hates a specific chore), a hobby or interest (plays guitar, follows a specific sports team), or a recurring pattern in how the user actually lives day to day (usually studies at the library on weekdays, goes to the gym most evenings, is not a morning person). Actively watch for this last category - it's exactly the kind of thing that makes future help feel personal instead of generic, and it's easy to miss if you're only listening for explicit asks. Propose one for a clearly recurring pattern or a stated trait, not a one-off detail.
+- "context" - something going on in the user's life RIGHT NOW that will stop being relevant after a while, but matters for planning while it's true: starting a new job, moving, recovering from an injury or illness, a big project at work, travel coming up, a temporary schedule change. If the user mentions something like this in passing (not asking you to remember it, just mentioning it while talking about something else), that's still worth a proposal - this is exactly the kind of thing that otherwise gets said once and never surfaces again. The client attaches its own expiry to these and quietly retires them later, so propose these readily.
 
 Never propose either for small talk, something already obvious from their task list, or anything already in the known-facts list below.
 
@@ -81,6 +83,7 @@ For each proposed task, fill in:
 - estimateMinutes: a number of minutes as a string if taskType is 'timeboxed' and a duration is inferable, otherwise null
 - dueAt: an ISO 8601 datetime string per the reasoning above (resolve relative dates like "tomorrow" or "next Friday" against the current time given below), or null only per the rule above
 - scheduledAt: an ISO 8601 datetime string only if the user said specifically when they plan to work on it, otherwise null
+- recurrence: 'daily', 'weekly', 'monthly', or null. Set this whenever the user's own words describe the task as repeating or ongoing, not a one-time thing - "every day", "every morning", "each week", "workout routine", "daily habit", "every Monday" (weekly), "once a month" all count, even without the word "repeat" itself. A recurring task NEEDS a dueAt to repeat from (the first occurrence) - if the user describes something as repeating but gave no anchoring time at all, treat the timing as under-specified per STEP 2/3 (ask, don't guess a time just to force a recurrence through) rather than setting recurrence with dueAt left null, since it would silently do nothing.
 - subtasks: array of short subtask strings per the guidance above, or [] only for genuinely single-step tasks
 
 EDITING EXISTING TASKS - a separate capability from proposing new ones. You may propose "taskEdits" (changes to a task that ALREADY EXISTS, from the workload list below) when the user's CURRENT message clearly asks to change something about a specific existing task (e.g. "push my dentist appointment to Friday", "mark the grocery run as done", "that report is actually pretty hard, bump the difficulty up", "clear the deadline on the laundry task"). Never propose one as a side effect of a general planning/brain-dump message, never because you think a task's priority looks off, never unprompted - only when the user is clearly asking to change that specific task right now.
@@ -92,6 +95,21 @@ Only include the specific field(s) actually changing in each taskEdits item - ne
 For each taskEdits item: taskId (the EXACT id string from the list below), taskPreview (a short quote/paraphrase of the task's current text, just so the human reviewing your draft can tell which task you mean), then only whichever of matrix/difficulty/dueAt/scheduledAt/completed are actually changing.
 
 Like every other proposal in this app, a taskEdits item is a DRAFT the user still has to confirm below, not something already applied the moment you reply - if "reply" claims a change already happened ("I've pushed it to Friday") but the confirm step never happens, the task genuinely never changes and that's a real, confusing gap. Word "reply" so it stays accurate either way: fine to be brief and natural ("Pushed it to Friday - confirm below and it's set" or similar), just don't state it as a completed fact.`;
+
+// Used instead of SYSTEM_INSTRUCTION entirely (see buildGeminiRequest's
+// mode branch) for Settings' "import from text or a file" entry point -
+// a completely different job from the back-and-forth chat above: pull out
+// everything durable from ONE document in a single pass, not have a
+// conversation. Deliberately UNCAPPED on count, the opposite of normal
+// chat's "at most 3 per turn" - thorough extraction from a big block of
+// text the user chose to paste specifically for this is the whole point.
+const MEMORY_IMPORT_INSTRUCTION = `You are extracting durable facts and preferences about a person from a document or pasted text they provided, for a to-do list app's memory feature. This is not a conversation - respond once, thoroughly, to the one document given to you.
+
+Never use an em dash (the "—" character) anywhere - a period, comma, or "and" instead. Use a plain hyphen "-" only for an actual hyphenated word, never as punctuation.
+
+Read the whole document and propose one memoryProposals entry for every distinct durable fact, preference, interest, or ongoing life circumstance you can find - there is no cap here, extract everything genuinely useful, not just one or two. Each entry needs "text" (a short, first-person-neutral fact, e.g. "Allergic to peanuts" or "Prefers studying in the evening", not a quote or a full sentence about the document) and "type": "preference" for anything durable (traits, hobbies, likes, routines, fixed constraints) or "context" for something temporary (a current job, an injury, a trip, a temporary schedule change). Skip anything already in the known-facts list below - never re-propose something already saved.
+
+Leave "tasks" empty unless the document contains an unmistakable, discrete action item explicitly stated as something to do - most personal documents (journals, notes, a bio, a "getting to know me" writeup) contain none, and forcing tasks out of one would be inventing them. Leave "taskEdits" and "quickReplies" as empty arrays always - neither applies here. Set "reply" to one short, warm sentence summarizing what you found (e.g. "Found 12 things about you - take a look below."), shown to the user as the result of this import, not part of a conversation.`;
 
 // Appended only when a group is actually the currently-open one (see
 // buildGeminiRequest) - keeps the base prompt shorter, and the model's
@@ -392,7 +410,8 @@ function buildPlanningSignalsBlock(signals, groupName) {
     const lines = [];
 
     const solo = signals.solo;
-    if (solo && (solo.dueTodayCount > 0 || solo.dueWeekCount > 0 || (Array.isArray(solo.stalled) && solo.stalled.length > 0))) {
+    const hasScheduledBlocks = Array.isArray(solo?.scheduledBlocks) && solo.scheduledBlocks.length > 0;
+    if (solo && (solo.dueTodayCount > 0 || solo.dueWeekCount > 0 || (Array.isArray(solo.stalled) && solo.stalled.length > 0) || hasScheduledBlocks)) {
         lines.push('\n\nPERSONAL PLANNING SIGNALS (computed - use these exact numbers, per the FORWARD PLANNING rule above):');
         const todayNote = solo.dueTodayUnestimatedCount > 0
             ? ` (${solo.dueTodayUnestimatedCount} of those has/have no time estimate, so this is a floor, not the full picture)`
@@ -405,6 +424,17 @@ function buildPlanningSignalsBlock(signals, groupName) {
         if (Array.isArray(solo.stalled) && solo.stalled.length > 0) {
             lines.push('- Stalled (snoozed 3 or more times - likely a real blocker, not just a busy week):');
             solo.stalled.forEach((task) => lines.push(`  - "${task.text}" (snoozed ${task.snoozeCount} times, id=${task.id})`));
+        }
+        // See the FINDING TIME rule above - real, already-committed blocks
+        // only (whatever the user set as a task's Schedule), never a
+        // computed guess at what's "free". Time between/after these is
+        // where a time-finding answer should actually point.
+        if (hasScheduledBlocks) {
+            lines.push('- Already scheduled (real blocks of time already committed to something, next 7 days):');
+            solo.scheduledBlocks.forEach((block) => {
+                const durationNote = block.durationMinutes ? `, ~${formatSignalMinutes(block.durationMinutes)}` : '';
+                lines.push(`  - ${block.start}${durationNote}: "${block.text}"`);
+            });
         }
     }
 
@@ -431,6 +461,19 @@ function buildPlanningSignalsBlock(signals, groupName) {
     }
 
     return lines.join('\n');
+}
+
+// gemini-3.6-flash supports 'minimal'/'low'/'medium'/'high' via
+// generationConfig.thinkingLevel (a direct sibling field, not nested under
+// a thinkingConfig object - confirmed against the current docs when this
+// was added, since the field/shape has changed across Gemini generations).
+// 'low' for a short plain message: real extraction against rules the
+// prompt already spells out, not something that benefits from the model
+// stopping to reason at length. Anything longer, or carrying an
+// attachment to actually parse, keeps the default deeper reasoning.
+function pickThinkingLevel(message, hasAttachments) {
+    const trimmedLength = String(message || '').trim().length;
+    return (trimmedLength > 0 && trimmedLength <= 100 && !hasAttachments) ? 'low' : 'medium';
 }
 
 function buildGeminiRequest(body) {
@@ -490,6 +533,7 @@ function buildGeminiRequest(body) {
                     estimateMinutes: { type: 'STRING', nullable: true },
                     dueAt: { type: 'STRING', nullable: true },
                     scheduledAt: { type: 'STRING', nullable: true },
+                    recurrence: { type: 'STRING', enum: ['daily', 'weekly', 'monthly'], nullable: true },
                     subtasks: { type: 'ARRAY', items: { type: 'STRING' } }
                 },
                 // dueAt/subtasks required (not just optional) so the model
@@ -588,11 +632,35 @@ function buildGeminiRequest(body) {
         requiredProperties.push('teammateSuggestions', 'teammateComments');
     }
 
+    // Settings' "import from text or a file" entry point (see brain-dump.js's
+    // window.DustyMemory.requestMemoryImport) sends mode:'memoryImport' -
+    // a completely different system instruction (MEMORY_IMPORT_INSTRUCTION,
+    // extraction-only, no per-turn cap), keeping only the known-facts block
+    // for de-duplication awareness. Everything else about the request
+    // (schema, attachments, auth) is identical to normal chat.
+    const isMemoryImport = body.mode === 'memoryImport';
+
     return {
-        systemInstruction: { parts: [{ text: `${SYSTEM_INSTRUCTION}${teammateInstruction}\n\n${timeNote}${taskContextBlock}${planningSignalsBlock}${memoryBlock}` }] },
+        systemInstruction: {
+            parts: [{
+                text: isMemoryImport
+                    ? `${MEMORY_IMPORT_INSTRUCTION}${memoryBlock}`
+                    : `${SYSTEM_INSTRUCTION}${teammateInstruction}\n\n${timeNote}${taskContextBlock}${planningSignalsBlock}${memoryBlock}`
+            }]
+        },
         contents,
         generationConfig: {
             temperature: 0.4,
+            // Real bug reported live: a quick one-liner ("add gym tomorrow
+            // 6pm") was taking as long to answer as an actual multi-task
+            // brain dump - the model was spending its default reasoning
+            // depth on every message regardless of how little there was to
+            // reason about. A short plain-text message is straightforward
+            // extraction against rules this prompt already spells out in
+            // full, not something that needs real thinking depth; a longer
+            // message, a real brain dump, or anything with an attachment to
+            // actually parse still gets the model's normal reasoning.
+            thinkingLevel: pickThinkingLevel(body.message, Array.isArray(body.attachments) && body.attachments.length > 0),
             responseMimeType: 'application/json',
             // Wrapped in an OBJECT (not a bare array root) specifically so
             // `reply` and `tasks` can travel together in one call. Types

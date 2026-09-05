@@ -137,6 +137,13 @@ function computeSoloPlanningSignals(rawTasks) {
     let dueWeekCount = 0;
     let dueWeekUnestimatedCount = 0;
     const stalled = [];
+    // See the FINDING TIME rule in the Worker's system prompt - real,
+    // already-committed blocks of time (whatever the user set as a task's
+    // own Schedule), not a guess at what counts as "free". This code's job
+    // is only to hand over the real numbers accurately, same philosophy as
+    // every other signal here - deciding what a "gap" means is left to the
+    // model, same as everything else it reasons over narratively.
+    const scheduledBlocks = [];
 
     rawTasks.forEach((task) => {
         const minutes = Number(task.estimateMinutes) || 0;
@@ -151,6 +158,16 @@ function computeSoloPlanningSignals(rawTasks) {
                 }
             }
         }
+        if (task.scheduledAt) {
+            const scheduled = new Date(task.scheduledAt);
+            if (!Number.isNaN(scheduled.getTime()) && scheduled >= now && scheduled <= weekEnd) {
+                scheduledBlocks.push({
+                    start: task.scheduledAt,
+                    durationMinutes: minutes > 0 ? minutes : null,
+                    text: String(task.text || '').slice(0, 120)
+                });
+            }
+        }
         // 3+ snoozes - a genuine repeating pattern, not just "life happened
         // once." Only ever set by an explicit user action (the snooze
         // button), never inferred.
@@ -160,10 +177,13 @@ function computeSoloPlanningSignals(rawTasks) {
         }
     });
 
+    scheduledBlocks.sort((a, b) => new Date(a.start) - new Date(b.start));
+
     return {
         dueTodayMinutes, dueTodayCount, dueTodayUnestimatedCount,
         dueWeekMinutes, dueWeekCount, dueWeekUnestimatedCount,
-        stalled: stalled.slice(0, 20)
+        stalled: stalled.slice(0, 20),
+        scheduledBlocks: scheduledBlocks.slice(0, 30)
     };
 }
 
@@ -308,10 +328,10 @@ async function gatherTaskContext(user, currentGroupId) {
 }
 
 // A fresh, one-time, read-only snapshot of users/{uid}/dustyMemory - the
-// short list of facts Dusty has asked to remember and the user explicitly
-// confirmed (see createMemoryReviewCard/commitMemories below). Sent with
-// every message, solo or group, since this is about the PERSON, not
-// whichever list they happen to have open.
+// short list of facts Dusty has saved about the user, whether auto-saved
+// from a chat (see appendMemoryReview/commitMemories below) or manually
+// added from Settings. Sent with every message, solo or group, since this
+// is about the PERSON, not whichever list they happen to have open.
 // Stale "context" memories (see commitMemories) are filtered out HERE,
 // before Dusty ever sees them - not deleted, just no longer sent to
 // Gemini or counted against the soft limit. Settings' own "manage
@@ -447,7 +467,7 @@ function buildDustyAvatarMarkup(size) {
 // never auth or Firestore access. commitTasks(draftTasks): called with the
 // user-confirmed, still-checked draft objects (possibly hand-edited) when
 // "Add" is clicked - may return a promise. Each draft is
-// { text, matrix, taskType, difficulty, estimateMinutes, dueAt, scheduledAt }
+// { text, matrix, taskType, difficulty, estimateMinutes, dueAt, scheduledAt, recurrence }
 // exactly as the AI (or the user's own edit) left it - NOTHING here is
 // trusted or sanitized; that's commitTasks' job, same as it would be for
 // any other task-creation entry point.
@@ -979,6 +999,21 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         });
         dueAtWrap.appendChild(dueAtCalendarBtn);
         row.appendChild(dueAtWrap);
+
+        // RECURRENCE_OPTIONS/getValidRecurrenceValue come from task-shared.js -
+        // Dusty can now propose a repeat frequency (see the Worker's schema),
+        // shown here the same way matrix/difficulty are: pre-filled from the
+        // AI's own draft, still editable before confirming.
+        const recurrenceSelectEl = document.createElement('select');
+        recurrenceSelectEl.classList.add('brainDumpTaskCardRecurrence');
+        RECURRENCE_OPTIONS.forEach((option) => {
+            const opt = document.createElement('option');
+            opt.value = option.value;
+            opt.textContent = option.label;
+            recurrenceSelectEl.appendChild(opt);
+        });
+        recurrenceSelectEl.value = getValidRecurrenceValue(draft.recurrence) || '';
+        row.appendChild(recurrenceSelectEl);
         fields.appendChild(row);
 
         // One subtask per line - simpler to read/edit than a full dynamic
@@ -1009,6 +1044,11 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             estimateMinutes: draft.estimateMinutes || null,
             dueAt: dueAtInputEl.value ? new Date(dueAtInputEl.value).toISOString() : null,
             scheduledAt: draft.scheduledAt || null,
+            // Same "needs a dueAt to repeat from" rule the rest of the app
+            // already follows (see addGroupTask/commitAiTasksSolo) - a
+            // recurrence picked here with the deadline field left empty
+            // would otherwise silently do nothing once committed.
+            recurrence: dueAtInputEl.value ? (getValidRecurrenceValue(recurrenceSelectEl.value) || null) : null,
             subtasks: subtasksInputEl.value.split('\n').map((line) => line.trim()).filter(Boolean)
         });
 
@@ -1683,126 +1723,90 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         });
     }
 
-    // "Remember this about me" draft - unlike suggestions/comments, Dusty
-    // may propose one without being explicitly asked (see the Worker's
-    // MEMORY prompt section), but it's still just a draft: nothing is
-    // saved to users/{uid}/dustyMemory until confirmed here. Deliberately
-    // simple - no matrix/difficulty/deadline, just a short editable fact.
-    function createMemoryReviewCard(draft) {
-        const card = document.createElement('div');
-        card.classList.add('brainDumpTaskCard');
-
-        // Normalized once, same "trust the LLM's coarse label, never its
-        // exact dates" reasoning as commitMemories - anything but exactly
-        // 'context' is treated as a durable preference.
-        const memoryType = draft.type === 'context' ? 'context' : 'preference';
-
-        const header = document.createElement('div');
-        header.classList.add('brainDumpTaskCardHeader');
-
-        const checkboxLabel = document.createElement('label');
-        checkboxLabel.classList.add('brainDumpTaskCardCheck');
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.checked = true;
-        checkboxLabel.appendChild(checkbox);
-        header.appendChild(checkboxLabel);
-
-        if (memoryType === 'context') {
-            const typeBadge = document.createElement('span');
-            typeBadge.classList.add('brainDumpMemoryTypeBadge');
-            typeBadge.textContent = 'Current situation';
-            typeBadge.title = `Expires automatically after ${BRAIN_DUMP_MEMORY_CONTEXT_EXPIRY_DAYS} days - Dusty will stop using it once it's likely stale, though it stays visible in Settings until you delete it.`;
-            header.appendChild(typeBadge);
-        }
-
-        const rememberOneBtn = document.createElement('button');
-        rememberOneBtn.type = 'button';
-        rememberOneBtn.classList.add('brainDumpTaskCardAddBtn');
-        rememberOneBtn.textContent = 'Remember';
-        header.appendChild(rememberOneBtn);
-
-        const fields = document.createElement('div');
-        fields.classList.add('brainDumpTaskCardFields');
-
-        const targetLabel = document.createElement('p');
-        targetLabel.classList.add('brainDumpTaskCardTarget');
-        targetLabel.textContent = memoryType === 'context'
-            ? `Remember this for about ${BRAIN_DUMP_MEMORY_CONTEXT_EXPIRY_DAYS} days:`
-            : 'Remember this about you:';
-        fields.appendChild(targetLabel);
-
-        const textInputEl = document.createElement('input');
-        textInputEl.type = 'text';
-        textInputEl.classList.add('brainDumpTaskCardText');
-        textInputEl.value = draft.text || '';
-        textInputEl.maxLength = 300;
-        fields.appendChild(textInputEl);
-
-        card.appendChild(header);
-        card.appendChild(fields);
-
-        const read = () => ({
-            included: checkbox.checked,
-            text: textInputEl.value,
-            type: memoryType
-        });
-
-        const markRemembered = () => {
-            textInputEl.disabled = true;
-            checkbox.disabled = true;
-            checkbox.checked = false;
-            rememberOneBtn.remove();
-            const rememberedLabel = document.createElement('span');
-            rememberedLabel.classList.add('brainDumpTaskCardAddedLabel');
-            rememberedLabel.textContent = 'Saved';
-            header.appendChild(rememberedLabel);
-        };
-
-        rememberOneBtn.addEventListener('click', async () => {
-            const draftNow = read();
-            if (!draftNow.text.trim()) {
-                return;
-            }
-            rememberOneBtn.disabled = true;
-            rememberOneBtn.textContent = 'Saving...';
-            try {
-                await commitMemories([draftNow]);
-                markRemembered();
-            } catch (error) {
-                console.error('Failed to save brain-dump memory:', error);
-                rememberOneBtn.disabled = false;
-                rememberOneBtn.textContent = 'Try again';
-            }
-        });
-
-        return { element: card, read };
-    }
-
-    function appendMemoryReview(memoryProposals, typeLabel) {
+    // Memory proposals auto-save now, per direct request - unlike every
+    // other proposal type here (tasks/suggestions/comments all stay
+    // confirm-first, since posting under the user's name or adding a real
+    // task is more consequential than privately remembering a fact). The
+    // compensating control that makes this acceptable: nothing is hidden,
+    // and undoing a wrong save is exactly as easy as the old confirm click
+    // was, just after the fact - appendMemorySavedNotice's Forget button
+    // deletes the specific doc just written, not just a visual dismiss.
+    async function appendMemoryReview(memoryProposals) {
         if (!memoryProposals || memoryProposals.length === 0) {
             return;
         }
-        appendReviewSection({
-            drafts: memoryProposals,
-            buildCard: createMemoryReviewCard,
-            commit: commitMemories,
-            sectionClass: 'brainDumpMemoryReview',
-            addBtnLabel: 'Save checked memories',
-            doneLabel: 'Saved',
-            typeLabel
-        });
+        let written;
+        try {
+            written = await commitMemories(memoryProposals);
+        } catch (error) {
+            console.error('Failed to auto-save memory:', error);
+            return;
+        }
+        written.forEach(({ id, text }) => appendMemorySavedNotice(id, text));
     }
 
-    // Writes confirmed memories straight to users/{uid}/dustyMemory - kept
+    function appendMemorySavedNotice(memoryId, text) {
+        const row = document.createElement('div');
+        row.classList.add('brainDumpMemorySaved');
+
+        const icon = document.createElement('span');
+        icon.classList.add('brainDumpMemorySavedIcon');
+        icon.textContent = '🧠';
+        row.appendChild(icon);
+
+        const label = document.createElement('span');
+        label.classList.add('brainDumpMemorySavedText');
+        label.textContent = `Remembered: ${text}`;
+        row.appendChild(label);
+
+        const forgetBtn = document.createElement('button');
+        forgetBtn.type = 'button';
+        forgetBtn.classList.add('brainDumpMemoryForgetBtn');
+        forgetBtn.textContent = 'Forget';
+        forgetBtn.addEventListener('click', async () => {
+            forgetBtn.disabled = true;
+            forgetBtn.textContent = 'Forgetting...';
+            try {
+                await forgetMemory(memoryId);
+                label.textContent = 'Forgotten.';
+                row.classList.add('forgotten');
+                forgetBtn.remove();
+            } catch (error) {
+                console.error('Failed to forget memory:', error);
+                forgetBtn.disabled = false;
+                forgetBtn.textContent = 'Try again';
+            }
+        });
+        row.appendChild(forgetBtn);
+
+        messagesEl.appendChild(row);
+        scrollToBottom();
+    }
+
+    async function forgetMemory(memoryId) {
+        const user = window.ToDoAuth?.auth?.currentUser;
+        if (!user) {
+            throw new Error('Not signed in.');
+        }
+        const { db, firestore } = window.ToDoAuth;
+        const { doc, deleteDoc, collection } = firestore;
+        await deleteDoc(doc(collection(db, 'users', user.uid, 'dustyMemory'), memoryId));
+    }
+
+    // Writes memories straight to users/{uid}/dustyMemory - kept
     // self-contained here (unlike commitTasks/commitSuggestions/
     // commitComments, which differ between solo and group and so are
     // supplied by each page) since this write is identical regardless of
-    // which page Brain Dump is open from. knownMemoryCount is a best-effort
-    // local count refreshed each time gatherDustyMemories runs (see
-    // sendMessage) - a soft nudge to stop offering new saves once someone
-    // has a lot stored, not a hard security limit (firestore.rules doesn't
-    // cap the count, only each memory's own text length).
+    // which page Brain Dump is open from. Returns what actually got
+    // written ({id, text} per doc) so the caller can show/undo each one -
+    // callers: appendMemoryReview above (auto-save from chat) and
+    // window.DustyMemory.requestMemoryImport's caller in settings.js
+    // (confirm-first bulk import, still calls this directly once checked).
+    // knownMemoryCount is a best-effort local count refreshed each time
+    // gatherDustyMemories runs (see sendMessage) - a soft nudge to stop
+    // offering new saves once someone has a lot stored, not a hard
+    // security limit (firestore.rules doesn't cap the count, only each
+    // memory's own text length).
     let knownMemoryCount = 0;
     async function commitMemories(drafts) {
         const user = window.ToDoAuth?.auth?.currentUser;
@@ -1812,6 +1816,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         const { db, firestore } = window.ToDoAuth;
         const { doc, setDoc, collection, serverTimestamp } = firestore;
 
+        const written = [];
         for (const draft of drafts) {
             const trimmedText = (draft.text || '').trim();
             if (!trimmedText) {
@@ -1831,14 +1836,18 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             const expiresAt = memoryType === 'context'
                 ? new Date(Date.now() + BRAIN_DUMP_MEMORY_CONTEXT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString()
                 : null;
-            await setDoc(doc(collection(db, 'users', user.uid, 'dustyMemory'), generateTaskId()), {
-                text: trimmedText.slice(0, 300),
+            const memoryId = generateTaskId();
+            const finalText = trimmedText.slice(0, 300);
+            await setDoc(doc(collection(db, 'users', user.uid, 'dustyMemory'), memoryId), {
+                text: finalText,
                 type: memoryType,
                 expiresAt,
                 createdAt: serverTimestamp()
             });
             knownMemoryCount += 1;
+            written.push({ id: memoryId, text: finalText });
         }
+        return written;
     }
 
     function renderAttachmentChips() {
@@ -1984,7 +1993,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             appendTaskEditReview(data.taskEdits, labelFor('Task changes'));
             appendSuggestionReview(data.teammateSuggestions, labelFor('Suggestions for teammates'));
             appendCommentReview(data.teammateComments, labelFor('Comments'));
-            appendMemoryReview(data.memoryProposals, labelFor('Remembered facts'));
+            appendMemoryReview(data.memoryProposals);
         } catch (error) {
             console.error('Brain dump request failed:', error);
             typingBubble.remove();
@@ -2137,6 +2146,72 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         fabEl?.classList.remove('brainDumpFabHidden');
         playGreetBurst();
     }
+
+    // Settings' "import from text or a file" entry point (see
+    // window.DustyMemory below) - a single one-shot Worker call in
+    // extraction mode (mode:'memoryImport', see the Worker's
+    // MEMORY_IMPORT_INSTRUCTION), not a normal chat turn: no history, no
+    // task-context/planning signals, just the document itself plus known
+    // memories (so Gemini can skip anything already saved). Returns
+    // { proposals } on success or { error } on failure - settings.js
+    // renders the proposals as its own confirm-first checklist and calls
+    // commitMemories directly once the user picks which to keep. Bulk
+    // import stays confirm-first even though normal chat is now auto-save;
+    // a big personal document dropped in all at once deserves a look
+    // before 20+ things land in memory unreviewed.
+    async function requestMemoryImport(text, file) {
+        const user = window.ToDoAuth?.auth?.currentUser;
+        if (!user) {
+            return { error: 'Not signed in.' };
+        }
+        if (BRAIN_DUMP_WORKER_URL.includes('REPLACE-ME')) {
+            return { error: "Brain Dump isn't set up yet - see worker/README.md." };
+        }
+
+        const attachments = [];
+        if (file) {
+            try {
+                const data = await readFileAsBase64(file);
+                attachments.push({ mimeType: file.type || 'application/octet-stream', data });
+            } catch (error) {
+                console.error('Failed to read import file:', error);
+                return { error: 'Could not read that file.' };
+            }
+        }
+
+        try {
+            const [idToken, memories] = await Promise.all([
+                user.getIdToken(),
+                gatherDustyMemories(user)
+            ]);
+            const response = await fetch(BRAIN_DUMP_WORKER_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+                body: JSON.stringify({
+                    mode: 'memoryImport',
+                    message: text || '(imported document)',
+                    attachments,
+                    clientTime: getClientTimeString(),
+                    memories
+                })
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+                return { error: data?.reply || 'Something went wrong - try again.' };
+            }
+            return { proposals: Array.isArray(data?.memoryProposals) ? data.memoryProposals : [] };
+        } catch (error) {
+            console.error('Memory import request failed:', error);
+            return { error: 'Could not reach Dusty right now.' };
+        }
+    }
+
+    // Published once per controller instance (solo's script.js and group's
+    // group.js each create their own) - whichever page is actually loaded
+    // is the one whose instance wins, same single-global shape as
+    // window.ToDoAuth. Settings only ever needs the one currently active
+    // page's version, never both at once.
+    window.DustyMemory = { requestMemoryImport };
 
     return { open, close, isOpen };
 }
