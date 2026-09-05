@@ -464,9 +464,12 @@ function buildPlanningSignalsBlock(signals, groupName) {
 }
 
 // gemini-3.6-flash supports 'minimal'/'low'/'medium'/'high' via
-// generationConfig.thinkingLevel (a direct sibling field, not nested under
-// a thinkingConfig object - confirmed against the current docs when this
-// was added, since the field/shape has changed across Gemini generations).
+// generationConfig.thinkingConfig.thinkingLevel - nested under thinkingConfig,
+// NOT a direct sibling of generationConfig (that shape was wrong and broke
+// every single call with a 400 "Unknown name thinkingLevel" - confirmed live
+// via the Worker's own error log, then against the current docs, since the
+// field/shape has changed across Gemini generations before and evidently
+// isn't done changing).
 // 'low' for a short plain message: real extraction against rules the
 // prompt already spells out, not something that benefits from the model
 // stopping to reason at length. Anything longer, or carrying an
@@ -660,7 +663,9 @@ function buildGeminiRequest(body) {
             // full, not something that needs real thinking depth; a longer
             // message, a real brain dump, or anything with an attachment to
             // actually parse still gets the model's normal reasoning.
-            thinkingLevel: pickThinkingLevel(body.message, Array.isArray(body.attachments) && body.attachments.length > 0),
+            thinkingConfig: {
+                thinkingLevel: pickThinkingLevel(body.message, Array.isArray(body.attachments) && body.attachments.length > 0)
+            },
             responseMimeType: 'application/json',
             // Wrapped in an OBJECT (not a bare array root) specifically so
             // `reply` and `tasks` can travel together in one call. Types
