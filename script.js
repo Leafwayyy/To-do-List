@@ -258,18 +258,18 @@ const TOUR_STEPS = [
         beforeShow: () => switchSoloView('tasks')
     },
     {
-        selector: '.calendarGrid',
-        title: 'Everything, laid out in time',
-        text: 'This is Calendar. Every task with a deadline or a planned time shows up here automatically, no extra typing. Due dates and planned work time show as separate marks, since they\'re not always the same day. Go ahead, tap any day, an empty one even starts a new task right from here.',
-        action: { event: 'click' },
-        beforeShow: () => switchSoloView('calendar')
-    },
-    {
         selector: '.viewTabs',
         title: 'Tasks, Calendar, and Activity',
         text: 'Everything you\'ve been doing lives under Tasks. Go ahead, tap over to Activity, that\'s where your completion history lives whenever you want it.',
         action: { event: 'click' },
         beforeShow: () => switchSoloView('tasks')
+    },
+    {
+        selector: '.calendarGrid',
+        title: 'Everything, laid out in time',
+        text: 'This is Calendar. Every task with a deadline or a planned time shows up here automatically, no extra typing. Due dates and planned work time show as separate marks, since they\'re not always the same day. Go ahead, tap any day, an empty one even starts a new task right from here.',
+        action: { event: 'click' },
+        beforeShow: () => switchSoloView('calendar')
     },
     {
         selector: '.activityPanel',
@@ -3545,16 +3545,21 @@ function createCalendarChip(entry) {
 }
 
 const CALENDAR_MAX_VISIBLE_CHIPS = 3;
+// Week cells have more vertical room than month cells (see .calendarGridWeek
+// in style.css) specifically so more fits before overflowing - without a
+// higher cap here, that extra room went unused and just read as empty
+// space under a single chip.
+const CALENDAR_MAX_VISIBLE_CHIPS_WEEK = 6;
 
-function renderCalendarDayChips(chipListEl, moreBtnEl, orderedEntries, expanded) {
+function renderCalendarDayChips(chipListEl, moreBtnEl, orderedEntries, expanded, maxVisible) {
     chipListEl.innerHTML = '';
-    const visibleCount = expanded ? orderedEntries.length : Math.min(CALENDAR_MAX_VISIBLE_CHIPS, orderedEntries.length);
+    const visibleCount = expanded ? orderedEntries.length : Math.min(maxVisible, orderedEntries.length);
     orderedEntries.slice(0, visibleCount).forEach((entry) => {
         chipListEl.appendChild(createCalendarChip(entry));
     });
 
-    if (orderedEntries.length > CALENDAR_MAX_VISIBLE_CHIPS) {
-        moreBtnEl.textContent = expanded ? 'Show less' : `+${orderedEntries.length - CALENDAR_MAX_VISIBLE_CHIPS} more`;
+    if (orderedEntries.length > maxVisible) {
+        moreBtnEl.textContent = expanded ? 'Show less' : `+${orderedEntries.length - maxVisible} more`;
         moreBtnEl.classList.remove('hidden');
     } else {
         moreBtnEl.classList.add('hidden');
@@ -3614,6 +3619,8 @@ function createCalendarDayCell(cell, entriesByDay) {
         ...entries.filter((entry) => entry.type === 'projected')
     ];
 
+    const maxVisible = calendarViewMode === 'week' ? CALENDAR_MAX_VISIBLE_CHIPS_WEEK : CALENDAR_MAX_VISIBLE_CHIPS;
+
     const moreBtn = document.createElement('button');
     moreBtn.type = 'button';
     moreBtn.classList.add('calendarMoreBtn', 'hidden');
@@ -3621,11 +3628,11 @@ function createCalendarDayCell(cell, entriesByDay) {
         event.stopPropagation();
         playClickSound();
         const isExpanded = cellEl.classList.toggle('expanded');
-        renderCalendarDayChips(chipList, moreBtn, ordered, isExpanded);
+        renderCalendarDayChips(chipList, moreBtn, ordered, isExpanded, maxVisible);
     });
     cellEl.appendChild(moreBtn);
 
-    renderCalendarDayChips(chipList, moreBtn, ordered, false);
+    renderCalendarDayChips(chipList, moreBtn, ordered, false, maxVisible);
 
     if (entries.length === 0) {
         cellEl.classList.add('empty');

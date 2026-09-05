@@ -3634,6 +3634,11 @@ body > .viewTabs{
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
+    /* Breathing room under the Tasks/Calendar/Activity tab row above -
+       Tasks and Activity both get this implicitly from their own leading
+       heading/title element; Calendar has neither, so without this its own
+       header row read as crammed right up against the tabs. */
+    margin-top: var(--space-4);
 }
 
 .calendarHeader{
@@ -3751,7 +3756,13 @@ body > .viewTabs{
 }
 
 .calendarGrid.calendarGridWeek{
-    grid-auto-rows: minmax(220px, auto);
+    /* Was 220px - with only a chip or two (the common case), that read as
+       a huge empty box with one line of text floating near the top, not
+       "more room for detail." A little taller than month's 88px is still
+       useful (Week is meant to show more before overflowing to "+N more"),
+       but the row should grow to fit real content (the "auto" side of this
+       minmax already does that), not reserve height nothing is using. */
+    grid-auto-rows: minmax(104px, auto);
 }
 
 .calendarDayCell{
