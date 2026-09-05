@@ -56,10 +56,30 @@ const app = initializeApp(firebaseConfig);
 // App Check: proves requests are coming from this real web app (via an
 // invisible reCAPTCHA Enterprise score check), not a script hitting the
 // Firebase project directly. Must run before any Auth/Firestore calls so
-// every request carries a token. Stays in "Monitor" mode with no real
-// effect until Firestore/Authentication are switched to "Enforced" in the
-// Firebase Console's App Check page - don't flip that until real traffic
-// through this app is showing up as verified there.
+// every request carries a token. Enforcement is ON for Authentication in
+// the Firebase Console right now (confirmed live - a signInWithPassword
+// call gets a flat 403 without a valid App Check token), not "Monitor
+// mode with no real effect" as an earlier version of this comment claimed -
+// correct that assumption before touching this again.
+//
+// The reCAPTCHA Enterprise site key below is scoped to the real production
+// domain, so it can't be satisfied from a local static server - the
+// reCAPTCHA call itself gets rejected, which fails the App Check token
+// exchange, which then makes Authentication reject every request outright.
+// Firebase's own documented fix for local dev is the App Check debug
+// provider: setting FIREBASE_APPCHECK_DEBUG_TOKEN before initializeAppCheck
+// makes the SDK generate (and persist via IndexedDB - not regenerated every
+// reload) a random debug token, printed to the browser console the first
+// time. That token still has to be registered ONCE in Firebase Console ->
+// Project Settings -> App Check -> this app -> Manage debug tokens before
+// local sign-in actually works - this alone doesn't skip that step, it
+// just gets you to the point of having a token to register. Gated to
+// localhost/127.0.0.1 only, so this never touches production's real
+// reCAPTCHA flow.
+if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+    self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+}
+
 initializeAppCheck(app, {
     provider: new ReCaptchaEnterpriseProvider('6Lfl5p8tAAAAACAMGgsF09HtWiRrawm2-hrVxTNs'),
     isTokenAutoRefreshEnabled: true
