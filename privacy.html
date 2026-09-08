@@ -94,7 +94,7 @@
   <div class="page">
     <a class="backLink" href="app.html">&larr; Back to To-Do List</a>
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated September 3, 2026</p>
+    <p class="updated">Last updated September 8, 2026</p>
 
     <div class="card">
       <h2>What this covers</h2>
@@ -108,17 +108,20 @@
         <tr><td>Task content</td><td>Everything you type into a task: text, subtasks, deadlines, priority, difficulty, effort estimate</td></tr>
         <tr><td>Group data</td><td>Group names, invite codes, membership, task comments, and task suggestions if you use the Group workspace</td></tr>
         <tr><td>Brain Dump chat (Dusty)</td><td>What you type, and any image, PDF, or text file you attach, if you use the Brain Dump chat</td></tr>
-        <tr><td>Dusty's memory</td><td>Short facts Dusty asks to save during a chat (e.g. a preference or recurring pattern) - only saved if you explicitly confirm each one</td></tr>
+        <tr><td>Dusty's memory</td><td>Short facts Dusty saves about you during a chat (e.g. a preference, an interest, or a recurring pattern), automatically when he's confident it's useful - see AI features below for how you're shown and can undo each one</td></tr>
         <tr><td>Local preferences</td><td>Stored only on your device: auto-sort setting, popup alert setting, activity history for the streak chart, onboarding progress</td></tr>
       </table>
 
       <h2>Where it's stored</h2>
       <p>Your account and task data are stored in <strong>Firebase Authentication</strong> and <strong>Cloud Firestore</strong>, both Google Cloud services. We don't run our own separate servers or databases outside of Firebase. Some preferences (like whether auto-sort is on) live only in your browser's local storage and never leave your device.</p>
 
+      <h2>Cookies</h2>
+      <p>We don't set or use any cookies of our own. Staying signed in works through your browser's local storage and IndexedDB instead (the same on-device storage already mentioned above), not a cookie. The only place a cookie could be involved at all is if you sign in with Google: that sign-in popup runs on Google's own domain, and anything it sets there is Google's cookie, under Google's own privacy policy, not something this app reads, sets, or controls. We also don't use any tracking or advertising cookies, ours or anyone else's.</p>
+
       <h2>AI features (Brain Dump / Dusty)</h2>
       <p>The Brain Dump chat (Dusty, the assistant you can open from the app) sends what you type, plus any image, PDF, or text file you attach, to <strong>Google's Gemini API</strong> to turn it into proposed tasks. This goes through a small server (a Cloudflare Worker) that we run ourselves, which checks that you're a real signed-in user of this app before forwarding anything, and does not store your message or attachment anywhere - it's passed through to Gemini and back, and forgotten. Chat history is kept only in your browser's memory for that session and clears on reload.</p>
       <p>Each time you chat with Dusty, he's also given a read-only snapshot of your current task list, both your personal list and every group you're in, so he can give relevant help and avoid suggesting things you're already tracking. Nothing about this snapshot is stored anywhere beyond that one request.</p>
-      <p>Dusty can also propose a change to a task you already have, for example updating its priority, difficulty, deadline, schedule, or marking it done, if you ask him to. Like everything else he drafts, a proposed edit is only ever applied once you review and confirm it - he never changes a task on his own.</p>
+      <p>Dusty can also propose a change to a task you already have, for example updating its priority, difficulty, deadline, schedule, its own text, its steps, or marking it done, if you ask him to. Like everything else he drafts, a proposed edit is only ever applied once you review and confirm it - he never changes a task on his own.</p>
       <p>If you ask Dusty to suggest a task to a teammate or post a comment on one of their tasks, and you confirm it, it's posted under your own account exactly as if you'd typed it yourself - see "Who else sees it" below.</p>
       <p>Dusty may also remember a short fact about you between chats (a preference, a constraint, something that keeps coming up). He can save one automatically when he's confident it's useful, without asking first - each one is shown to you right in the chat as it's saved, with an immediate one-tap way to remove it if it's wrong or you'd rather he not keep it. Either way, it's never shown to anyone but you, is stored in your own account data in Cloud Firestore, and you can view and delete anything he's remembered at any time from Settings - included if you export or delete your account.</p>
       <p>Settings also lets you paste a longer piece of text or upload a file specifically to have Dusty pull out multiple facts at once, instead of one at a time - it goes through the exact same Gemini pipeline described above, and you review and pick which of the results to actually save before anything is written.</p>
