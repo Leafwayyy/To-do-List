@@ -515,7 +515,98 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     let fileInput = null;
     let rateStatusEl = null;
 
-    let history = []; // [{ role: 'user'|'assistant', text }] - capped, never persisted
+    // [{ role: 'user'|'assistant', text }] - capped, and now persisted to
+    // localStorage (see saveHistoryToStorage/restoreHistory below) so a
+    // refresh, or navigating between the solo and group pages (two
+    // separate documents - normal browser navigation resets all JS state
+    // regardless of what this file does), doesn't just erase an unfinished
+    // conversation, reported live as a real annoyance. Attachments are
+    // deliberately NOT part of this - they were never in `history` to
+    // begin with (only plain reply/message text is), so there's no risk of
+    // a 10MB attachment blowing through localStorage's much smaller quota.
+    // Keyed by `context` ('solo' vs 'group') since script.js and
+    // group/group.js each create their own controller instance with a
+    // different system prompt/capability set - a group conversation
+    // restored into the solo page (or vice versa) would reference things
+    // that don't apply there.
+    let history = [];
+    // A conversation left untouched this long reads as stale rather than
+    // "still going" - long enough to survive a normal weekend gap, short
+    // enough that this never quietly becomes a permanent archive nobody
+    // asked for. Same expiry-not-permanence spirit as memory's own
+    // 'context' facts (BRAIN_DUMP_MEMORY_CONTEXT_EXPIRY_DAYS), just a much
+    // shorter window since a stale chat matters far less than a stale fact.
+    const BRAIN_DUMP_HISTORY_EXPIRY_MS = 3 * 24 * 60 * 60 * 1000;
+
+    // Keyed by uid too, not just context - localStorage is shared by every
+    // account that's ever signed in on this browser, not just the current
+    // one. Without the uid, signing out and a different person signing in
+    // on the same machine would see the PREVIOUS account's conversation the
+    // moment they opened Dusty - a real cross-account leak, not just a
+    // stale-content annoyance. Returns null (both functions below no-op)
+    // if nobody's actually signed in yet, which build()/open() shouldn't
+    // be reachable before anyway (the FAB that opens this is itself
+    // auth-gated), but this stays safe either way rather than assuming it.
+    function getHistoryStorageKey() {
+        const uid = window.ToDoAuth?.auth?.currentUser?.uid;
+        return uid ? `dustyHistory_${context}_${uid}` : null;
+    }
+
+    function saveHistoryToStorage() {
+        const key = getHistoryStorageKey();
+        if (!key) {
+            return;
+        }
+        try {
+            localStorage.setItem(key, JSON.stringify({ turns: history, savedAt: Date.now() }));
+        } catch {
+            // localStorage full/unavailable - non-fatal, worst case the
+            // conversation just doesn't survive a reload this time.
+        }
+    }
+
+    // Called once, right after messagesEl exists (see build()) - replays
+    // whatever's still fresh as real bubbles, same appendUserBubble/
+    // appendAssistantBubble the live conversation already uses, so a
+    // restored conversation is visually indistinguishable from one that
+    // never left. Deliberately does NOT restore quick-reply chips or
+    // review cards (tasks/edits/suggestions/memories proposed but not yet
+    // acted on) - those need the real structured draft data and live
+    // commit handlers this plain text snapshot doesn't carry, restoring a
+    // checkbox UI that silently can't actually do anything would be worse
+    // than not restoring it at all.
+    function restoreHistory() {
+        const key = getHistoryStorageKey();
+        if (!key) {
+            return;
+        }
+        let saved = null;
+        try {
+            saved = JSON.parse(localStorage.getItem(key) || 'null');
+        } catch {
+            saved = null;
+        }
+        if (!saved || !Array.isArray(saved.turns) || saved.turns.length === 0) {
+            return;
+        }
+        if (typeof saved.savedAt !== 'number' || Date.now() - saved.savedAt > BRAIN_DUMP_HISTORY_EXPIRY_MS) {
+            try {
+                localStorage.removeItem(key);
+            } catch {
+                // Non-fatal - worst case a stale entry lingers unused.
+            }
+            return;
+        }
+
+        history = saved.turns.slice(-BRAIN_DUMP_MAX_HISTORY_TURNS);
+        history.forEach((turn) => {
+            if (turn.role === 'user') {
+                appendUserBubble(turn.text, []);
+            } else {
+                appendAssistantBubble(turn.text, []);
+            }
+        });
+    }
     let pendingAttachments = []; // [{ mimeType, data, name }] for the NEXT send only
     let isSending = false;
     let rateCountdownIntervalId = null;
@@ -2158,6 +2249,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
 
             appendAssistantBubble(data.reply || "Here's what I found:", data.quickReplies);
             history = [...history, { role: 'assistant', text: data.reply || '' }].slice(-BRAIN_DUMP_MAX_HISTORY_TURNS);
+            saveHistoryToStorage();
 
             // Section J: a type-label chip only when this reply actually
             // mixed more than one kind of review card together - four
@@ -2282,6 +2374,11 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
                 close();
             }
         });
+
+        // Runs once, right here - build() itself only ever runs once (see
+        // open()'s `if (!overlay)` guard), and every element this needs
+        // (messagesEl in particular) is wired up by this point.
+        restoreHistory();
     }
 
     function open() {
@@ -2330,10 +2427,13 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         return index;
     }
 
-    // Fires once per fresh session (chat history is in-memory only and
-    // resets on page reload - this replaces the old static intro line with
-    // something that actually varies). Purely client-side - no Firestore
-    // read, no Gemini call, shows instantly.
+    // Fires only when there's genuinely nothing else to show - build()'s
+    // own restoreHistory() runs first and already repopulates messagesEl
+    // when a recent conversation exists, so the messagesEl.children.length
+    // check below naturally skips this greeting for anyone coming back to
+    // an unfinished conversation, and only shows it for an actually fresh
+    // start. Purely client-side either way - no Firestore read, no Gemini
+    // call, shows instantly.
     function maybeShowWelcomeBack() {
         if (messagesEl.children.length > 0) {
             return; // already an ongoing conversation this session
