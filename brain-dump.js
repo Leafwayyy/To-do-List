@@ -1532,6 +1532,30 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         status.classList.add('brainDumpTaskReviewStatus');
         footer.appendChild(status);
 
+        const actions = document.createElement('div');
+        actions.classList.add('brainDumpTaskReviewActions');
+
+        // Real gap reported live: not wanting ANY of what's offered had no
+        // way to actually close the loop - the cards just sat there in the
+        // chat log forever with nothing checked, since unchecking every box
+        // only ever meant "don't add these," never "stop showing me this."
+        // Same "Dismiss" verb the onboarding hint card already uses
+        // elsewhere in this app, not a new one. Shared here in
+        // appendReviewSection rather than per review type, so tasks,
+        // task-edits, suggestions, and comments all get it the same way.
+        const dismissBtn = document.createElement('button');
+        dismissBtn.type = 'button';
+        dismissBtn.classList.add('brainDumpDismissReviewBtn');
+        dismissBtn.textContent = 'Dismiss';
+        dismissBtn.addEventListener('click', () => {
+            section.innerHTML = '';
+            const dismissed = document.createElement('p');
+            dismissed.classList.add('brainDumpTaskReviewDone');
+            dismissed.textContent = 'Dismissed.';
+            section.appendChild(dismissed);
+        });
+        actions.appendChild(dismissBtn);
+
         const bulkBtn = document.createElement('button');
         bulkBtn.type = 'button';
         bulkBtn.classList.add('brainDumpAddBtn');
@@ -1587,7 +1611,8 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
                 status.textContent = 'Something went wrong - try again.';
             }
         });
-        footer.appendChild(bulkBtn);
+        actions.appendChild(bulkBtn);
+        footer.appendChild(actions);
 
         section.appendChild(footer);
         messagesEl.appendChild(section);

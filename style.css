@@ -3418,7 +3418,13 @@ body > .viewTabs{
 
 .viewPanel[data-view-panel="activity"] .activityPanel{
     width: 100%;
-    margin-top: 0;
+    /* Was 0, left over from when Activity shared a two-column layout with
+       a side column and needed to align flush with something else there -
+       now that it's its own full-width tab, that 0 was exactly why it sat
+       crammed right up against the Tasks/Calendar/Activity tabs above it,
+       reported live. var(--space-4) matches the breathing room Calendar's
+       own panel already gets for the same reason (see .calendarPanel). */
+    margin-top: var(--space-4);
     min-height: 0;
 }
 
@@ -3432,6 +3438,11 @@ body > .viewTabs{
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
+    /* Same breathing-room fix as solo's Activity/Calendar tabs (see
+       .viewPanel[data-view-panel="activity"] .activityPanel) - Team has no
+       heading of its own above its content either, so without this it sat
+       flush against the Tasks/Team/Leaderboard/Activity tabs above it. */
+    margin-top: var(--space-4);
 }
 
 /* .viewPanel.hidden MUST be declared after every .viewPanel[data-view-panel=
@@ -3681,9 +3692,11 @@ body > .viewTabs{
     flex-direction: column;
     gap: var(--space-3);
     /* Breathing room under the Tasks/Calendar/Activity tab row above -
-       Tasks and Activity both get this implicitly from their own leading
-       heading/title element; Calendar has neither, so without this its own
-       header row read as crammed right up against the tabs. */
+       Tasks gets this implicitly from its own leading title element;
+       Calendar and Activity both needed it added explicitly (see
+       .viewPanel[data-view-panel="activity"] .activityPanel for the
+       Activity side of this same fix), since neither has a heading of its
+       own sitting above its content the way Tasks does. */
     margin-top: var(--space-4);
 }
 
@@ -6489,6 +6502,34 @@ body.authGateActive .authOverlay{
     color: #ffb3b3;
 }
 
+.brainDumpTaskReviewActions{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+/* Ghost/secondary treatment next to .brainDumpAddBtn's filled pill - same
+   primary-vs-secondary weighting the tour's Next/Skip pair already uses,
+   so "I don't want any of these" reads as the lighter, less-committal
+   action without competing with the real confirm button. */
+.brainDumpDismissReviewBtn{
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--violet-muted, #d7d0ff);
+    font-weight: 700;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.brainDumpDismissReviewBtn:hover{
+    background: rgba(255, 255, 255, 0.08);
+    color: #f2edff;
+}
+
 .brainDumpAddBtn{
     height: 32px;
     padding: 0 14px;
@@ -7896,6 +7937,11 @@ body.authGateActive .authOverlay{
    'activity' branch in group.js), so .groupHistoryPanel is just a plain
    card sitting directly in that view, not an overlay. */
 .groupHistoryPanel{
+    /* Same breathing-room fix as solo's Activity panel and group's own
+       Team tab (see .viewPanel[data-view-panel="activity"] .activityPanel) -
+       matches .groupLeaderboardPanel's existing margin-top, which never had
+       this gap to begin with. */
+    margin-top: var(--space-4);
     border-radius: var(--radius-lg);
     border: 1px solid var(--card-border);
     border-top: 2px solid var(--card-top-accent);
