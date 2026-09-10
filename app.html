@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260910c">
+    <link rel="stylesheet" href="style.css?v=20260910d">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#030204">
@@ -337,6 +337,16 @@
         <button class="undoDeleteBtn" type="button">Undo</button>
     </div>
 
+    <!-- Badge-earned toast: a lighter, non-blocking moment for the instant a
+         badge unlocks - deliberately NOT the slot-reel .rewardOverlay
+         (reserved for milestones), and not something the weekly recap
+         should be the only place this shows up, up to 7 days later. Same
+         bottom-toast shell as .undoToast above, own markup/state. -->
+    <div class="badgeEarnedToast hidden" role="status" aria-live="polite">
+        <span class="badgeEarnedToastIcon"><i class="fa-solid fa-star"></i></span>
+        <p class="badgeEarnedToastText"></p>
+    </div>
+
     <div class="tourOverlay hidden" aria-hidden="true">
         <div class="tourCurtain tourCurtainTop"></div>
         <div class="tourCurtain tourCurtainBottom"></div>
@@ -462,7 +472,7 @@
     <script src="task-shared.js?v=20260910a"></script>
     <script src="brain-dump.js?v=20260908a"></script>
     <script src="auth-gate.js?v=20260830a"></script>
-    <script src="script.js?v=20260910b"></script>
+    <script src="script.js?v=20260910c"></script>
     <script type="module" src="firebase-init.js?v=20260910a"></script>
     <script src="settings.js?v=20260910a"></script>
 

@@ -4571,6 +4571,46 @@ body > .viewTabs{
     white-space: nowrap;
 }
 
+.badgeEarnedToast{
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    z-index: 1450;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    max-width: min(94vw, 560px);
+    border: 1px solid rgba(203, 184, 255, 0.55);
+    border-radius: 12px;
+    background: linear-gradient(155deg, rgba(58, 42, 131, 0.97), rgba(34, 24, 92, 0.98));
+    box-shadow: 0 12px 36px rgba(8, 5, 30, 0.55);
+    padding: 10px 14px;
+}
+
+.badgeEarnedToast.hidden{
+    display: none;
+}
+
+.badgeEarnedToastIcon{
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #ffe08a, #d7a83a);
+    color: #3a2a05;
+    font-size: 12px;
+}
+
+.badgeEarnedToastText{
+    color: #f4efff;
+    font-size: 13px;
+    line-height: 1.35;
+}
+
 .undoDeleteBtn{
     border: 1px solid rgba(206, 193, 255, 0.82);
     border-radius: 999px;

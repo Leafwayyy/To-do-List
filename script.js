@@ -64,6 +64,8 @@ const activityDetailsList = document.querySelector('.activityDetailsList');
 const activityDetailsCloseBtn = document.querySelector('.activityDetailsCloseBtn');
 const undoToast = document.querySelector('.undoToast');
 const undoToastText = document.querySelector('.undoToastText');
+const badgeEarnedToast = document.querySelector('.badgeEarnedToast');
+const badgeEarnedToastText = document.querySelector('.badgeEarnedToastText');
 const undoDeleteBtn = document.querySelector('.undoDeleteBtn');
 // .tour* element lookups now live inside createTourController (task-shared.js).
 // All .auth*/.userBadge* element lookups now live in auth-gate.js (shared
@@ -186,6 +188,8 @@ const REMINDER_COOLDOWN_MS = {
 const GLOBAL_REMINDER_GAP_MS = 8 * 60 * 1000;
 const MOBILE_LAYOUT_QUERY = window.matchMedia('(max-width: 900px)');
 const UNDO_DELETE_TIMEOUT_MS = 6000;
+const BADGE_EARNED_TOAST_MS = 5000;
+let badgeEarnedToastTimeoutId = null;
 
 // Hosted by Dusty now, speaking to you directly in first and second person
 // throughout, per direct request - he introduces himself up front, then
@@ -306,7 +310,7 @@ const TOUR_STEPS = [
     {
         selector: '.activityPanel',
         title: 'Track completed work',
-        text: 'Tap any day in Daily Activity, and I\'ll show you exactly what you finished that day.',
+        text: 'Tap any day in Daily Activity, and I\'ll show you exactly what you finished that day. Keep coming back day after day and you\'ll build a streak, shown right by your task counter, and unlock achievements down here as you go.',
         action: { event: 'click' },
         beforeShow: () => switchSoloView('activity')
     },
@@ -3476,6 +3480,13 @@ async function applySoloCompletionDelta(uid, task, delta) {
     const isHeavy = getValidDifficultyLevel(task.difficulty) === 5;
     const todayKey = getDateKey(new Date());
 
+    // A transaction callback can be re-run by the SDK on contention (see the
+    // plan's "two devices" risk note) - newlyEarnedBadgeIds is recomputed
+    // fresh on every attempt from that attempt's own read, so it always
+    // reflects the diff for whichever attempt actually wins and commits,
+    // never a stale one from a retried, discarded attempt.
+    let newlyEarnedBadgeIds = [];
+
     await runTransaction(db, async (transaction) => {
         const snapshot = await transaction.get(profileRef);
         const data = snapshot.exists() ? snapshot.data() : {};
@@ -3487,7 +3498,9 @@ async function applySoloCompletionDelta(uid, task, delta) {
         let streak = data.streak && typeof data.streak === 'object'
             ? data.streak
             : { current: 0, longest: 0, lastCompletionDateKey: null };
-        let badges = Array.isArray(data.badges) ? data.badges.slice() : [];
+        const previousBadges = Array.isArray(data.badges) ? data.badges : [];
+        let badges = previousBadges.slice();
+        newlyEarnedBadgeIds = [];
 
         if (delta > 0) {
             streak = computeNextStreak(streak.current || 0, streak.longest || 0, streak.lastCompletionDateKey || null, todayKey);
@@ -3497,6 +3510,7 @@ async function applySoloCompletionDelta(uid, task, delta) {
             ACHIEVEMENT_BADGES.forEach((badge) => {
                 if (badge.statKey && badge.target && !badges.includes(badge.id) && (Number(stats[badge.statKey]) || 0) >= badge.target) {
                     badges.push(badge.id);
+                    newlyEarnedBadgeIds.push(badge.id);
                 }
             });
             // Clean Sweep: checked live against the current task list, not
@@ -3504,6 +3518,7 @@ async function applySoloCompletionDelta(uid, task, delta) {
             // comment for why.
             if (!badges.includes('clean_sweep') && tasks.length > 0 && tasks.every((t) => t.completed)) {
                 badges.push('clean_sweep');
+                newlyEarnedBadgeIds.push('clean_sweep');
             }
             update.badges = badges;
         }
@@ -3515,6 +3530,40 @@ async function applySoloCompletionDelta(uid, task, delta) {
     mirrorPublicStreakSummary(uid);
     refreshSoloStreakPill();
     renderSoloAchievements();
+    if (newlyEarnedBadgeIds.length > 0) {
+        showBadgeEarnedToast(newlyEarnedBadgeIds);
+    }
+}
+
+// The in-the-moment counterpart to the weekly recap's "new since last
+// recap" callout - a badge shouldn't go unacknowledged for up to 7 days
+// just because it's not a milestone (checkForMilestone/
+// triggerRewardCelebration). Deliberately a small toast, not the
+// slot-reel reward overlay - a badge is common enough (10 of them) that
+// treating every one like a jackpot would cheapen the actual milestone
+// celebration, and both could otherwise fire from the same completion.
+function showBadgeEarnedToast(badgeIds) {
+    if (!badgeEarnedToast || !badgeEarnedToastText || badgeIds.length === 0) {
+        return;
+    }
+    const titles = badgeIds
+        .map((id) => ACHIEVEMENT_BADGES.find((badge) => badge.id === id)?.title)
+        .filter(Boolean);
+    if (titles.length === 0) {
+        return;
+    }
+
+    badgeEarnedToastText.textContent = titles.length === 1
+        ? `Achievement unlocked: ${titles[0]}`
+        : `${titles.length} achievements unlocked: ${titles.join(', ')}`;
+    badgeEarnedToast.classList.remove('hidden');
+
+    if (badgeEarnedToastTimeoutId) {
+        clearTimeout(badgeEarnedToastTimeoutId);
+    }
+    badgeEarnedToastTimeoutId = setTimeout(() => {
+        badgeEarnedToast.classList.add('hidden');
+    }, BADGE_EARNED_TOAST_MS);
 }
 
 // A separate, narrow write - see firestore.rules' users/{uid}/public/{docId}
