@@ -65,6 +65,39 @@ service cloud.firestore {
         && request.resource.data.text.size() <= 300;
     }
 
+    // Solo's own completion log - the sibling to the group history rule
+    // further down, giving the streak/badge feature a durable per-completion
+    // record instead of trusting only the client's local activity counters
+    // (which live in localStorage and were never synced). Delete is allowed
+    // (unlike group's owner-or-group-owner delete) because un-completing a
+    // task here removes its own matching entry - see setTaskCompletedState
+    // in script.js. Immutable otherwise (no update rule), same as every
+    // other event log in this file.
+    match /users/{uid}/history/{entryId} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.taskText is string
+        && request.resource.data.taskText.size() > 0
+        && request.resource.data.taskText.size() <= 2000;
+    }
+
+    // Feedback / bug reports, submitted from Settings -> Feedback. A
+    // top-level collection (not nested under users/{uid}) on purpose, so
+    // every submission is browsable at once from the Firebase console
+    // instead of needing a collection-group query. Read is capped to your
+    // own submissions, same as everything else personal in this file; no
+    // update/delete from the client at all - a status change (open -> looked
+    // at -> done) happens by hand in the console, not through the app.
+    match /feedback/{feedbackId} {
+      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.category in ['bug', 'idea', 'feedback', 'remove']
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 2000;
+    }
+
     // Feature 4: groups. The invite code IS the document ID (see
     // group-app/src/groups.js), which is what lets "join by code" work as a
     // narrow, self-contained security rule below instead of needing a Cloud

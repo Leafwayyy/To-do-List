@@ -54,6 +54,13 @@
     let memoryImportBtn = null;
     let memoryImportStatus = null;
     let memoryImportResults = null;
+    let feedbackOverlay = null;
+    let feedbackCategorySelect = null;
+    let feedbackMessageInput = null;
+    let feedbackSubmitBtn = null;
+    let feedbackSubmitStatus = null;
+    let feedbackList = null;
+    let feedbackEmpty = null;
 
     function injectStyles() {
         const style = document.createElement('style');
@@ -331,6 +338,93 @@
                 white-space: nowrap;
             }
             .settingsMemoryImportSaveBtn { padding: 8px 16px; }
+            /* Feedback panel - same lazily-built, stacks-on-top pattern as
+               .settingsMemoryOverlay above, and reuses its list/status
+               classes directly (.settingsMemoryList, .settingsMemoryItem,
+               .settingsMemoryItemText, .settingsHint) rather than
+               duplicating them. Only genuinely new rules are the form
+               controls and the status pill. */
+            .settingsFeedbackOverlay {
+                position: fixed;
+                inset: 0;
+                z-index: 950;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(4, 6, 10, 0.72);
+                padding: 20px;
+            }
+            .settingsFeedbackOverlay.hidden { display: none; }
+            .settingsFeedbackCard {
+                width: 100%;
+                max-width: 420px;
+                max-height: 80vh;
+                overflow-y: auto;
+                background: linear-gradient(150deg, #050225, #0a0537, #140a46);
+                border: 1px solid rgba(170, 152, 255, 0.36);
+                border-radius: 16px;
+                color: #f6f4ff;
+                font-family: 'Inter', system-ui, sans-serif;
+                padding: 22px 24px 26px;
+            }
+            .settingsFeedbackCategory {
+                width: 100%;
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(170, 152, 255, 0.3);
+                border-radius: 8px;
+                color: #f6f4ff;
+                padding: 8px 10px;
+                font: inherit;
+                font-size: 0.86rem;
+                margin-bottom: 8px;
+                box-sizing: border-box;
+            }
+            .settingsFeedbackCategory option { background: #140a46; color: #f6f4ff; }
+            .settingsFeedbackMessage {
+                width: 100%;
+                min-height: 90px;
+                resize: vertical;
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(170, 152, 255, 0.3);
+                border-radius: 8px;
+                color: #f6f4ff;
+                padding: 8px 10px;
+                font: inherit;
+                font-size: 0.86rem;
+                box-sizing: border-box;
+                margin-bottom: 8px;
+            }
+            .settingsFeedbackSubmitBtn { padding: 8px 16px; }
+            .settingsFeedbackSubmitStatus { margin: 8px 0 14px; }
+            .settingsFeedbackSubmitStatus.hidden { display: none; }
+            .settingsFeedbackListHeading {
+                margin: 0 0 8px;
+                font-size: 0.82rem;
+                color: #b58bff;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+            }
+            .settingsFeedbackEmpty.hidden { display: none; }
+            .settingsFeedbackItemTop { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+            .settingsFeedbackItemCategory { font-weight: 700; text-transform: capitalize; }
+            .settingsFeedbackItemDate { opacity: 0.7; font-size: 0.78rem; }
+            .settingsFeedbackStatusPill {
+                flex: 0 0 auto;
+                margin-left: auto;
+                font-size: 0.68rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.02em;
+                border-radius: 999px;
+                padding: 2px 8px;
+                white-space: nowrap;
+                color: #d7d0ff;
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(170, 152, 255, 0.3);
+            }
+            .settingsFeedbackStatusPill.isLookedAt { color: #f6e6a8; background: rgba(224, 194, 90, 0.14); border-color: rgba(224, 194, 90, 0.4); }
+            .settingsFeedbackStatusPill.isDone { color: #a8e0b8; background: rgba(90, 224, 130, 0.14); border-color: rgba(90, 224, 130, 0.4); }
+            .settingsFeedbackItem { display: block; }
         `;
         document.head.appendChild(style);
     }
@@ -408,6 +502,12 @@
                 </section>
 
                 <section class="settingsSection">
+                    <h3>Feedback</h3>
+                    <p class="settingsHint">Found a bug, have an idea, or just want to tell us something? We read every one.</p>
+                    <button type="button" class="settingsFeedbackTriggerBtn settingsMemoryManageBtn">Send feedback</button>
+                </section>
+
+                <section class="settingsSection">
                     <h3>Privacy &amp; legal</h3>
                     <p class="settingsHint"><a href="${PRIVACY_URL}">Privacy Policy</a> &middot; <a href="${TERMS_URL}">Terms of Service</a></p>
                 </section>
@@ -436,6 +536,7 @@
         node.querySelector('.settingsExportBtn').addEventListener('click', exportTasks);
         node.querySelector('.settingsDeleteBtn').addEventListener('click', onDeleteClick);
         node.querySelector('.settingsMemoryManageBtn').addEventListener('click', openMemoryOverlay);
+        node.querySelector('.settingsFeedbackTriggerBtn').addEventListener('click', openFeedbackOverlay);
 
         emailText = node.querySelector('.settingsEmail');
         nameInput = node.querySelector('.settingsNameInput');
@@ -503,11 +604,16 @@
         if (event.key !== 'Escape') {
             return;
         }
-        // The memory panel sits on top of the main Settings panel (see
-        // openMemoryOverlay) - Escape should close whichever is actually on
-        // top first, not both at once.
+        // The memory and feedback panels both sit on top of the main
+        // Settings panel (see openMemoryOverlay/openFeedbackOverlay) -
+        // Escape should close whichever is actually on top first, not both
+        // at once.
         if (memoryOverlay && !memoryOverlay.classList.contains('hidden')) {
             closeMemoryOverlay();
+            return;
+        }
+        if (feedbackOverlay && !feedbackOverlay.classList.contains('hidden')) {
+            closeFeedbackOverlay();
             return;
         }
         closeOverlay();
@@ -793,6 +899,232 @@
         }
         memoryOverlay.classList.add('hidden');
         memoryOverlay.setAttribute('aria-hidden', 'true');
+    }
+
+    // Bug/idea/feedback/removal-request form, plus a read-only list of your
+    // own past submissions. Same lazily-built, stacks-on-top-of-Settings
+    // pattern as buildMemoryOverlay above, deliberately structured the same
+    // way. Writes to a top-level feedback/{id} collection (not nested under
+    // users/{uid}) - see firestore.rules for why.
+    function buildFeedbackOverlay() {
+        const node = document.createElement('div');
+        node.className = 'settingsFeedbackOverlay hidden';
+        node.setAttribute('aria-hidden', 'true');
+        node.innerHTML = `
+            <div class="settingsFeedbackCard" role="dialog" aria-modal="true" aria-label="Send feedback">
+                <div class="settingsHeader">
+                    <h2>Feedback</h2>
+                    <button type="button" class="settingsCloseBtn" aria-label="Close">&times;</button>
+                </div>
+                <p class="settingsHint">Found a bug, have an idea, or want something removed? Tell us below - we read every one.</p>
+
+                <select class="settingsFeedbackCategory">
+                    <option value="bug">Bug</option>
+                    <option value="idea">Idea</option>
+                    <option value="feedback">General feedback</option>
+                    <option value="remove">Something to remove</option>
+                </select>
+                <textarea class="settingsFeedbackMessage" rows="4" maxlength="2000" placeholder="What's going on?"></textarea>
+                <button type="button" class="settingsFeedbackSubmitBtn settingsMemoryAddBtn">Submit</button>
+                <p class="settingsFeedbackSubmitStatus settingsHint hidden" aria-live="polite"></p>
+
+                <h3 class="settingsFeedbackListHeading">Your past feedback</h3>
+                <ul class="settingsMemoryList settingsFeedbackList"></ul>
+                <p class="settingsFeedbackEmpty settingsHint hidden">Nothing sent yet.</p>
+            </div>
+        `;
+        document.body.appendChild(node);
+
+        node.addEventListener('click', (event) => {
+            if (event.target === node) {
+                closeFeedbackOverlay();
+            }
+        });
+        node.querySelector('.settingsCloseBtn').addEventListener('click', closeFeedbackOverlay);
+        node.querySelector('.settingsFeedbackSubmitBtn').addEventListener('click', submitFeedback);
+
+        feedbackCategorySelect = node.querySelector('.settingsFeedbackCategory');
+        feedbackMessageInput = node.querySelector('.settingsFeedbackMessage');
+        feedbackSubmitBtn = node.querySelector('.settingsFeedbackSubmitBtn');
+        feedbackSubmitStatus = node.querySelector('.settingsFeedbackSubmitStatus');
+        feedbackList = node.querySelector('.settingsFeedbackList');
+        feedbackEmpty = node.querySelector('.settingsFeedbackEmpty');
+
+        return node;
+    }
+
+    async function submitFeedback() {
+        if (!currentUser || !feedbackMessageInput) {
+            return;
+        }
+        const message = feedbackMessageInput.value.trim();
+        if (!message) {
+            feedbackSubmitStatus.textContent = 'Write something first.';
+            feedbackSubmitStatus.classList.remove('hidden');
+            return;
+        }
+        const category = feedbackCategorySelect.value;
+
+        feedbackSubmitBtn.disabled = true;
+        feedbackSubmitStatus.classList.add('hidden');
+        try {
+            const { doc, setDoc, collection, serverTimestamp } = window.ToDoAuth.firestore;
+            const docRef = doc(collection(window.ToDoAuth.db, 'feedback'));
+            const submission = {
+                uid: currentUser.uid,
+                email: currentUser.email || '',
+                category,
+                message: message.slice(0, 2000),
+                userAgent: navigator.userAgent || '',
+                status: 'open',
+                createdAt: serverTimestamp()
+            };
+            await setDoc(docRef, submission);
+            feedbackMessageInput.value = '';
+            feedbackSubmitStatus.textContent = 'Sent, thank you.';
+            feedbackSubmitStatus.classList.remove('hidden');
+            // Optimistic prepend, same reasoning as addMemoryManually calling
+            // refreshMemoryList right after a write - createdAt isn't
+            // resolved locally yet (serverTimestamp() is a sentinel until
+            // the server responds), so this row shows "Just now" until the
+            // next full refreshFeedbackList call gives it a real date.
+            prependFeedbackItem({ id: docRef.id, ...submission, createdAt: null });
+        } catch (error) {
+            console.error('Failed to submit feedback:', error);
+            feedbackSubmitStatus.textContent = "Couldn't send, check your connection and try again.";
+            feedbackSubmitStatus.classList.remove('hidden');
+        } finally {
+            feedbackSubmitBtn.disabled = false;
+        }
+    }
+
+    function feedbackStatusLabel(status) {
+        if (status === 'looked-at') {
+            return 'Looked at';
+        }
+        if (status === 'done') {
+            return 'Done';
+        }
+        return 'Open';
+    }
+
+    function feedbackStatusPillClass(status) {
+        if (status === 'looked-at') {
+            return 'isLookedAt';
+        }
+        if (status === 'done') {
+            return 'isDone';
+        }
+        return '';
+    }
+
+    function formatFeedbackDate(createdAt) {
+        if (!createdAt || typeof createdAt.toDate !== 'function') {
+            return 'Just now';
+        }
+        return createdAt.toDate().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    // Built with createElement/textContent, not innerHTML, same reasoning
+    // as refreshMemoryList below - a feedback message is whatever the user
+    // typed, never trusted as markup.
+    function buildFeedbackItem(entry) {
+        const item = document.createElement('li');
+        item.className = 'settingsMemoryItem settingsFeedbackItem';
+
+        const top = document.createElement('div');
+        top.className = 'settingsFeedbackItemTop';
+
+        const categoryLabel = document.createElement('span');
+        categoryLabel.className = 'settingsFeedbackItemCategory';
+        categoryLabel.textContent = entry.category === 'remove' ? 'Removal' : entry.category;
+        top.appendChild(categoryLabel);
+
+        const dateLabel = document.createElement('span');
+        dateLabel.className = 'settingsFeedbackItemDate';
+        dateLabel.textContent = formatFeedbackDate(entry.createdAt);
+        top.appendChild(dateLabel);
+
+        const pill = document.createElement('span');
+        pill.className = 'settingsFeedbackStatusPill';
+        const pillClass = feedbackStatusPillClass(entry.status);
+        if (pillClass) {
+            pill.classList.add(pillClass);
+        }
+        pill.textContent = feedbackStatusLabel(entry.status);
+        top.appendChild(pill);
+
+        item.appendChild(top);
+
+        const textSpan = document.createElement('span');
+        textSpan.className = 'settingsMemoryItemText';
+        textSpan.textContent = entry.message || '';
+        item.appendChild(textSpan);
+
+        return item;
+    }
+
+    function prependFeedbackItem(entry) {
+        if (!feedbackList) {
+            return;
+        }
+        feedbackList.insertBefore(buildFeedbackItem(entry), feedbackList.firstChild);
+        if (feedbackEmpty) {
+            feedbackEmpty.classList.add('hidden');
+        }
+    }
+
+    // Re-fetched fresh each time the panel opens - same "glance, not a live
+    // view" reasoning as refreshMemoryList, no subscription needed. The
+    // where('uid', ...) clause isn't just an optimization - the firestore
+    // rule for this collection only allows reading a document whose own uid
+    // field matches you, and an unconstrained list query against that kind
+    // of rule gets rejected outright (Firestore can't prove every possible
+    // result would pass), not silently filtered. Sorted client-side rather
+    // than adding orderBy('createdAt') to the query, which would need a
+    // composite index set up in the Firebase console before it'd work -
+    // not worth it for what's expected to be a short personal list.
+    function refreshFeedbackList() {
+        if (!currentUser || !feedbackList) {
+            return;
+        }
+        const { collection, query, where, getDocs } = window.ToDoAuth.firestore;
+        const feedbackQuery = query(
+            collection(window.ToDoAuth.db, 'feedback'),
+            where('uid', '==', currentUser.uid)
+        );
+        getDocs(feedbackQuery).then((snapshot) => {
+            const ownEntries = snapshot.docs
+                .map((entryDoc) => ({ id: entryDoc.id, ...entryDoc.data() }))
+                .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+            feedbackList.innerHTML = '';
+            ownEntries.forEach((entry) => {
+                feedbackList.appendChild(buildFeedbackItem(entry));
+            });
+            if (feedbackEmpty) {
+                feedbackEmpty.classList.toggle('hidden', ownEntries.length > 0);
+            }
+        }).catch((error) => {
+            console.error('Failed to load past feedback:', error);
+        });
+    }
+
+    function openFeedbackOverlay() {
+        playClickSoundSafely();
+        if (!feedbackOverlay) {
+            feedbackOverlay = buildFeedbackOverlay();
+        }
+        refreshFeedbackList();
+        feedbackOverlay.classList.remove('hidden');
+        feedbackOverlay.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeFeedbackOverlay() {
+        if (!feedbackOverlay) {
+            return;
+        }
+        feedbackOverlay.classList.add('hidden');
+        feedbackOverlay.setAttribute('aria-hidden', 'true');
     }
 
     // This file has no shared click-sound helper of its own (unlike
