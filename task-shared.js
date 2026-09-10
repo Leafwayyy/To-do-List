@@ -72,6 +72,68 @@ function getDifficultyLabel(level) {
     return `D${normalizedLevel} (${difficulty.label})`;
 }
 
+// Accomplishments/streaks: defined once here (not in script.js) so group's
+// own roster streak-flame fast-follow can read the exact same badge list
+// instead of a second copy that could drift. A badge is "earned" the moment
+// its id appears in a user's users/{uid} profile doc's badges array (see
+// script.js's updateSoloCompletionStats) - never re-derived from these
+// checkFns at render time, so a badge can't silently un-earn itself if a
+// stat later dips (an undone completion, say). checkFn/statKey/target exist
+// only to drive the Achievements row's live progress display for a badge
+// not yet earned ("3/7 days") - clean_sweep has neither, since "cleared
+// every active task at once" isn't a running number to show progress
+// toward, it's checked directly against the live task list at the moment a
+// task is completed (see script.js).
+const ACHIEVEMENT_BADGES = [
+    { id: 'first_task', icon: 'fa-star', title: 'First Task', description: 'Complete your first task.', statKey: 'totalCompletions', target: 1 },
+    { id: 'streak_3', icon: 'fa-fire', title: '3-Day Streak', description: 'Complete a task 3 days in a row.', statKey: 'longestStreak', target: 3 },
+    { id: 'streak_7', icon: 'fa-fire', title: '7-Day Streak', description: 'Complete a task 7 days in a row.', statKey: 'longestStreak', target: 7 },
+    { id: 'streak_30', icon: 'fa-fire', title: '30-Day Streak', description: 'Complete a task 30 days in a row.', statKey: 'longestStreak', target: 30 },
+    { id: 'streak_100', icon: 'fa-fire', title: '100-Day Streak', description: 'Complete a task 100 days in a row.', statKey: 'longestStreak', target: 100 },
+    { id: 'tasks_25', icon: 'fa-list-check', title: '25 Tasks Done', description: 'Complete 25 tasks total.', statKey: 'totalCompletions', target: 25 },
+    { id: 'tasks_100', icon: 'fa-list-check', title: '100 Tasks Done', description: 'Complete 100 tasks total.', statKey: 'totalCompletions', target: 100 },
+    { id: 'tasks_500', icon: 'fa-list-check', title: '500 Tasks Done', description: 'Complete 500 tasks total.', statKey: 'totalCompletions', target: 500 },
+    { id: 'heavy_lifter', icon: 'fa-dumbbell', title: 'Heavy Lifter', description: 'Complete 10 Very Hard tasks.', statKey: 'heavyTaskCompletions', target: 10 },
+    { id: 'clean_sweep', icon: 'fa-broom', title: 'Clean Sweep', description: 'Clear every active task at once.', statKey: null, target: null }
+];
+
+// stats: { totalCompletions, longestStreak, heavyTaskCompletions } - the
+// same shape script.js's profile read normalizes to (defaulting every
+// field to 0 for an account with none of this written yet, see
+// getSoloCompletionStats). Returns null for a badge with no numeric target
+// (currently just clean_sweep).
+function getAchievementProgress(badge, stats) {
+    if (!badge.statKey || !badge.target) {
+        return null;
+    }
+    const current = Math.min(Number(stats[badge.statKey]) || 0, badge.target);
+    return { current, target: badge.target };
+}
+
+// today/lastCompletionDateKey are both getDateKey() strings (local browser
+// time, same convention as the activity heatmap - see script.js's
+// addActivityCount). Pure and easy to test in isolation: same day -> no
+// change; exactly one calendar day later -> the streak continues; anything
+// else (a gap, or no prior completion at all) -> it restarts at 1. Shared
+// here (not private to script.js) so a future group-side streak read can
+// reuse the exact same day-math instead of a second implementation that
+// could disagree with solo's about what counts as "the next day".
+function computeNextStreak(currentStreak, longestStreak, lastCompletionDateKey, todayKey) {
+    let nextCurrent;
+    if (lastCompletionDateKey === todayKey) {
+        nextCurrent = currentStreak || 1;
+    } else {
+        const yesterday = new Date(`${todayKey}T00:00:00`);
+        yesterday.setDate(yesterday.getDate() - 1);
+        nextCurrent = (lastCompletionDateKey === getDateKey(yesterday)) ? (currentStreak || 0) + 1 : 1;
+    }
+    return {
+        current: nextCurrent,
+        longest: Math.max(longestStreak || 0, nextCurrent),
+        lastCompletionDateKey: todayKey
+    };
+}
+
 // Rough hours-to-complete per difficulty rank (Very Easy..Very Hard), used
 // only as a fallback when a task has no explicit time estimate - most
 // tasks never get one, and "how long will this actually take" is exactly

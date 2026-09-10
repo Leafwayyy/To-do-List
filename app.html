@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260905d">
+    <link rel="stylesheet" href="style.css?v=20260910a">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#030204">
@@ -77,6 +77,7 @@
                     <div class="taskAmountContainer">
 
                         <p class="taskAmount">0/0</p>
+                        <span class="streakPill hidden" title="Your current streak"></span>
                     </div>
 
                 </div>
@@ -280,8 +281,15 @@
                     <span class="heatCell level-4"></span>
                     <span>More</span>
                 </div>
+
+                <!-- Achievements: a compact earned/locked badge row appended
+                     below the heatmap in this same Activity tab, not a new
+                     nav tab - see script.js's renderSoloAchievements. -->
+                <p class="achievementsHeading">Achievements</p>
+                <div class="achievementsRow" role="list" aria-label="Achievements"></div>
             </div>
         </div>
+        <p class="achievementsTooltip hidden" role="tooltip"></p>
 
         <!-- Calendar: the same tasks already on your list, laid out by day.
              .calendarDayCell is the one piece of markup driving both the
@@ -417,11 +425,11 @@
         </div>
     </div>
 
-    <script src="task-shared.js?v=20260905b"></script>
+    <script src="task-shared.js?v=20260910a"></script>
     <script src="brain-dump.js?v=20260908a"></script>
     <script src="auth-gate.js?v=20260830a"></script>
-    <script src="script.js?v=20260905b"></script>
-    <script type="module" src="firebase-init.js?v=20260831a"></script>
+    <script src="script.js?v=20260910a"></script>
+    <script type="module" src="firebase-init.js?v=20260910a"></script>
     <script src="settings.js?v=20260910a"></script>
 
 

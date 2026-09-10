@@ -37,6 +37,7 @@ import {
     limit,
     onSnapshot,
     writeBatch,
+    runTransaction,
     serverTimestamp,
     increment
 } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js';
@@ -160,7 +161,7 @@ window.ToDoAuth = {
     db,
     firestore: {
         doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove,
-        collection, query, where, orderBy, limit, onSnapshot, writeBatch, serverTimestamp, increment
+        collection, query, where, orderBy, limit, onSnapshot, writeBatch, runTransaction, serverTimestamp, increment
     },
     signInWithGoogle: () => signInWithPopup(auth, googleProvider),
     signUpWithEmail: (email, password) => createUserWithEmailAndPassword(auth, email, password),

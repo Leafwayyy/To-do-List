@@ -54,6 +54,9 @@ const tasksList = document.querySelector('.tasks');
 const progressBar = document.querySelector('.progressBar');
 const motivatorText = document.querySelector('.motivatorText');
 const taskAmountText = document.querySelector('.taskAmount');
+const streakPill = document.querySelector('.streakPill');
+const achievementsRow = document.querySelector('.achievementsRow');
+const achievementsTooltip = document.querySelector('.achievementsTooltip');
 const activityDetailsOverlay = document.querySelector('.activityDetailsOverlay');
 const activityDetailsTitle = document.querySelector('.activityDetailsTitle');
 const activityDetailsMeta = document.querySelector('.activityDetailsMeta');
@@ -135,6 +138,21 @@ let showDifficultyBadgesOnMobile = true;
 let activityCountsByDate = {};
 let activityHistoryByDate = {};
 let activityTooltip = null;
+// Accomplishments/streaks - a local cache of the users/{uid} profile doc's
+// streak/badge summary fields (see updateSoloCompletionStats), refreshed
+// whenever that doc is written or first read at sign-in, so the streak
+// pill/Achievements row can render synchronously off this instead of a
+// Firestore read on every render. Defaults match an account that's never
+// had these fields written at all (see the "new/existing users" risk note
+// in the plan) - every reader of this object must go through it, never
+// assume the profile doc itself has these fields.
+let soloCompletionStats = { totalCompletions: 0, heavyTaskCompletions: 0, streak: { current: 0, longest: 0, lastCompletionDateKey: null }, badges: [] };
+// taskId -> the Firestore history doc id just created for it, so an undo
+// in the SAME session can delete the right entry without a query. Doesn't
+// survive a reload - an undo after a reload just leaves that one history
+// entry in place (a harmless, documented limitation, see the plan).
+const pendingSoloHistoryIds = new Map();
+const SOLO_STATS_BACKFILLED_KEY = 'todoSoloStatsBackfilledV1';
 let pendingDeletedTask = null;
 let undoDeleteTimeoutId = null;
 let pendingSubtaskFocusTaskId = null;
@@ -518,6 +536,11 @@ function startApp() {
     renderActivityHeatmap();
     startRealtimeUpdates();
     initializeTaskEditor();
+    // Reads (and, for a pre-existing account with no summary fields yet,
+    // one-time backfills) the streak/badge summary - after
+    // loadActivityCounts()/loadActivityHistory() above, since the backfill
+    // derives its starting numbers from that local data.
+    loadSoloCompletionStats();
 
     subscribeToCloudTasks();
 }
@@ -551,6 +574,14 @@ AuthGate.init({
         hasLoadedCloudTasksOnce = false;
         tasks = [];
         isLegacyTourAccount = false;
+        // Clears the previous account's streak/badges from both the cache
+        // and the pill/row on screen - a shared-browser sign-out shouldn't
+        // leave the last person's streak flashing before the next
+        // sign-in's own loadSoloCompletionStats() resolves.
+        soloCompletionStats = { totalCompletions: 0, heavyTaskCompletions: 0, streak: { current: 0, longest: 0, lastCompletionDateKey: null }, badges: [] };
+        pendingSoloHistoryIds.clear();
+        refreshSoloStreakPill();
+        renderSoloAchievements();
     }
 });
 
@@ -2086,6 +2117,14 @@ function setTaskCompletedState(task, completed) {
         addActivityCount(1);
         addActivityHistoryEntry(task);
         checkForMilestone();
+        // Not awaited - same fire-and-forget cloud-sync pattern saveTasks()
+        // already uses elsewhere in this file. Runs before the recurrence
+        // block below on purpose, since updateSoloCompletionStats checks
+        // the live task list for the Clean Sweep badge (every task
+        // completed at once) - a recurring task resets its own .completed
+        // back to false right after this, which should correctly count as
+        // "still has an active task", not accidentally read as cleared.
+        updateSoloCompletionStats(task, true);
 
         // Recurring: this occurrence still counts (activity/history/
         // milestone above already credited it) - it just doesn't STAY
@@ -2109,6 +2148,7 @@ function setTaskCompletedState(task, completed) {
     } else if (wasCompleted && !completed) {
         addActivityCount(-1);
         removeLatestActivityHistoryEntry(task);
+        updateSoloCompletionStats(task, false);
     }
 }
 
@@ -3018,6 +3058,7 @@ function updateTaskSummary() {
     const completedTasks = tasks.filter((task) => task.completed).length;
 
     taskAmountText.textContent = `${completedTasks}/${totalTasks}`;
+    refreshSoloStreakPill();
 
     const progressPercent = totalTasks === 0 ? 0 : (completedTasks / totalTasks) * 100;
     progressBar.style.width = `${progressPercent}%`;
@@ -3343,6 +3384,196 @@ function removeLatestActivityHistoryEntry(task) {
     }
 
     saveActivityHistory();
+}
+
+// Writes the durable per-completion log entry (users/{uid}/history, mirrors
+// group's groups/{id}/history - see logGroupTaskCompletion in group/group.js)
+// and updates the denormalized streak/badge summary, on a genuine completion
+// state change. Not awaited by its caller (setTaskCompletedState) - same
+// fire-and-forget cloud-sync convention as saveTasks()/syncTasksToCloud().
+async function updateSoloCompletionStats(task, completed) {
+    if (!window.ToDoAuth?.auth?.currentUser) {
+        return;
+    }
+    const uid = window.ToDoAuth.auth.currentUser.uid;
+    const { db, firestore } = window.ToDoAuth;
+    const { doc, collection, setDoc, deleteDoc } = firestore;
+
+    try {
+        if (completed) {
+            const historyRef = doc(collection(db, 'users', uid, 'history'));
+            // A real client timestamp captured right now, never anything
+            // task-editable (task.dueAt/scheduledAt) - see the plan's note
+            // on why a backdated due date must never be able to fabricate a
+            // streak day.
+            await setDoc(historyRef, {
+                taskId: task.id,
+                taskText: task.text,
+                completedAt: new Date().toISOString()
+            });
+            pendingSoloHistoryIds.set(task.id, historyRef.id);
+        } else {
+            const historyId = pendingSoloHistoryIds.get(task.id);
+            pendingSoloHistoryIds.delete(task.id);
+            if (historyId) {
+                await deleteDoc(doc(db, 'users', uid, 'history', historyId));
+            }
+        }
+        await applySoloCompletionDelta(uid, task, completed ? 1 : -1);
+    } catch (error) {
+        console.error('Failed to sync completion stats:', error);
+    }
+}
+
+// The actual streak/badge math, inside a transaction so two tabs/devices
+// completing tasks close together can't lose an increment to a last-write-
+// wins race (see the plan's "two devices" risk note). totalCompletions/
+// heavyTaskCompletions move symmetrically on both a completion (delta +1)
+// and an undo (delta -1) - streak/badges deliberately do NOT move on an
+// undo, see the plan's reasoning on why (recomputing a streak from the full
+// history log on every undo isn't worth the cost, and a badge, once shown,
+// should never disappear again).
+async function applySoloCompletionDelta(uid, task, delta) {
+    const { db, firestore } = window.ToDoAuth;
+    const { doc, runTransaction } = firestore;
+    const profileRef = doc(db, 'users', uid);
+    const isHeavy = getValidDifficultyLevel(task.difficulty) === 5;
+    const todayKey = getDateKey(new Date());
+
+    await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(profileRef);
+        const data = snapshot.exists() ? snapshot.data() : {};
+
+        const totalCompletions = Math.max(0, (Number(data.totalCompletions) || 0) + delta);
+        const heavyTaskCompletions = Math.max(0, (Number(data.heavyTaskCompletions) || 0) + (isHeavy ? delta : 0));
+        const update = { totalCompletions, heavyTaskCompletions };
+
+        let streak = data.streak && typeof data.streak === 'object'
+            ? data.streak
+            : { current: 0, longest: 0, lastCompletionDateKey: null };
+        let badges = Array.isArray(data.badges) ? data.badges.slice() : [];
+
+        if (delta > 0) {
+            streak = computeNextStreak(streak.current || 0, streak.longest || 0, streak.lastCompletionDateKey || null, todayKey);
+            update.streak = streak;
+
+            const stats = { totalCompletions, longestStreak: streak.longest, heavyTaskCompletions };
+            ACHIEVEMENT_BADGES.forEach((badge) => {
+                if (badge.statKey && badge.target && !badges.includes(badge.id) && (Number(stats[badge.statKey]) || 0) >= badge.target) {
+                    badges.push(badge.id);
+                }
+            });
+            // Clean Sweep: checked live against the current task list, not
+            // a stored counter - see task-shared.js's ACHIEVEMENT_BADGES
+            // comment for why.
+            if (!badges.includes('clean_sweep') && tasks.length > 0 && tasks.every((t) => t.completed)) {
+                badges.push('clean_sweep');
+            }
+            update.badges = badges;
+        }
+
+        transaction.set(profileRef, update, { merge: true });
+        soloCompletionStats = { totalCompletions, heavyTaskCompletions, streak, badges };
+    });
+
+    refreshSoloStreakPill();
+    renderSoloAchievements();
+}
+
+// Reads the profile doc's summary fields once (sign-in, or whenever the
+// panels are about to render for the first time) and normalizes every
+// field to a real default - see soloCompletionStats' own comment on why
+// this can never assume the fields exist.
+async function loadSoloCompletionStats() {
+    if (!window.ToDoAuth?.auth?.currentUser) {
+        return;
+    }
+    const uid = window.ToDoAuth.auth.currentUser.uid;
+    const { db, firestore } = window.ToDoAuth;
+    const { doc, getDoc } = firestore;
+    try {
+        const snapshot = await getDoc(doc(db, 'users', uid));
+        const data = snapshot.exists() ? snapshot.data() : {};
+        soloCompletionStats = {
+            totalCompletions: Number(data.totalCompletions) || 0,
+            heavyTaskCompletions: Number(data.heavyTaskCompletions) || 0,
+            streak: (data.streak && typeof data.streak === 'object')
+                ? { current: Number(data.streak.current) || 0, longest: Number(data.streak.longest) || 0, lastCompletionDateKey: data.streak.lastCompletionDateKey || null }
+                : { current: 0, longest: 0, lastCompletionDateKey: null },
+            badges: Array.isArray(data.badges) ? data.badges : []
+        };
+    } catch (error) {
+        console.error('Failed to load streak/achievement summary:', error);
+    }
+
+    await maybeBackfillSoloCompletionStats(uid);
+    refreshSoloStreakPill();
+    renderSoloAchievements();
+}
+
+// One-time, per-account: an account that already had activity before this
+// feature shipped would otherwise look like it's starting from zero the
+// first time it loads after the update - see the plan's "existing users"
+// risk note. Derives totals from the local activityCountsByDate/
+// activityHistoryByDate this account's browser already has (no new
+// Firestore reads needed) and writes them once. Gated on a localStorage
+// flag (per-browser, not per-account) - a genuinely new account has no
+// local activity data to derive anything from anyway, so this is a no-op
+// for them either way, just marked done so it never re-runs.
+async function maybeBackfillSoloCompletionStats(uid) {
+    let alreadyBackfilled = false;
+    try {
+        alreadyBackfilled = localStorage.getItem(SOLO_STATS_BACKFILLED_KEY) === 'true';
+    } catch {
+        alreadyBackfilled = false;
+    }
+    if (alreadyBackfilled || soloCompletionStats.totalCompletions > 0) {
+        try {
+            localStorage.setItem(SOLO_STATS_BACKFILLED_KEY, 'true');
+        } catch {
+            // Non-fatal - worst case this re-checks (and no-ops, since
+            // totalCompletions is already > 0) next load.
+        }
+        return;
+    }
+
+    const localTotal = Object.values(activityCountsByDate).reduce((sum, count) => sum + (Number(count) || 0), 0);
+    if (localTotal === 0) {
+        try {
+            localStorage.setItem(SOLO_STATS_BACKFILLED_KEY, 'true');
+        } catch {
+        }
+        return;
+    }
+
+    const sortedDateKeys = Object.keys(activityCountsByDate).sort();
+    let streak = { current: 0, longest: 0, lastCompletionDateKey: null };
+    sortedDateKeys.forEach((dateKey) => {
+        streak = computeNextStreak(streak.current, streak.longest, streak.lastCompletionDateKey, dateKey);
+    });
+
+    const badges = [];
+    const stats = { totalCompletions: localTotal, longestStreak: streak.longest, heavyTaskCompletions: 0 };
+    ACHIEVEMENT_BADGES.forEach((badge) => {
+        if (badge.statKey && badge.target && (Number(stats[badge.statKey]) || 0) >= badge.target) {
+            badges.push(badge.id);
+        }
+    });
+
+    try {
+        const { db, firestore } = window.ToDoAuth;
+        const { doc, setDoc } = firestore;
+        await setDoc(doc(db, 'users', uid), { totalCompletions: localTotal, streak, badges }, { merge: true });
+        soloCompletionStats = { totalCompletions: localTotal, heavyTaskCompletions: 0, streak, badges };
+    } catch (error) {
+        console.error('Failed to backfill streak/achievement summary:', error);
+        return;
+    }
+
+    try {
+        localStorage.setItem(SOLO_STATS_BACKFILLED_KEY, 'true');
+    } catch {
+    }
 }
 
 function pruneActivityCounts() {
@@ -3794,6 +4025,83 @@ function renderActivityHeatmap() {
     activitySummary.textContent = `Today: ${todayCompletions} | This week: ${thisWeekCompletions} | ${activeDays} active day${activeDays === 1 ? '' : 's'} in last 6 months`;
     activityGrid.setAttribute('aria-label', `Activity heatmap for the last 6 months ending ${getDateKey(today)}`);
     lastActivityRenderDateKey = getDateKey(today);
+    renderSoloAchievements();
+}
+
+// Streak pill: a small "🔥 N" chip next to the existing task-count pill
+// (.taskAmountContainer) - deliberately NOT shown for current < 2, so a
+// brand-new or inconsistent user sees nothing here at all rather than a
+// "🔥 1" that isn't yet worth boasting about (see the plan's no-clutter
+// design notes). Clicking it jumps to the Activity tab, same as the rest
+// of that pill row.
+function refreshSoloStreakPill() {
+    if (!streakPill) {
+        return;
+    }
+    const current = soloCompletionStats.streak.current || 0;
+    if (current < 2) {
+        streakPill.classList.add('hidden');
+        streakPill.textContent = '';
+        return;
+    }
+    streakPill.textContent = `🔥 ${current}`;
+    streakPill.title = `${current}-day streak - your longest is ${soloCompletionStats.streak.longest || current}`;
+    streakPill.classList.remove('hidden');
+}
+
+// Compact earned/locked badge row, appended to the bottom of the existing
+// Activity tab (below the heatmap/legend) rather than a new nav tab - see
+// the plan's no-clutter design notes. Rebuilt from scratch each call (the
+// list is fixed-size and small, same reasoning as refreshMemoryList in
+// settings.js not bothering with incremental diffing).
+function renderSoloAchievements() {
+    if (!achievementsRow) {
+        return;
+    }
+    achievementsRow.innerHTML = '';
+    const stats = {
+        totalCompletions: soloCompletionStats.totalCompletions,
+        longestStreak: soloCompletionStats.streak.longest,
+        heavyTaskCompletions: soloCompletionStats.heavyTaskCompletions
+    };
+    const earnedIds = new Set(soloCompletionStats.badges);
+
+    ACHIEVEMENT_BADGES.forEach((badge) => {
+        const isEarned = earnedIds.has(badge.id);
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = `achievementChip${isEarned ? ' isEarned' : ' isLocked'}`;
+        chip.innerHTML = `<i class="fa-solid ${badge.icon}"></i>`;
+        chip.setAttribute('aria-label', badge.title);
+
+        const progress = getAchievementProgress(badge, stats);
+        let tooltipText = `${badge.title} - ${badge.description}`;
+        if (!isEarned && progress) {
+            tooltipText += ` (${progress.current}/${progress.target})`;
+        }
+        chip.addEventListener('click', (event) => {
+            event.stopPropagation();
+            playClickSound();
+            showAchievementsTooltip(tooltipText, event);
+        });
+        achievementsRow.appendChild(chip);
+    });
+}
+
+function showAchievementsTooltip(text, event) {
+    if (!achievementsTooltip) {
+        return;
+    }
+    achievementsTooltip.textContent = text;
+    achievementsTooltip.classList.remove('hidden');
+    const rect = event.currentTarget.getBoundingClientRect();
+    achievementsTooltip.style.left = `${rect.left + (rect.width / 2)}px`;
+    achievementsTooltip.style.top = `${rect.top}px`;
+
+    clearTimeout(showAchievementsTooltip.hideTimer);
+    showAchievementsTooltip.hideTimer = setTimeout(() => {
+        achievementsTooltip.classList.add('hidden');
+    }, 3000);
 }
 
 function openActivityDetails(dateKey, dayLabel, count) {

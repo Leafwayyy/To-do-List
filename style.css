@@ -3657,6 +3657,95 @@ body > .viewTabs{
     }
 }
 
+/* Streak pill: a small badge overlapping the corner of the existing
+   .taskAmountContainer circle (which is already position: relative) rather
+   than a new flex child in .motivatorContainer - that row's spacing is
+   hand-tuned with relative/absolute offsets on each of its three children
+   (see .motivatorText/.progressBarContainer above), so a badge attached to
+   an existing element is far less likely to knock that math out than a
+   fourth sibling squeezed into the same flex row. Hidden entirely below a
+   2-day streak - see refreshSoloStreakPill in script.js. */
+.streakPill{
+    position: absolute;
+    top: -6px;
+    right: -8px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: linear-gradient(135deg, #ff9a4d, #ff5b3d);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 7px;
+    border-radius: 999px;
+    border: 2px solid rgba(255, 255, 255, 0.92);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+    white-space: nowrap;
+    cursor: default;
+}
+.streakPill.hidden{ display: none; }
+
+/* Achievements: a compact earned/locked badge row appended below the
+   heatmap/legend in the existing Activity tab - see the plan's no-clutter
+   notes on why this isn't a new nav tab. Purple family to match the rest
+   of this app's current accent (see settings.js's #b58bff), not the
+   heatmap's blue-scale colors above. */
+.achievementsHeading{
+    margin: 4px 0 0;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6a4fa8;
+}
+
+.achievementsRow{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.achievementChip{
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    border: 1.5px solid rgba(170, 145, 235, 0.4);
+    background: rgba(255, 255, 255, 0.5);
+    color: #6a4fa8;
+    font-size: 15px;
+    cursor: pointer;
+    padding: 0;
+}
+
+.achievementChip.isEarned{
+    background: linear-gradient(135deg, rgba(201, 165, 255, 0.95), rgba(141, 148, 255, 0.95));
+    border-color: rgba(225, 205, 255, 0.96);
+    color: #fff;
+}
+
+.achievementChip.isLocked{
+    opacity: 0.45;
+}
+
+.achievementsTooltip{
+    position: fixed;
+    transform: translate(-50%, -100%) translateY(-8px);
+    background: rgba(20, 10, 46, 0.94);
+    color: #f6f4ff;
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(170, 152, 255, 0.4);
+    max-width: 240px;
+    text-align: center;
+    z-index: 960;
+    pointer-events: none;
+}
+.achievementsTooltip.hidden{ display: none; }
+
 /* Themed tooltip replaces native black tooltip */
 .activityTooltip{
     position: fixed;
