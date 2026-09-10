@@ -78,6 +78,15 @@ const rewardReelTrack = document.querySelector('.rewardReelTrack');
 const rewardSuggestionText = document.querySelector('.rewardSuggestionText');
 const rewardCloseBtn = document.querySelector('.rewardCloseBtn');
 
+const weeklyRecapOverlay = document.querySelector('.weeklyRecapOverlay');
+const weeklyRecapTitle = document.querySelector('.weeklyRecapTitle');
+const weeklyRecapThisWeek = document.querySelector('.weeklyRecapThisWeek');
+const weeklyRecapLastWeek = document.querySelector('.weeklyRecapLastWeek');
+const weeklyRecapStreak = document.querySelector('.weeklyRecapStreak');
+const weeklyRecapNewBadges = document.querySelector('.weeklyRecapNewBadges');
+const weeklyRecapNewBadgesRow = document.querySelector('.weeklyRecapNewBadgesRow');
+const weeklyRecapCloseBtn = document.querySelector('.weeklyRecapCloseBtn');
+
 const STORAGE_KEY = 'todoTasksV3';
 const PREV_STORAGE_KEY = 'todoTasksV2';
 const LEGACY_STORAGE_KEY = 'todoTasks';
@@ -85,6 +94,11 @@ const SETTINGS_KEY = 'todoSettingsV1';
 const ACTIVITY_KEY = 'todoActivityV1';
 const ACTIVITY_HISTORY_KEY = 'todoActivityHistoryV1';
 const CELEBRATED_DAILY_CLEAR_KEY = 'todoCelebratedDailyClearDate';
+// Per-browser (not per-account) - a shared-computer household seeing the
+// recap once per device is an acceptable tradeoff for not needing an extra
+// Firestore field/read just to dedupe this across devices, see the plan's
+// "weekly recap query timing" risk note.
+const WEEKLY_RECAP_SHOWN_KEY = 'todoWeeklyRecapShownAtV1';
 const COACH_KEY = 'todoCoachV1';
 // Set once at sign-in (see AuthGate.init below) - whether THIS account
 // predates account-level tour tracking, so renderOnboardingHint() can hide
@@ -498,6 +512,21 @@ if (activityDetailsOverlay) {
     });
 }
 
+if (weeklyRecapCloseBtn) {
+    weeklyRecapCloseBtn.addEventListener('click', () => {
+        playClickSound();
+        closeWeeklyRecap();
+    });
+}
+
+if (weeklyRecapOverlay) {
+    weeklyRecapOverlay.addEventListener('click', (event) => {
+        if (event.target === weeklyRecapOverlay) {
+            closeWeeklyRecap();
+        }
+    });
+}
+
 // Skip/Next wiring and resize/scroll repositioning are handled inside
 // createTourController itself now.
 document.addEventListener('keydown', onGlobalKeyDown);
@@ -539,8 +568,10 @@ function startApp() {
     // Reads (and, for a pre-existing account with no summary fields yet,
     // one-time backfills) the streak/badge summary - after
     // loadActivityCounts()/loadActivityHistory() above, since the backfill
-    // derives its starting numbers from that local data.
-    loadSoloCompletionStats();
+    // derives its starting numbers from that local data. The weekly recap
+    // check runs only after that resolves, since it needs the real
+    // (possibly just-backfilled) badges list to diff against.
+    loadSoloCompletionStats().then(() => maybeShowWeeklyRecap());
 
     subscribeToCloudTasks();
 }
@@ -976,6 +1007,11 @@ function onGlobalKeyDown(event) {
     if (event.key === 'Escape') {
         if (rewardOverlay && !rewardOverlay.classList.contains('hidden')) {
             closeRewardCelebration();
+            return;
+        }
+
+        if (weeklyRecapOverlay && !weeklyRecapOverlay.classList.contains('hidden')) {
+            closeWeeklyRecap();
             return;
         }
 
@@ -3476,8 +3512,28 @@ async function applySoloCompletionDelta(uid, task, delta) {
         soloCompletionStats = { totalCompletions, heavyTaskCompletions, streak, badges };
     });
 
+    mirrorPublicStreakSummary(uid);
     refreshSoloStreakPill();
     renderSoloAchievements();
+}
+
+// A separate, narrow write - see firestore.rules' users/{uid}/public/{docId}
+// comment for why this mirrors just the streak count and badge ids into
+// their own doc rather than widening the real profile doc's read rule.
+// Best-effort: if this particular write fails, the group roster's flame for
+// this person is just stale/missing until the next successful completion,
+// nothing solo-side depends on it succeeding.
+async function mirrorPublicStreakSummary(uid) {
+    try {
+        const { db, firestore } = window.ToDoAuth;
+        const { doc, setDoc } = firestore;
+        await setDoc(doc(db, 'users', uid, 'public', 'streakSummary'), {
+            current: soloCompletionStats.streak.current || 0,
+            badges: soloCompletionStats.badges
+        });
+    } catch (error) {
+        console.error('Failed to mirror public streak summary:', error);
+    }
 }
 
 // Reads the profile doc's summary fields once (sign-in, or whenever the
@@ -3565,6 +3621,7 @@ async function maybeBackfillSoloCompletionStats(uid) {
         const { doc, setDoc } = firestore;
         await setDoc(doc(db, 'users', uid), { totalCompletions: localTotal, streak, badges }, { merge: true });
         soloCompletionStats = { totalCompletions: localTotal, heavyTaskCompletions: 0, streak, badges };
+        await mirrorPublicStreakSummary(uid);
     } catch (error) {
         console.error('Failed to backfill streak/achievement summary:', error);
         return;
@@ -3574,6 +3631,144 @@ async function maybeBackfillSoloCompletionStats(uid) {
         localStorage.setItem(SOLO_STATS_BACKFILLED_KEY, 'true');
     } catch {
     }
+}
+
+// Client-side gate, no backend scheduling: shows once every 7+ days (or on
+// the very first qualifying load, if the flag has never been set), and only
+// once there's actually something to recap - a brand-new account with zero
+// completions would just see an empty "0 vs 0" card, which is clutter, not
+// motivation. Runs after loadSoloCompletionStats() resolves (see
+// startApp()), since it needs soloCompletionStats.badges to know which
+// badges are new.
+async function maybeShowWeeklyRecap() {
+    if (!window.ToDoAuth?.auth?.currentUser || soloCompletionStats.totalCompletions === 0) {
+        return;
+    }
+
+    let lastShownAt = 0;
+    try {
+        lastShownAt = Number(localStorage.getItem(WEEKLY_RECAP_SHOWN_KEY)) || 0;
+    } catch {
+        lastShownAt = 0;
+    }
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    if (Date.now() - lastShownAt < sevenDaysMs) {
+        return;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const currentWeekStart = new Date(today);
+    currentWeekStart.setDate(today.getDate() - today.getDay());
+    const lastWeekStart = new Date(currentWeekStart);
+    lastWeekStart.setDate(currentWeekStart.getDate() - 7);
+
+    let thisWeekCount = 0;
+    let lastWeekCount = 0;
+    try {
+        const uid = window.ToDoAuth.auth.currentUser.uid;
+        const { db, firestore } = window.ToDoAuth;
+        const { collection, query, where, getDocs } = firestore;
+        // One bounded 14-day range query, split into this-week/last-week
+        // client-side, rather than two separate queries - see the plan's
+        // note on keeping this to a single read.
+        const historyQuery = query(
+            collection(db, 'users', uid, 'history'),
+            where('completedAt', '>=', lastWeekStart.toISOString())
+        );
+        const snapshot = await getDocs(historyQuery);
+        const currentWeekStartIso = currentWeekStart.toISOString();
+        snapshot.docs.forEach((entryDoc) => {
+            const completedAt = entryDoc.data().completedAt;
+            if (typeof completedAt !== 'string') {
+                return;
+            }
+            if (completedAt >= currentWeekStartIso) {
+                thisWeekCount += 1;
+            } else {
+                lastWeekCount += 1;
+            }
+        });
+    } catch (error) {
+        console.error('Failed to load weekly recap data:', error);
+        return;
+    }
+
+    // "New since your last recap" (an approximation of "new this week" -
+    // exact per-badge earn dates aren't tracked, see the plan's data-model
+    // notes) - diffed against a small snapshot field on the profile doc,
+    // updated right after this recap is shown.
+    let previouslySeenBadges = [];
+    try {
+        const uid = window.ToDoAuth.auth.currentUser.uid;
+        const { db, firestore } = window.ToDoAuth;
+        const { doc, getDoc, setDoc } = firestore;
+        const profileRef = doc(db, 'users', uid);
+        const snapshot = await getDoc(profileRef);
+        const data = snapshot.exists() ? snapshot.data() : {};
+        previouslySeenBadges = Array.isArray(data.badgesSeenInRecap) ? data.badgesSeenInRecap : [];
+        await setDoc(profileRef, { badgesSeenInRecap: soloCompletionStats.badges }, { merge: true });
+    } catch (error) {
+        console.error('Failed to update badgesSeenInRecap:', error);
+    }
+    const newBadgeIds = soloCompletionStats.badges.filter((id) => !previouslySeenBadges.includes(id));
+
+    showWeeklyRecap(thisWeekCount, lastWeekCount, newBadgeIds);
+
+    try {
+        localStorage.setItem(WEEKLY_RECAP_SHOWN_KEY, String(Date.now()));
+    } catch {
+    }
+}
+
+function showWeeklyRecap(thisWeekCount, lastWeekCount, newBadgeIds) {
+    if (!weeklyRecapOverlay || !weeklyRecapTitle) {
+        return;
+    }
+
+    let titleText;
+    if (thisWeekCount > lastWeekCount) {
+        titleText = 'You picked up the pace';
+    } else if (thisWeekCount > 0 && thisWeekCount === lastWeekCount) {
+        titleText = 'Steady as ever';
+    } else if (thisWeekCount > 0) {
+        titleText = 'Still moving forward';
+    } else {
+        titleText = 'A quieter week';
+    }
+    weeklyRecapTitle.textContent = titleText;
+    weeklyRecapThisWeek.textContent = String(thisWeekCount);
+    weeklyRecapLastWeek.textContent = String(lastWeekCount);
+    weeklyRecapStreak.textContent = `🔥 ${soloCompletionStats.streak.current || 0}`;
+
+    if (newBadgeIds.length > 0 && weeklyRecapNewBadges && weeklyRecapNewBadgesRow) {
+        weeklyRecapNewBadgesRow.innerHTML = '';
+        newBadgeIds.forEach((badgeId) => {
+            const badge = ACHIEVEMENT_BADGES.find((entry) => entry.id === badgeId);
+            if (!badge) {
+                return;
+            }
+            const chip = document.createElement('div');
+            chip.className = 'achievementChip isEarned';
+            chip.innerHTML = `<i class="fa-solid ${badge.icon}"></i>`;
+            chip.title = badge.title;
+            weeklyRecapNewBadgesRow.appendChild(chip);
+        });
+        weeklyRecapNewBadges.classList.remove('hidden');
+    } else if (weeklyRecapNewBadges) {
+        weeklyRecapNewBadges.classList.add('hidden');
+    }
+
+    weeklyRecapOverlay.classList.remove('hidden');
+    weeklyRecapOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function closeWeeklyRecap() {
+    if (!weeklyRecapOverlay) {
+        return;
+    }
+    weeklyRecapOverlay.classList.add('hidden');
+    weeklyRecapOverlay.setAttribute('aria-hidden', 'true');
 }
 
 function pruneActivityCounts() {

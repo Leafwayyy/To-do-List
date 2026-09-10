@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260910a">
+    <link rel="stylesheet" href="style.css?v=20260910c">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#030204">
@@ -381,6 +381,40 @@
         </div>
     </div>
 
+    <!-- Weekly recap: same dark-card visual language as .rewardCard above
+         (var(--card-1) etc.), but its own markup/state - no slot-reel, and
+         kept separate from triggerRewardCelebration's spin-token state
+         machine rather than bolted onto it. See script.js's
+         maybeShowWeeklyRecap. -->
+    <div class="weeklyRecapOverlay hidden" aria-hidden="true">
+        <div class="weeklyRecapCard" role="dialog" aria-modal="true" aria-label="Your week in review">
+            <p class="weeklyRecapKicker">Your week in review</p>
+            <h3 class="weeklyRecapTitle"></h3>
+
+            <div class="weeklyRecapStats">
+                <div class="weeklyRecapStat">
+                    <p class="weeklyRecapStatValue weeklyRecapThisWeek"></p>
+                    <p class="weeklyRecapStatLabel">This week</p>
+                </div>
+                <div class="weeklyRecapStat">
+                    <p class="weeklyRecapStatValue weeklyRecapLastWeek"></p>
+                    <p class="weeklyRecapStatLabel">Last week</p>
+                </div>
+                <div class="weeklyRecapStat">
+                    <p class="weeklyRecapStatValue weeklyRecapStreak"></p>
+                    <p class="weeklyRecapStatLabel">Streak</p>
+                </div>
+            </div>
+
+            <div class="weeklyRecapNewBadges hidden">
+                <p class="weeklyRecapNewBadgesLabel">New this week</p>
+                <div class="weeklyRecapNewBadgesRow"></div>
+            </div>
+
+            <button class="weeklyRecapCloseBtn" type="button">Keep going</button>
+        </div>
+    </div>
+
     <div class="authOverlay">
         <div class="authGlow" aria-hidden="true"></div>
 
@@ -428,7 +462,7 @@
     <script src="task-shared.js?v=20260910a"></script>
     <script src="brain-dump.js?v=20260908a"></script>
     <script src="auth-gate.js?v=20260830a"></script>
-    <script src="script.js?v=20260910a"></script>
+    <script src="script.js?v=20260910b"></script>
     <script type="module" src="firebase-init.js?v=20260910a"></script>
     <script src="settings.js?v=20260910a"></script>
 

@@ -65,6 +65,28 @@ service cloud.firestore {
         && request.resource.data.text.size() <= 300;
     }
 
+    // A narrow, non-identifying mirror of just the streak count and earned
+    // badge ids - readable by ANY signed-in user (not owner-only, unlike
+    // every other users/{uid} subcollection in this file), specifically so
+    // group/group.js's roster streak-flame can read a teammate's streak
+    // without the users/{uid} doc itself needing to open up (that doc also
+    // carries email/displayName, which group members should NOT gain read
+    // access to just for a streak flame). The app itself only ever shows
+    // this inside a shared group's roster, but the rule can't cheaply prove
+    // "shares a group with me" without a specific groupId in the path (see
+    // every group-scoped rule elsewhere in this file, which always takes
+    // one) - exposing a bare streak number and badge ids to any signed-in
+    // account, with nothing else attached, was judged an acceptable
+    // narrowing rather than reusing/widening the real profile doc's rule.
+    match /users/{uid}/public/{docId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.current is int
+        && request.resource.data.badges is list
+        && request.resource.data.badges.size() <= 20;
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
     // Solo's own completion log - the sibling to the group history rule
     // further down, giving the streak/badge feature a durable per-completion
     // record instead of trusting only the client's local activity counters

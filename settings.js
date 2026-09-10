@@ -1407,9 +1407,19 @@
 
             // Firestore doesn't cascade-delete subcollections when the
             // parent doc goes - dustyMemory needs its own explicit pass,
-            // same as tasks just above.
+            // same as tasks just above. history (the streak/achievement
+            // completion log, script.js's updateSoloCompletionStats) and
+            // public/streakSummary (the narrow group-roster-visible mirror
+            // of it, script.js's mirrorPublicStreakSummary) are the same
+            // kind of subcollection and need the same explicit cleanup.
             const memorySnapshot = await getDocs(collection(db, 'users', uid, 'dustyMemory'));
             await Promise.all(memorySnapshot.docs.map((memoryDoc) => deleteDoc(memoryDoc.ref)));
+
+            const historySnapshotSolo = await getDocs(collection(db, 'users', uid, 'history'));
+            await Promise.all(historySnapshotSolo.docs.map((entryDoc) => deleteDoc(entryDoc.ref)));
+
+            const publicSnapshot = await getDocs(collection(db, 'users', uid, 'public'));
+            await Promise.all(publicSnapshot.docs.map((publicDoc) => deleteDoc(publicDoc.ref)));
 
             const profileRef = doc(db, 'users', uid);
             const profileSnapshot = await getDoc(profileRef);

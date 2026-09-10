@@ -5702,6 +5702,121 @@ body.authGateActive .authOverlay{
     box-shadow: 0 0 0 3px rgba(215, 183, 120, 0.7), 0 0 24px rgba(215, 183, 120, 0.5);
 }
 
+/* Weekly recap: same card design tokens as .rewardCard/.authCard above,
+   own layout - a calm, factual summary, not a celebration, so no confetti/
+   reel/kicker-gold styling here. */
+.weeklyRecapOverlay{
+    position: fixed;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    background: rgba(6, 4, 24, 0.68);
+    backdrop-filter: blur(4px);
+    z-index: 1500;
+}
+.weeklyRecapOverlay.hidden{ display: none; }
+
+.weeklyRecapCard{
+    width: min(380px, 92vw);
+    background: linear-gradient(165deg, var(--card-1), var(--card-3));
+    border: 2px solid var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    box-shadow: var(--card-shadow);
+    border-radius: 18px;
+    padding: 26px 22px 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 4px;
+}
+
+.weeklyRecapKicker{
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--violet-accent, #b58bff);
+    margin: 0;
+}
+
+.weeklyRecapTitle{
+    font-size: 20px;
+    font-weight: 800;
+    color: #f7f4ff;
+    margin: 2px 0 0;
+}
+
+.weeklyRecapStats{
+    display: flex;
+    width: 100%;
+    gap: 8px;
+    margin-top: 18px;
+}
+
+.weeklyRecapStat{
+    flex: 1;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 10px 6px;
+}
+
+.weeklyRecapStatValue{
+    font-size: 22px;
+    font-weight: 800;
+    color: #f7f4ff;
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.weeklyRecapStatLabel{
+    font-size: 11px;
+    color: var(--violet-muted, #d7d0ff);
+    margin: 2px 0 0;
+}
+
+.weeklyRecapNewBadges{
+    width: 100%;
+    margin-top: 16px;
+}
+.weeklyRecapNewBadges.hidden{ display: none; }
+
+.weeklyRecapNewBadgesLabel{
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--violet-muted, #d7d0ff);
+    margin: 0 0 6px;
+}
+
+.weeklyRecapNewBadgesRow{
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.weeklyRecapNewBadgesRow .achievementChip{
+    cursor: default;
+}
+
+.weeklyRecapCloseBtn{
+    margin-top: 20px;
+    border: 1px solid rgba(206, 194, 255, 0.76);
+    background: linear-gradient(120deg, rgba(202, 167, 255, 0.97), rgba(143, 150, 255, 0.98));
+    color: #120b30;
+    font: inherit;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 10px 28px;
+    border-radius: 999px;
+    cursor: pointer;
+}
+
 /* Sign-in gate + signed-in user badge */
 .authCard{
     background: linear-gradient(165deg, var(--card-1), var(--card-3));
@@ -7745,6 +7860,20 @@ body.authGateActive .authOverlay{
     font-size: 10px;
     color: #e0a63e;
     opacity: 0.85;
+    vertical-align: middle;
+}
+
+/* A teammate's streak - the one place streaks touch group at all (see the
+   plan's reasoning on why this replaces a general friend/profile system).
+   Deliberately plain text, not a badge/pill like role or overdue above -
+   this is the same "🔥 N" treatment as solo's own streak pill, just inline
+   with the name instead of overlapping a counter circle that doesn't exist
+   on this card. */
+.memberCardStreakFlame{
+    margin-left: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #f7f4ff;
     vertical-align: middle;
 }
 

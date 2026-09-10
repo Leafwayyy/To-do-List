@@ -3214,6 +3214,72 @@ function describeGroupWriteError(error, fallback) {
         : (error.message || fallback);
 }
 
+// A small per-session cache of other members' streak/badge summaries (the
+// same users/{uid} fields solo writes - see script.js's
+// applySoloCompletionDelta). renderMemberRoster can re-render on every
+// group task change, so fetching every member's profile doc on every call
+// would be wasteful - cached instead, with a modest TTL, refreshed lazily
+// in the background rather than blocking the render. This is the one place
+// streaks touch group at all - see the plan's reasoning on why this
+// replaces a general friend/profile system rather than sitting alongside
+// one.
+const memberStreakCache = new Map(); // uid -> { current, badges, fetchedAt }
+const MEMBER_STREAK_CACHE_TTL_MS = 5 * 60 * 1000;
+let memberStreakRefreshInFlight = false;
+
+function getCachedMemberStreak(uid) {
+    return memberStreakCache.get(uid) || null;
+}
+
+async function refreshStaleMemberStreaks(memberIds, group) {
+    if (!window.ToDoAuth?.auth?.currentUser || memberStreakRefreshInFlight) {
+        return;
+    }
+    const now = Date.now();
+    const staleIds = memberIds.filter((uid) => {
+        const entry = memberStreakCache.get(uid);
+        return !entry || (now - entry.fetchedAt) > MEMBER_STREAK_CACHE_TTL_MS;
+    });
+    if (staleIds.length === 0) {
+        return;
+    }
+
+    memberStreakRefreshInFlight = true;
+    try {
+        const { doc, getDoc } = window.ToDoAuth.firestore;
+        const db = window.ToDoAuth.db;
+        await Promise.all(staleIds.map(async (uid) => {
+            try {
+                // Reads the narrow users/{uid}/public/streakSummary mirror,
+                // NOT the real users/{uid} profile doc - that one's rule is
+                // owner-only (it also carries email/displayName), see
+                // firestore.rules' comment on why this is a separate doc.
+                const snapshot = await getDoc(doc(db, 'users', uid, 'public', 'streakSummary'));
+                const data = snapshot.exists() ? snapshot.data() : {};
+                memberStreakCache.set(uid, {
+                    current: Number(data.current) || 0,
+                    badges: Array.isArray(data.badges) ? data.badges : [],
+                    fetchedAt: Date.now()
+                });
+            } catch (error) {
+                console.error("Failed to load a member's streak:", error);
+                memberStreakCache.set(uid, { current: 0, badges: [], fetchedAt: Date.now() });
+            }
+        }));
+    } finally {
+        memberStreakRefreshInFlight = false;
+    }
+
+    // One backfill re-render now that the cache actually has data - the
+    // membership/role args below match what setActiveMemberScope/the group
+    // listener already pass in, so this reflects the same state, just
+    // slightly later than the initial (streak-less) render.
+    const currentGroup = getSelectedGroup();
+    if (currentGroup && currentGroup.id === group.id) {
+        renderMemberRoster(currentGroup, getMyRoleInGroup(currentGroup));
+    }
+}
+
 function renderMemberRoster(group, { isOwner = false, isAdmin = false } = {}) {
     if (!memberRoster) {
         return;
@@ -3228,6 +3294,12 @@ function renderMemberRoster(group, { isOwner = false, isAdmin = false } = {}) {
     // point at the invite code already on the page rather than just
     // leaving it as an unexplained roster of one.
     memberRosterInviteHint?.classList.toggle('hidden', memberIds.length > 1);
+
+    // Fire-and-forget - cards below render immediately with whatever's
+    // already cached (nothing, on a cold start), and refreshStaleMemberStreaks
+    // triggers one backfill re-render once real data comes back. See its
+    // own comment for why this isn't just fetched inline here.
+    refreshStaleMemberStreaks(memberIds, group);
 
     const cards = memberIds.map((memberId, index) => {
         const memberTasks = groupTasks.filter((task) => task.ownerId === memberId);
@@ -3302,6 +3374,18 @@ function renderMemberRoster(group, { isOwner = false, isAdmin = false } = {}) {
             overdueFlag.title = 'Has an overdue task';
             overdueFlag.setAttribute('aria-label', 'Has an overdue task');
             name.appendChild(overdueFlag);
+        }
+        // Same no-clutter threshold as solo's own streak pill (script.js's
+        // refreshSoloStreakPill) - nothing shown below a 2-day streak, and
+        // nothing at all until this member's cached summary actually
+        // arrives (see refreshStaleMemberStreaks above).
+        const memberStreak = getCachedMemberStreak(card.memberId);
+        if (memberStreak && memberStreak.current >= 2) {
+            const streakFlag = document.createElement('span');
+            streakFlag.classList.add('memberCardStreakFlame');
+            streakFlag.textContent = `🔥 ${memberStreak.current}`;
+            streakFlag.title = `${memberStreak.current}-day streak`;
+            name.appendChild(streakFlag);
         }
         memberCard.appendChild(name);
 
