@@ -395,10 +395,16 @@
                 margin-bottom: 8px;
             }
             .settingsFeedbackSubmitBtn { padding: 8px 16px; }
-            .settingsFeedbackSubmitStatus { margin: 8px 0 14px; }
+            .settingsFeedbackSubmitStatus { margin: 8px 0 0; }
             .settingsFeedbackSubmitStatus.hidden { display: none; }
             .settingsFeedbackListHeading {
-                margin: 0 0 8px;
+                /* Real spacing above this heading regardless of whether
+                   .settingsFeedbackSubmitStatus above it is showing - that
+                   element is display:none until a submission happens, so
+                   its own margin contributed nothing to the gap the rest of
+                   the time, leaving the button and this heading crammed
+                   together (the common, pre-submission state). */
+                margin: 20px 0 8px;
                 font-size: 0.82rem;
                 color: #b58bff;
                 text-transform: uppercase;
