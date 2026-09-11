@@ -281,6 +281,65 @@ const TOUR_STEPS = [
         beforeShow: () => switchSoloView('tasks')
     },
     {
+        // Placeholder selector - every step below rewrites its own
+        // step.selector inside beforeShow(step), scoped to whichever task
+        // getMostRecentlyCreatedTask() finds, since .subtasksToggleBtn/
+        // .subtaskInput/.subtaskAddBtn/.subtaskDeadlineBtn are reused across
+        // every task row, and a tour RESTART (the always-available
+        // .helpTourBtn) can run on an account with existing tasks already
+        // in the list - a bare document.querySelector would grab whichever
+        // task happens to render first, not necessarily the one this tour
+        // just created.
+        selector: '.subtasksToggleBtn',
+        title: 'Break it into steps',
+        text: 'Big tasks go down easier in pieces. Tap here to open up steps for what you just added.',
+        action: { event: 'click' },
+        beforeShow: (step) => {
+            switchSoloView('tasks');
+            const latest = getMostRecentlyCreatedTask();
+            if (latest) {
+                step.selector = `[data-task-id="${latest.id}"] .subtasksToggleBtn`;
+            }
+        }
+    },
+    {
+        selector: '.subtaskInput',
+        title: 'Add a step',
+        text: 'Type one real thing this task involves, right here.',
+        action: { event: 'input', validate: (target) => (target.value || '').trim() !== '' },
+        beforeShow: (step) => {
+            const latest = getMostRecentlyCreatedTask();
+            if (latest) {
+                step.selector = `[data-task-id="${latest.id}"] .subtaskInput`;
+            }
+        }
+    },
+    {
+        selector: '.subtaskAddBtn',
+        title: 'Add it',
+        text: 'Tap + to actually add that step. You can check steps off one at a time, separately from the task itself.',
+        action: { event: 'click' },
+        beforeShow: (step) => {
+            const latest = getMostRecentlyCreatedTask();
+            if (latest) {
+                step.selector = `[data-task-id="${latest.id}"] .subtaskAddBtn`;
+            }
+        }
+    },
+    {
+        selector: '.subtaskDeadlineBtn',
+        title: 'Give that step its own deadline',
+        text: 'A step can have its own deadline, separate from the task\'s overall one. Tap the clock, and I\'ll show up in Today, Overdue, and the Calendar the moment that step\'s own date gets close, even if the whole task isn\'t due for weeks. That\'s how you spread a big project across several days instead of leaving it all for one deadline at the end.',
+        action: { event: 'click' },
+        beforeShow: (step) => {
+            const latest = getMostRecentlyCreatedTask();
+            const newestSubtask = latest?.subtasks?.[latest.subtasks.length - 1];
+            if (latest && newestSubtask) {
+                step.selector = `[data-task-id="${latest.id}"] [data-subtask-id="${newestSubtask.id}"] .subtaskDeadlineBtn`;
+            }
+        }
+    },
+    {
         selector: '.priorityControls',
         title: 'Choose sorting mode',
         text: 'Nice, that\'s really on your list now. Auto-sort keeps your list ranked for you at all times. Sort once just gives you a one-time smart order instead, then leaves it alone. Pick whichever fits how you like to work.',
@@ -4974,6 +5033,21 @@ function startRealtimeUpdates() {
 
 function findTaskById(taskId) {
     return tasks.find((task) => task.id === taskId);
+}
+
+// Used only by the onboarding tour's subtask steps, to scope a step's
+// selector to the specific task the tour just created rather than
+// whichever task happens to render first (see TOUR_STEPS' beforeShow
+// comments) - createdAt is set once, at creation, and never touched again,
+// so it stays a reliable "which task is newest" signal regardless of manual
+// order or auto-sort re-arranging the rendered list afterward.
+function getMostRecentlyCreatedTask() {
+    return tasks.reduce((newest, task) => {
+        if (!task.createdAt) {
+            return newest;
+        }
+        return (!newest || task.createdAt > newest.createdAt) ? task : newest;
+    }, null);
 }
 
 // playClickSound/playTaskCompleteSound and the audio elements behind them

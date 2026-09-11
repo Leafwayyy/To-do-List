@@ -1087,7 +1087,13 @@ function createTourController({ steps, storageKey, onEnd, onStart }) {
             return false;
         }
 
-        step.beforeShow?.();
+        // Passing the step itself (harmless for every existing beforeShow,
+        // which all take zero params) lets a step whose real target lives
+        // inside a dynamically-rendered row - a specific task the tour just
+        // created, not a page-level singleton - compute and overwrite its
+        // own step.selector right before it's read below, instead of the
+        // tour engine needing any new per-step scoping mechanism of its own.
+        step.beforeShow?.(step);
 
         const target = document.querySelector(step.selector);
         if (!target) {
