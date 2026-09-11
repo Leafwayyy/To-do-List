@@ -802,7 +802,7 @@ function commitAiTasksSolo(draftTasks) {
 
         tasks.push({
             id: generateTaskId(),
-            text: trimmedText.slice(0, 2000),
+            text: trimmedText.slice(0, AI_TASK_TITLE_MAX_LENGTH),
             completed: false,
             matrix,
             difficulty,
@@ -827,10 +827,10 @@ function commitAiTasksSolo(draftTasks) {
     saveTasks();
 }
 
-// Applies Dusty-proposed edits to EXISTING tasks (matrix/difficulty/
-// dueAt/scheduledAt/completed only - never text/subtasks, and never a
-// delete - see the EDITING EXISTING TASKS rule in the Worker's system
-// instruction). taskId is never trusted blind: findTaskById re-checks it
+// Applies Dusty-proposed edits to EXISTING tasks (matrix/difficulty/dueAt/
+// scheduledAt/completed/text/subtasks, never a delete - see the EDITING
+// EXISTING TASKS rule in the Worker's system instruction). taskId is never
+// trusted blind: findTaskById re-checks it
 // against the real, already-loaded task list, same discipline as
 // commitComments/commitAiSuggestionsGroup in group.js - a draft naming a
 // taskId that no longer exists (deleted mid-conversation, say) is just
@@ -877,7 +877,7 @@ function commitAiTaskEditsSolo(draftEdits) {
             anyCompletionChanged = true;
         }
         if (Object.prototype.hasOwnProperty.call(draft, 'text') && draft.text && draft.text.trim()) {
-            task.text = draft.text.trim().slice(0, 2000);
+            task.text = draft.text.trim().slice(0, AI_TASK_TITLE_MAX_LENGTH);
         }
         if (Object.prototype.hasOwnProperty.call(draft, 'subtasks') && Array.isArray(draft.subtasks)) {
             task.subtasks = applyEditedSubtasks(task.subtasks, draft.subtasks);

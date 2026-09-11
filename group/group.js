@@ -4760,7 +4760,14 @@ async function commitAiTasksGroup(draftTasks) {
 
         const taskType = getValidTaskType(draft.taskType);
         await addGroupTask(group.id, currentUser, {
-            text: trimmedText,
+            // A real bug this closes: this was passed through completely
+            // uncapped, relying only on firestore.rules' 2000-char doc-size
+            // limit (which would just reject an oversized write, not what's
+            // happening here) - nowhere near "a short, clear title" per the
+            // Worker's own prompt. See task-shared.js's
+            // AI_TASK_TITLE_MAX_LENGTH comment for the observed failure this
+            // guards against (a degenerate Gemini repetition loop).
+            text: trimmedText.slice(0, AI_TASK_TITLE_MAX_LENGTH),
             matrix: draft.matrix,
             difficulty: draft.difficulty,
             dueAt: isValidDateValue(draft.dueAt) ? new Date(draft.dueAt).toISOString() : null,
@@ -4935,7 +4942,7 @@ async function commitAiTaskEditsGroup(drafts) {
             fieldUpdates.scheduledAt = isValidDateValue(draft.scheduledAt) ? new Date(draft.scheduledAt).toISOString() : null;
         }
         if (Object.prototype.hasOwnProperty.call(draft, 'text') && draft.text && draft.text.trim()) {
-            fieldUpdates.text = draft.text.trim().slice(0, 2000);
+            fieldUpdates.text = draft.text.trim().slice(0, AI_TASK_TITLE_MAX_LENGTH);
         }
         if (Object.prototype.hasOwnProperty.call(draft, 'subtasks') && Array.isArray(draft.subtasks)) {
             // applyEditedSubtasks (task-shared.js) - full replace, preserving

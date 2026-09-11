@@ -10,6 +10,20 @@
 // below just becomes available as a global, exactly like the rest of
 // script.js already works.
 
+// A task's TITLE, not its full content - the same 240 the Brain Dump review
+// cards' text inputs already declare via maxLength. Real bug this closes:
+// an AI-drafted task/edit's text field was only ever capped at 2000 (meant
+// for the Firestore doc-size limit, task-shared.js's counterpart in
+// firestore.rules), which is nowhere near "a short, clear title" - when
+// Gemini's generation degenerated into a repetition loop (a real, observed
+// failure, not hypothetical), roughly 1500 characters of repeated garbage
+// sailed straight through that cap and got applied as a task's title. Used
+// by commitAiTasksSolo/commitAiTaskEditsSolo (script.js),
+// commitAiTasksGroup/commitAiTaskEditsGroup (group/group.js), and the
+// Brain Dump review cards themselves (brain-dump.js) - one shared ceiling
+// instead of the same number hardcoded independently in four places.
+const AI_TASK_TITLE_MAX_LENGTH = 240;
+
 const MATRIX_CONFIG = {
     do: { label: 'Do', rank: 4, className: 'matrix-do' },
     schedule: { label: 'Schedule', rank: 3, className: 'matrix-schedule' },

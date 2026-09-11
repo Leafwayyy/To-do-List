@@ -1115,8 +1115,16 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         const textInputEl = document.createElement('input');
         textInputEl.type = 'text';
         textInputEl.classList.add('brainDumpTaskCardText');
-        textInputEl.value = draft.text || '';
-        textInputEl.maxLength = 240;
+        // Real bug: maxLength only blocks further typing - it does NOT
+        // truncate a value already set via .value =, so an oversized AI
+        // draft (a degenerate model repetition loop, observed live) sat
+        // here un-truncated and easy to miss in a single-line box. Clamped
+        // here to the exact same AI_TASK_TITLE_MAX_LENGTH the actual
+        // commit path enforces (task-shared.js), so what's shown here is
+        // what would actually be saved, not a false preview of something
+        // longer.
+        textInputEl.value = (draft.text || '').slice(0, AI_TASK_TITLE_MAX_LENGTH);
+        textInputEl.maxLength = AI_TASK_TITLE_MAX_LENGTH;
         fields.appendChild(textInputEl);
 
         const row = document.createElement('div');
@@ -1388,8 +1396,15 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             const textInput = document.createElement('input');
             textInput.type = 'text';
             textInput.classList.add('brainDumpTaskCardText');
-            textInput.maxLength = 240;
-            textInput.value = draft.text;
+            // Same maxLength-doesn't-truncate-a-set-value gap as the
+            // new-task review card above - see its comment. This is the
+            // exact spot the reported bug came through: an edit whose
+            // drafted text had degenerated into ~1500 characters of
+            // repeated garbage sat here, visually indistinguishable from a
+            // normal title in a scrolled single-line box, and got applied
+            // on confirm.
+            textInput.maxLength = AI_TASK_TITLE_MAX_LENGTH;
+            textInput.value = (draft.text || '').slice(0, AI_TASK_TITLE_MAX_LENGTH);
             row.appendChild(textInput);
             fields.appendChild(row);
             fieldReaders.text = () => textInput.value;
@@ -1750,8 +1765,16 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         const textInputEl = document.createElement('input');
         textInputEl.type = 'text';
         textInputEl.classList.add('brainDumpTaskCardText');
-        textInputEl.value = draft.text || '';
-        textInputEl.maxLength = 240;
+        // Real bug: maxLength only blocks further typing - it does NOT
+        // truncate a value already set via .value =, so an oversized AI
+        // draft (a degenerate model repetition loop, observed live) sat
+        // here un-truncated and easy to miss in a single-line box. Clamped
+        // here to the exact same AI_TASK_TITLE_MAX_LENGTH the actual
+        // commit path enforces (task-shared.js), so what's shown here is
+        // what would actually be saved, not a false preview of something
+        // longer.
+        textInputEl.value = (draft.text || '').slice(0, AI_TASK_TITLE_MAX_LENGTH);
+        textInputEl.maxLength = AI_TASK_TITLE_MAX_LENGTH;
         fields.appendChild(textInputEl);
 
         const row = document.createElement('div');
