@@ -4027,6 +4027,19 @@ body > .viewTabs{
     text-decoration: line-through;
 }
 
+/* A step's own deadline - visually reads as "part of a bigger task", not a
+   second real task in its own right (dotted, not the projected chip's
+   dashed, and italic label) - clicking it still opens the real parent task,
+   same as every other chip type. */
+.calendarChip-step{
+    border-style: dotted;
+}
+
+.calendarChip-step span{
+    font-style: italic;
+    font-weight: 600;
+}
+
 /* Group calendar only (group.js) - a chip for a teammate's task instead of
    your own: no edit permission exists for it anywhere else in the app
    either, so it stays visually present but inert rather than pretending

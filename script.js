@@ -1268,7 +1268,12 @@ function getVisibleTasks() {
                         return false;
                     }
 
-                    const status = getDeadlineStatus(task.dueAt);
+                    // Subtask-aware (an incomplete step's own deadline, if
+                    // sooner than the task's own - see getTaskUrgencyStatus
+                    // in task-shared.js), same status the auto-sort already
+                    // uses - a task with a step due today belongs in Focus
+                    // even if the task's own deadline is weeks out.
+                    const status = getTaskUrgencyStatus(task);
                     const dueSoon = status.hasDeadline && status.deadlineTimestamp <= in24Hours;
                     const urgentMatrix = getValidMatrixValue(task.matrix) === 'do';
                     const shortTimeboxed = getValidTaskType(task.taskType) === 'timeboxed' && (task.estimateMinutes || 0) > 0 && (task.estimateMinutes || 0) <= 60;
@@ -1280,15 +1285,27 @@ function getVisibleTasks() {
                 .sort(compareByPriority)
                 .slice(0, 3);
         }
+        // overdue/today/week below are all subtask-aware now (an incomplete
+        // step's own deadline counts, same as the task's own) - see
+        // getEffectiveDueAt/getTaskUrgencyStatus in task-shared.js, the
+        // same helpers compareByPriority's auto-sort already relies on.
+        // Real gap this closes: a task could rank near the top of All
+        // because a step was due today, while staying completely invisible
+        // in Today itself, since these filters used to check only the
+        // task's own dueAt.
         case 'overdue':
-            return tasks.filter((task) => !task.completed && getDeadlineStatus(task.dueAt).isOverdue);
+            return tasks.filter((task) => !task.completed && getTaskUrgencyStatus(task).isOverdue);
         case 'today':
             return tasks.filter((task) => {
-                if (task.completed || !task.dueAt || !isValidDateValue(task.dueAt)) {
+                if (task.completed) {
+                    return false;
+                }
+                const effectiveDueAt = getEffectiveDueAt(task).dueAt;
+                if (!effectiveDueAt || !isValidDateValue(effectiveDueAt)) {
                     return false;
                 }
 
-                const dueDate = new Date(task.dueAt);
+                const dueDate = new Date(effectiveDueAt);
                 const now = new Date();
                 return dueDate.getFullYear() === now.getFullYear()
                     && dueDate.getMonth() === now.getMonth()
@@ -1299,10 +1316,14 @@ function getVisibleTasks() {
             const weekAhead = now + (7 * 24 * 60 * 60 * 1000);
 
             return tasks.filter((task) => {
-                if (task.completed || !task.dueAt || !isValidDateValue(task.dueAt)) {
+                if (task.completed) {
                     return false;
                 }
-                const dueTimestamp = new Date(task.dueAt).getTime();
+                const effectiveDueAt = getEffectiveDueAt(task).dueAt;
+                if (!effectiveDueAt || !isValidDateValue(effectiveDueAt)) {
+                    return false;
+                }
+                const dueTimestamp = new Date(effectiveDueAt).getTime();
                 return dueTimestamp >= now && dueTimestamp <= weekAhead;
             });
         }
@@ -2181,7 +2202,14 @@ function setTaskCompletedState(task, completed) {
                 task.dueAt = nextDueAt;
                 task.snoozeCount = 0;
                 if (Array.isArray(task.subtasks)) {
-                    task.subtasks = task.subtasks.map((subtask) => ({ ...subtask, completed: false }));
+                    // dueAt cleared too, not just completed - a step's own
+                    // deadline now actually drives Today/Overdue/the
+                    // calendar (see getEffectiveDueAt), so leaving last
+                    // cycle's date in place would resurrect the task with
+                    // permanently-overdue steps every time it recurs, until
+                    // someone manually re-dates each one. A clean slate
+                    // each cycle instead - real bug caught before it shipped.
+                    task.subtasks = task.subtasks.map((subtask) => ({ ...subtask, completed: false, dueAt: null }));
                 }
             }
         }
@@ -2397,6 +2425,31 @@ function toggleSubtaskCompletion(taskId, subtaskId) {
     subtask.completed = !subtask.completed;
     task.updatedAt = new Date().toISOString();
     recomputeParentCompletionFromSubtasks(task);
+
+    // Only when THIS toggle did not also flip the parent task's own
+    // completed state (checking the last remaining step, or unchecking one
+    // on an already-completed task and reopening it) - that case already
+    // ran the full activity/streak/badge pipeline via
+    // recomputeParentCompletionFromSubtasks -> setTaskCompletedState above,
+    // and crediting it again here would double-count the same event. A step
+    // that doesn't move the parent's own state gets its own, separate
+    // credit, both the local heatmap counters (same ones a whole-task
+    // completion already moves) and the Firestore-backed streak (see
+    // updateSoloSubtaskActivityStats). A composite id (task+subtask, not
+    // just the task's own id) keys the local history entry so unchecking
+    // THIS specific step removes only its own entry, not a different
+    // step's or the task's own.
+    if (task.completed === wasCompleted) {
+        const subtaskActivityRef = { id: `${task.id}:${subtask.id}`, text: `${task.text}: ${subtask.text}` };
+        if (subtask.completed) {
+            addActivityCount(1);
+            addActivityHistoryEntry(subtaskActivityRef);
+        } else {
+            addActivityCount(-1);
+            removeLatestActivityHistoryEntry(subtaskActivityRef);
+        }
+        updateSoloSubtaskActivityStats(task, subtask, subtask.completed);
+    }
 
     applyOrdering();
     renderTasks();
@@ -3465,6 +3518,50 @@ async function updateSoloCompletionStats(task, completed) {
     }
 }
 
+// A step can be substantial (a whole textbook chapter, not just "pack a
+// bag") - confirmed with the user that every subtask completion should
+// count toward activity/streak, the same as a whole task. Deliberately does
+// NOT touch totalCompletions/heavyTaskCompletions/the completion-count
+// badges (25/100/500) - letting every step count there too would make those
+// badges trivially gameable by decomposing one task into hundreds of steps.
+// The streak has no equivalent problem: it only ever needs "did something
+// count today," regardless of source. Mirrors updateSoloCompletionStats
+// above almost exactly, just keyed by subtask id (not task id, so a task
+// and one of its own steps completing close together don't collide in
+// pendingSoloHistoryIds) and routed through applySoloCompletionDelta's
+// countsTowardTotals: false path.
+async function updateSoloSubtaskActivityStats(task, subtask, completed) {
+    if (!window.ToDoAuth?.auth?.currentUser) {
+        return;
+    }
+    const uid = window.ToDoAuth.auth.currentUser.uid;
+    const { db, firestore } = window.ToDoAuth;
+    const { doc, collection, setDoc, deleteDoc } = firestore;
+    const pendingKey = `subtask:${subtask.id}`;
+
+    try {
+        if (completed) {
+            const historyRef = doc(collection(db, 'users', uid, 'history'));
+            await setDoc(historyRef, {
+                taskId: task.id,
+                taskText: `${task.text}: ${subtask.text}`,
+                entryType: 'subtask',
+                completedAt: new Date().toISOString()
+            });
+            pendingSoloHistoryIds.set(pendingKey, historyRef.id);
+        } else {
+            const historyId = pendingSoloHistoryIds.get(pendingKey);
+            pendingSoloHistoryIds.delete(pendingKey);
+            if (historyId) {
+                await deleteDoc(doc(db, 'users', uid, 'history', historyId));
+            }
+        }
+        await applySoloCompletionDelta(uid, task, completed ? 1 : -1, { countsTowardTotals: false });
+    } catch (error) {
+        console.error('Failed to sync subtask activity stats:', error);
+    }
+}
+
 // The actual streak/badge math, inside a transaction so two tabs/devices
 // completing tasks close together can't lose an increment to a last-write-
 // wins race (see the plan's "two devices" risk note). totalCompletions/
@@ -3473,7 +3570,7 @@ async function updateSoloCompletionStats(task, completed) {
 // undo, see the plan's reasoning on why (recomputing a streak from the full
 // history log on every undo isn't worth the cost, and a badge, once shown,
 // should never disappear again).
-async function applySoloCompletionDelta(uid, task, delta) {
+async function applySoloCompletionDelta(uid, task, delta, { countsTowardTotals = true } = {}) {
     const { db, firestore } = window.ToDoAuth;
     const { doc, runTransaction } = firestore;
     const profileRef = doc(db, 'users', uid);
@@ -3491,8 +3588,19 @@ async function applySoloCompletionDelta(uid, task, delta) {
         const snapshot = await transaction.get(profileRef);
         const data = snapshot.exists() ? snapshot.data() : {};
 
-        const totalCompletions = Math.max(0, (Number(data.totalCompletions) || 0) + delta);
-        const heavyTaskCompletions = Math.max(0, (Number(data.heavyTaskCompletions) || 0) + (isHeavy ? delta : 0));
+        // countsTowardTotals: false (a subtask completion, see
+        // updateSoloSubtaskActivityStats) leaves totalCompletions/
+        // heavyTaskCompletions/badges completely untouched - only the
+        // streak moves. See that function's own comment for why: the
+        // streak just needs "did something count today" regardless of
+        // source, but the completion-count badges specifically measure
+        // discrete tasks and would become trivially gameable otherwise.
+        const totalCompletions = countsTowardTotals
+            ? Math.max(0, (Number(data.totalCompletions) || 0) + delta)
+            : (Number(data.totalCompletions) || 0);
+        const heavyTaskCompletions = countsTowardTotals
+            ? Math.max(0, (Number(data.heavyTaskCompletions) || 0) + (isHeavy ? delta : 0))
+            : (Number(data.heavyTaskCompletions) || 0);
         const update = { totalCompletions, heavyTaskCompletions };
 
         let streak = data.streak && typeof data.streak === 'object'
@@ -3506,21 +3614,23 @@ async function applySoloCompletionDelta(uid, task, delta) {
             streak = computeNextStreak(streak.current || 0, streak.longest || 0, streak.lastCompletionDateKey || null, todayKey);
             update.streak = streak;
 
-            const stats = { totalCompletions, longestStreak: streak.longest, heavyTaskCompletions };
-            ACHIEVEMENT_BADGES.forEach((badge) => {
-                if (badge.statKey && badge.target && !badges.includes(badge.id) && (Number(stats[badge.statKey]) || 0) >= badge.target) {
-                    badges.push(badge.id);
-                    newlyEarnedBadgeIds.push(badge.id);
+            if (countsTowardTotals) {
+                const stats = { totalCompletions, longestStreak: streak.longest, heavyTaskCompletions };
+                ACHIEVEMENT_BADGES.forEach((badge) => {
+                    if (badge.statKey && badge.target && !badges.includes(badge.id) && (Number(stats[badge.statKey]) || 0) >= badge.target) {
+                        badges.push(badge.id);
+                        newlyEarnedBadgeIds.push(badge.id);
+                    }
+                });
+                // Clean Sweep: checked live against the current task list,
+                // not a stored counter - see task-shared.js's
+                // ACHIEVEMENT_BADGES comment for why.
+                if (!badges.includes('clean_sweep') && tasks.length > 0 && tasks.every((t) => t.completed)) {
+                    badges.push('clean_sweep');
+                    newlyEarnedBadgeIds.push('clean_sweep');
                 }
-            });
-            // Clean Sweep: checked live against the current task list, not
-            // a stored counter - see task-shared.js's ACHIEVEMENT_BADGES
-            // comment for why.
-            if (!badges.includes('clean_sweep') && tasks.length > 0 && tasks.every((t) => t.completed)) {
-                badges.push('clean_sweep');
-                newlyEarnedBadgeIds.push('clean_sweep');
+                update.badges = badges;
             }
-            update.badges = badges;
         }
 
         transaction.set(profileRef, update, { merge: true });
@@ -4000,13 +4110,28 @@ function buildCalendarEntriesByDay(cells) {
                 cursor = next;
             }
         }
+
+        // A step's own deadline, on its own day - this is what actually
+        // lets a big task's work be seen spread across the week, not just
+        // its one overall due-date chip above. Only an incomplete step on
+        // an active task, mirroring getEffectiveDueAt's own "a completed
+        // step's deadline no longer counts" rule - a task manually marked
+        // done with a dangling incomplete step left behind shouldn't leave
+        // a stray chip on an otherwise-finished task either.
+        if (!task.completed && Array.isArray(task.subtasks)) {
+            task.subtasks.forEach((subtask) => {
+                if (!subtask.completed && subtask.dueAt && isValidDateValue(subtask.dueAt)) {
+                    addEntry(getDateKey(new Date(subtask.dueAt)), { type: 'step', task, subtask });
+                }
+            });
+        }
     });
 
     return byDay;
 }
 
 function createCalendarChip(entry) {
-    const { type, task } = entry;
+    const { type, task, subtask } = entry;
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.classList.add('calendarChip', `calendarChip-${type}`);
@@ -4016,21 +4141,29 @@ function createCalendarChip(entry) {
 
     // A projected (not-yet-real) occurrence gets the same neutral treatment
     // as "no deadline pressure" - urgency coloring on a ghost that might be
-    // weeks out wouldn't mean anything. The two REAL marks (due/planned)
-    // both reuse getTaskDisplayDeadlineStatus, same completed-aware urgency
-    // color every other badge in the app already uses.
-    chip.classList.add(type === 'projected' ? 'deadline-none' : getTaskDisplayDeadlineStatus(task).deadlineClassName);
+    // weeks out wouldn't mean anything. The two REAL task-level marks (due/
+    // planned) reuse getTaskDisplayDeadlineStatus, same completed-aware
+    // urgency color every other badge in the app already uses. A step's own
+    // urgency color comes from ITS OWN deadline (getDeadlineStatus(subtask.
+    // dueAt), same as the step's own badge inside the task card) - not the
+    // task's, since a step can be under real pressure independent of
+    // whatever the task's own overall deadline looks like.
+    if (type === 'step') {
+        chip.classList.add(getDeadlineStatus(subtask.dueAt).deadlineClassName);
+    } else {
+        chip.classList.add(type === 'projected' ? 'deadline-none' : getTaskDisplayDeadlineStatus(task).deadlineClassName);
+    }
 
     const icon = document.createElement('i');
-    icon.classList.add('fa-solid', type === 'planned' ? 'fa-clock' : type === 'projected' ? 'fa-repeat' : 'fa-calendar');
+    icon.classList.add('fa-solid', type === 'step' ? 'fa-list-check' : type === 'planned' ? 'fa-clock' : type === 'projected' ? 'fa-repeat' : 'fa-calendar');
     chip.appendChild(icon);
 
     const label = document.createElement('span');
-    label.textContent = task.text;
+    label.textContent = type === 'step' ? `${task.text}: ${subtask.text}` : task.text;
     chip.appendChild(label);
 
-    const kindLabel = type === 'planned' ? 'Planned' : type === 'projected' ? 'Repeats' : 'Due';
-    chip.title = `${kindLabel}: ${task.text}`;
+    const kindLabel = type === 'step' ? 'Step due' : type === 'planned' ? 'Planned' : type === 'projected' ? 'Repeats' : 'Due';
+    chip.title = type === 'step' ? `${kindLabel}: ${task.text} - ${subtask.text}` : `${kindLabel}: ${task.text}`;
 
     chip.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -4109,9 +4242,16 @@ function createCalendarDayCell(cell, entriesByDay) {
 
     // Due markers first (Serial Position Effect - the most decision-
     // relevant thing gets primacy, same reasoning already used ordering
-    // task-row badges), then planned chips, then projected repeats.
+    // task-row badges), then a step's own deadline (real, current pressure,
+    // same tier as due), then planned chips, then projected repeats. Real
+    // bug caught by testing: this whitelist silently drops any entry type
+    // not listed here, which is exactly what happened to 'step' entries the
+    // first time this was wired up - buildCalendarEntriesByDay/
+    // createCalendarChip both handled them correctly, but they never
+    // reached the renderer because this array never let them through.
     const ordered = [
         ...entries.filter((entry) => entry.type === 'due'),
+        ...entries.filter((entry) => entry.type === 'step'),
         ...entries.filter((entry) => entry.type === 'planned'),
         ...entries.filter((entry) => entry.type === 'projected')
     ];
@@ -4693,7 +4833,13 @@ function maybeNotifyTaskUrgency(task, status) {
 
     const now = Date.now();
     const stageCooldown = REMINDER_COOLDOWN_MS[stage] || REMINDER_COOLDOWN_MS.soon;
-    const notifyKey = `${task.id}|${task.dueAt || ''}|${stage}`;
+    // Keyed on the EFFECTIVE deadline timestamp (task.dueAt, or a sooner
+    // incomplete step's, whichever status actually reflects - see
+    // updateUrgencyAlert's caller), not the task's own literal dueAt - a
+    // step-driven reminder needs its own key, or it could get silently
+    // suppressed by an unrelated cooldown keyed to the task's own
+    // (different, non-firing) deadline.
+    const notifyKey = `${task.id}|${status.deadlineTimestamp}|${stage}`;
     const lastStageReminderAt = stageReminderTimestamps.get(notifyKey) || 0;
 
     if (lastStageReminderAt > 0 && now - lastStageReminderAt < stageCooldown) {
@@ -4748,8 +4894,13 @@ function updateUrgencyAlert() {
     }
 
     const activeTasks = tasks.filter((task) => !task.completed);
+    // Subtask-aware (getTaskUrgencyStatus, not getDeadlineStatus(task.dueAt))
+    // so a task with an overdue or soon-due step shows up in this banner,
+    // the overdue count badge, and (via maybeNotifyTaskUrgency below) popup
+    // reminders - same status the auto-sort/Today/Week/Overdue views all
+    // already use.
     const rankedByUrgency = activeTasks
-        .map((task) => ({ task, status: getDeadlineStatus(task.dueAt) }))
+        .map((task) => ({ task, status: getTaskUrgencyStatus(task) }))
         .filter((entry) => entry.status.hasDeadline)
         .sort((entryA, entryB) => entryA.status.deadlineTimestamp - entryB.status.deadlineTimestamp);
     const overdueCount = rankedByUrgency.filter((entry) => entry.status.urgencyLevel === 'overdue').length;

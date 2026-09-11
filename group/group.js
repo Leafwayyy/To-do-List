@@ -240,7 +240,13 @@ function getRecurrenceAdvanceFields(task) {
         completedAt: null,
         dueAt: nextDueAt,
         snoozeCount: 0,
-        subtasks: (Array.isArray(task.subtasks) ? task.subtasks : []).map((subtask) => ({ ...subtask, completed: false }))
+        // dueAt cleared too, not just completed - a step's own deadline now
+        // actually drives Today/Overdue/the calendar (getEffectiveDueAt in
+        // task-shared.js), so leaving last cycle's date in place would
+        // resurrect the task with permanently-overdue steps every time it
+        // recurs. Mirrors the same fix in solo's setTaskCompletedState
+        // (script.js).
+        subtasks: (Array.isArray(task.subtasks) ? task.subtasks : []).map((subtask) => ({ ...subtask, completed: false, dueAt: null }))
     };
 }
 
@@ -2103,6 +2109,11 @@ function getVisibleGroupTasks() {
         ? groupTasks
         : groupTasks.filter((task) => task.ownerId === activeMemberScope);
 
+    // focus/overdue/today/week below are all subtask-aware (an incomplete
+    // step's own deadline counts, same as the task's own) - see
+    // getEffectiveDueAt/getTaskUrgencyStatus in task-shared.js, the same
+    // helpers compareGroupTasksByPriority's auto-sort already relies on.
+    // Mirrors the identical fix in solo's getVisibleTasks (script.js).
     switch (activeView) {
         case 'focus': {
             const in24Hours = now + (24 * 60 * 60 * 1000);
@@ -2111,7 +2122,7 @@ function getVisibleGroupTasks() {
                     if (task.completed) {
                         return false;
                     }
-                    const status = getDeadlineStatus(task.dueAt);
+                    const status = getTaskUrgencyStatus(task);
                     const dueSoon = status.hasDeadline && status.deadlineTimestamp <= in24Hours;
                     const urgentMatrix = getValidMatrixValue(task.matrix) === 'do';
                     return dueSoon || urgentMatrix;
@@ -2120,13 +2131,17 @@ function getVisibleGroupTasks() {
                 .slice(0, 5);
         }
         case 'overdue':
-            return scopedTasks.filter((task) => !task.completed && getDeadlineStatus(task.dueAt).isOverdue);
+            return scopedTasks.filter((task) => !task.completed && getTaskUrgencyStatus(task).isOverdue);
         case 'today':
             return scopedTasks.filter((task) => {
-                if (task.completed || !isValidDateValue(task.dueAt)) {
+                if (task.completed) {
                     return false;
                 }
-                const dueDate = new Date(task.dueAt);
+                const effectiveDueAt = getEffectiveDueAt(task).dueAt;
+                if (!isValidDateValue(effectiveDueAt)) {
+                    return false;
+                }
+                const dueDate = new Date(effectiveDueAt);
                 const today = new Date();
                 return dueDate.getFullYear() === today.getFullYear()
                     && dueDate.getMonth() === today.getMonth()
@@ -2135,10 +2150,14 @@ function getVisibleGroupTasks() {
         case 'week': {
             const weekAhead = now + (7 * 24 * 60 * 60 * 1000);
             return scopedTasks.filter((task) => {
-                if (task.completed || !isValidDateValue(task.dueAt)) {
+                if (task.completed) {
                     return false;
                 }
-                const dueTimestamp = new Date(task.dueAt).getTime();
+                const effectiveDueAt = getEffectiveDueAt(task).dueAt;
+                if (!isValidDateValue(effectiveDueAt)) {
+                    return false;
+                }
+                const dueTimestamp = new Date(effectiveDueAt).getTime();
                 return dueTimestamp >= now && dueTimestamp <= weekAhead;
             });
         }
@@ -2952,6 +2971,17 @@ function buildGroupCalendarEntriesByDay(cells) {
                 cursor = next;
             }
         }
+
+        // A step's own deadline, on its own day - mirrors solo's identical
+        // addition in buildCalendarEntriesByDay (script.js). Only an
+        // incomplete step on an active task, same as solo.
+        if (!task.completed && Array.isArray(task.subtasks)) {
+            task.subtasks.forEach((subtask) => {
+                if (!subtask.completed && subtask.dueAt && isValidDateValue(subtask.dueAt)) {
+                    addEntry(getDateKey(new Date(subtask.dueAt)), { type: 'step', task, subtask });
+                }
+            });
+        }
     });
 
     return byDay;
@@ -3035,7 +3065,7 @@ function renderGroupCalendarDayChips(chipListEl, moreBtnEl, orderedEntries, expa
 // chip stays inert, since no edit permission exists for it anywhere else
 // in the app either.
 function createGroupCalendarChip(entry, group) {
-    const { type, task } = entry;
+    const { type, task, subtask } = entry;
     const isMine = task.ownerId === currentUser?.uid;
 
     const chip = document.createElement('button');
@@ -3047,27 +3077,33 @@ function createGroupCalendarChip(entry, group) {
     if (task.completed) {
         chip.classList.add('completed');
     }
-    chip.classList.add(type === 'projected' ? 'deadline-none' : getTaskDisplayDeadlineStatus(task).deadlineClassName);
+    // A step's own urgency color comes from its own deadline, not the
+    // task's - same reasoning as solo's createCalendarChip (script.js).
+    if (type === 'step') {
+        chip.classList.add(getDeadlineStatus(subtask.dueAt).deadlineClassName);
+    } else {
+        chip.classList.add(type === 'projected' ? 'deadline-none' : getTaskDisplayDeadlineStatus(task).deadlineClassName);
+    }
 
     const dot = document.createElement('span');
     dot.classList.add('calendarChipMemberDot', `calendarMemberColor-${getGroupMemberColorIndex(task.ownerId, group)}`);
     chip.appendChild(dot);
 
     const icon = document.createElement('i');
-    icon.classList.add('fa-solid', type === 'planned' ? 'fa-clock' : type === 'projected' ? 'fa-repeat' : 'fa-calendar');
+    icon.classList.add('fa-solid', type === 'step' ? 'fa-list-check' : type === 'planned' ? 'fa-clock' : type === 'projected' ? 'fa-repeat' : 'fa-calendar');
     chip.appendChild(icon);
 
     const label = document.createElement('span');
-    label.textContent = task.text;
+    label.textContent = type === 'step' ? `${task.text}: ${subtask.text}` : task.text;
     chip.appendChild(label);
 
     // task.ownerName is re-stamped on every write by its owner (see
     // groups-data.js's resolveMemberName comment) - reading it straight off
     // this task is simpler and just as fresh as looking it up again.
     const ownerName = isMine ? 'You' : (task.ownerName || 'Teammate');
-    const kindLabel = type === 'planned' ? 'Planned' : type === 'projected' ? 'Repeats' : 'Due';
+    const kindLabel = type === 'step' ? 'Step due' : type === 'planned' ? 'Planned' : type === 'projected' ? 'Repeats' : 'Due';
     chip.setAttribute('aria-label', `${kindLabel}: ${task.text} (${ownerName})`);
-    chip.title = `${ownerName} · ${kindLabel}`;
+    chip.title = type === 'step' ? `${ownerName} · ${kindLabel}: ${subtask.text}` : `${ownerName} · ${kindLabel}`;
 
     if (isMine) {
         chip.addEventListener('click', (event) => {
@@ -3111,8 +3147,15 @@ function createGroupCalendarDayCell(cell, entriesByDay, group) {
     chipList.classList.add('calendarChipList');
     cellEl.appendChild(chipList);
 
+    // Real bug caught by testing on the solo side (script.js) and fixed
+    // here too before it ever shipped: this whitelist silently drops any
+    // entry type not listed - 'step' needs to be here explicitly, same tier
+    // as 'due' (real, current pressure), or the entries buildGroup
+    // CalendarEntriesByDay/createGroupCalendarChip both correctly produce
+    // never actually reach the renderer.
     const ordered = [
         ...entries.filter((entry) => entry.type === 'due'),
+        ...entries.filter((entry) => entry.type === 'step'),
         ...entries.filter((entry) => entry.type === 'planned'),
         ...entries.filter((entry) => entry.type === 'projected')
     ];
@@ -3311,11 +3354,12 @@ function renderMemberRoster(group, { isOwner = false, isAdmin = false } = {}) {
         const focusTask = activeTasks.length > 0
             ? [...activeTasks].sort(compareGroupTasksByPriority)[0]
             : null;
-        // Same overdue check updateGroupUrgencyAlert() already uses for the
-        // team-wide banner - here it's per-member, so a teammate who's
-        // fallen behind is visible right from the roster, not just once
-        // you're already looking at their tasks.
-        const hasOverdue = activeTasks.some((task) => getDeadlineStatus(task.dueAt).urgencyLevel === 'overdue');
+        // Same (subtask-aware) overdue check updateGroupUrgencyAlert() uses
+        // for the team-wide banner - here it's per-member, so a teammate
+        // who's fallen behind (whether on the task's own deadline or one of
+        // its steps) is visible right from the roster, not just once you're
+        // already looking at their tasks.
+        const hasOverdue = activeTasks.some((task) => getTaskUrgencyStatus(task).urgencyLevel === 'overdue');
 
         const role = memberId === group.ownerId ? 'owner' : (adminIds.includes(memberId) ? 'admin' : 'member');
 
@@ -4087,8 +4131,12 @@ function updateGroupUrgencyAlert() {
     }
 
     const activeTasks = groupTasks.filter((task) => !task.completed);
+    // Subtask-aware (getTaskUrgencyStatus, not getDeadlineStatus(task.dueAt)) -
+    // mirrors the identical fix in solo's updateUrgencyAlert (script.js), so
+    // a teammate's task with an overdue or soon-due step shows up in this
+    // team-wide banner and the overdue count badge too.
     const rankedByUrgency = activeTasks
-        .map((task) => ({ task, status: getDeadlineStatus(task.dueAt) }))
+        .map((task) => ({ task, status: getTaskUrgencyStatus(task) }))
         .filter((entry) => entry.status.hasDeadline)
         .sort((entryA, entryB) => entryA.status.deadlineTimestamp - entryB.status.deadlineTimestamp);
     const overdueCount = rankedByUrgency.filter((entry) => entry.status.urgencyLevel === 'overdue').length;
@@ -4258,7 +4306,11 @@ function maybeNotifyGroupTaskUrgency() {
     const stage = status.urgencyLevel;
     const now = Date.now();
     const stageCooldown = GROUP_REMINDER_COOLDOWN_MS[stage] || GROUP_REMINDER_COOLDOWN_MS.soon;
-    const notifyKey = `${task.id}|${task.dueAt || ''}|${stage}`;
+    // Keyed on the effective deadline timestamp, not the task's own literal
+    // dueAt - same fix as solo's maybeNotifyTaskUrgency (script.js), so a
+    // step-driven reminder can't get silently suppressed by an unrelated
+    // cooldown keyed to the task's own (different, non-firing) deadline.
+    const notifyKey = `${task.id}|${status.deadlineTimestamp}|${stage}`;
     const lastStageReminderAt = groupStageReminderTimestamps.get(notifyKey) || 0;
 
     if (lastStageReminderAt > 0 && now - lastStageReminderAt < stageCooldown) {
