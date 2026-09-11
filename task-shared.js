@@ -98,15 +98,25 @@ function getDifficultyLabel(level) {
 // every active task at once" isn't a running number to show progress
 // toward, it's checked directly against the live task list at the moment a
 // task is completed (see script.js).
+// Titles are deliberately evocative, not literal - the plain-language
+// threshold already lives in "description" right next to it wherever this
+// renders (the Achievements row, the weekly recap's new-badge callout), so
+// the title is free to carry personality instead of restating a number.
+// ids/thresholds are what's actually stored (a user's earned badges array
+// holds ids, never titles), so renaming a title here is always a safe,
+// non-breaking change - it can never affect who has already earned what.
 const ACHIEVEMENT_BADGES = [
-    { id: 'first_task', icon: 'fa-star', title: 'First Task', description: 'Complete your first task.', statKey: 'totalCompletions', target: 1 },
-    { id: 'streak_3', icon: 'fa-fire', title: '3-Day Streak', description: 'Complete a task 3 days in a row.', statKey: 'longestStreak', target: 3 },
-    { id: 'streak_7', icon: 'fa-fire', title: '7-Day Streak', description: 'Complete a task 7 days in a row.', statKey: 'longestStreak', target: 7 },
-    { id: 'streak_30', icon: 'fa-fire', title: '30-Day Streak', description: 'Complete a task 30 days in a row.', statKey: 'longestStreak', target: 30 },
-    { id: 'streak_100', icon: 'fa-fire', title: '100-Day Streak', description: 'Complete a task 100 days in a row.', statKey: 'longestStreak', target: 100 },
-    { id: 'tasks_25', icon: 'fa-list-check', title: '25 Tasks Done', description: 'Complete 25 tasks total.', statKey: 'totalCompletions', target: 25 },
-    { id: 'tasks_100', icon: 'fa-list-check', title: '100 Tasks Done', description: 'Complete 100 tasks total.', statKey: 'totalCompletions', target: 100 },
-    { id: 'tasks_500', icon: 'fa-list-check', title: '500 Tasks Done', description: 'Complete 500 tasks total.', statKey: 'totalCompletions', target: 500 },
+    { id: 'first_task', icon: 'fa-star', title: 'First Step', description: 'Complete your first task.', statKey: 'totalCompletions', target: 1 },
+    // The four streak badges read as one escalating fire, matching the
+    // shared fa-fire icon: a spark catching, then kindled, then a real
+    // blaze, then a wildfire that's taken on a life of its own.
+    { id: 'streak_3', icon: 'fa-fire', title: 'Spark', description: 'Complete a task 3 days in a row.', statKey: 'longestStreak', target: 3 },
+    { id: 'streak_7', icon: 'fa-fire', title: 'Kindled', description: 'Complete a task 7 days in a row.', statKey: 'longestStreak', target: 7 },
+    { id: 'streak_30', icon: 'fa-fire', title: 'Blazing', description: 'Complete a task 30 days in a row.', statKey: 'longestStreak', target: 30 },
+    { id: 'streak_100', icon: 'fa-fire', title: 'Wildfire', description: 'Complete a task 100 days in a row.', statKey: 'longestStreak', target: 100 },
+    { id: 'tasks_25', icon: 'fa-list-check', title: 'Momentum', description: 'Complete 25 tasks total.', statKey: 'totalCompletions', target: 25 },
+    { id: 'tasks_100', icon: 'fa-list-check', title: 'Century Club', description: 'Complete 100 tasks total.', statKey: 'totalCompletions', target: 100 },
+    { id: 'tasks_500', icon: 'fa-list-check', title: 'Task Master', description: 'Complete 500 tasks total.', statKey: 'totalCompletions', target: 500 },
     { id: 'heavy_lifter', icon: 'fa-dumbbell', title: 'Heavy Lifter', description: 'Complete 10 Very Hard tasks.', statKey: 'heavyTaskCompletions', target: 10 },
     { id: 'clean_sweep', icon: 'fa-broom', title: 'Clean Sweep', description: 'Clear every active task at once.', statKey: null, target: null }
 ];
