@@ -636,6 +636,7 @@ function startApp() {
     // (possibly just-backfilled) badges list to diff against.
     loadSoloCompletionStats().then(() => maybeShowWeeklyRecap());
 
+    renderTaskListSkeleton();
     subscribeToCloudTasks();
 }
 
@@ -1274,6 +1275,29 @@ function syncDurationChipState() {
     durationChips.forEach((chip) => {
         chip.classList.toggle('active', chip.dataset.minutes === selectedMinutes);
     });
+}
+
+// Shown once, immediately, before the first Firestore snapshot resolves
+// (see startApp/subscribeToCloudTasks) - without this, a slow connection
+// means renderTasks() briefly paints the real "No tasks yet" empty-state
+// message before any data has actually arrived, which is a false claim,
+// not a loading state. subscribeToCloudTasks's first onSnapshot callback
+// calls renderTasks(), which clears tasksList via innerHTML = '' the same
+// way it always does, so this never needs its own cleanup call.
+function renderTaskListSkeleton() {
+    tasksList.innerHTML = '';
+    for (let i = 0; i < 3; i++) {
+        const row = document.createElement('li');
+        row.className = 'taskSkeletonRow';
+        row.innerHTML = `
+            <span class="taskSkeletonCheck"></span>
+            <span class="taskSkeletonLines">
+                <span class="taskSkeletonBar taskSkeletonBar--text"></span>
+                <span class="taskSkeletonBar taskSkeletonBar--meta"></span>
+            </span>
+        `;
+        tasksList.appendChild(row);
+    }
 }
 
 function renderTasks() {

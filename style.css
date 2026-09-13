@@ -4183,6 +4183,63 @@ body > .viewTabs{
     box-shadow: inset 0 1px 0 rgba(221, 214, 255, 0.06);
 }
 
+/* Skeleton rows shown while the first Firestore snapshot is still in
+   flight (see renderTaskListSkeleton in script.js) - same size/shape as
+   a real .tasks li so the list doesn't visibly jump once real data
+   replaces these, just a shimmering placeholder instead of real content. */
+.taskSkeletonRow{
+    width: 90%;
+    padding: 10px;
+    background: var(--violet-surface-soft);
+    border-radius: 10px;
+    border: 2px solid var(--violet-border-soft);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.taskSkeletonCheck{
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-circle);
+    background: linear-gradient(90deg, rgba(170, 152, 255, 0.14) 25%, rgba(170, 152, 255, 0.3) 37%, rgba(170, 152, 255, 0.14) 63%);
+    background-size: 400% 100%;
+}
+
+.taskSkeletonLines{
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.taskSkeletonBar{
+    height: 12px;
+    border-radius: var(--radius-pill);
+    background: linear-gradient(90deg, rgba(170, 152, 255, 0.14) 25%, rgba(170, 152, 255, 0.3) 37%, rgba(170, 152, 255, 0.14) 63%);
+    background-size: 400% 100%;
+}
+
+.taskSkeletonBar--text{ width: 60%; }
+.taskSkeletonBar--meta{ width: 34%; height: 9px; }
+
+.taskSkeletonRow:nth-child(2) .taskSkeletonBar--text{ width: 78%; }
+.taskSkeletonRow:nth-child(3) .taskSkeletonBar--text{ width: 45%; }
+
+@media (prefers-reduced-motion: no-preference){
+    .taskSkeletonCheck,
+    .taskSkeletonBar{
+        animation: skeletonShimmer 1.6s ease-in-out infinite;
+    }
+
+    .taskSkeletonRow:nth-child(2) .taskSkeletonCheck,
+    .taskSkeletonRow:nth-child(2) .taskSkeletonBar{ animation-delay: 0.15s; }
+    .taskSkeletonRow:nth-child(3) .taskSkeletonCheck,
+    .taskSkeletonRow:nth-child(3) .taskSkeletonBar{ animation-delay: 0.3s; }
+}
+
 .tasks li.completed .taskText,
 .tasks li.completed .taskMeta{
     opacity: 0.66;
@@ -5125,49 +5182,122 @@ body.authChecking .userBadge{
     position: fixed;
     inset: 0;
     z-index: 1900;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     overflow: hidden;
+    overflow-y: auto;
+    padding-top: clamp(50px, 9vh, 100px);
 }
 
 body.authChecking .authLoadingScreen{
     display: flex;
 }
 
-/* Skeleton instead of a spinner - a spinner tells you "something is
-   happening" but not what; this at least gestures at the shape of what's
-   about to arrive (a page of text/rows), per the standard "skeleton over
-   spinner" guidance. This screen can't know yet whether it's about to show
-   the sign-in card or the task dashboard, so the shape is a generic
-   title-plus-rows approximation rather than a pixel-exact match to either -
-   still more informative than a bare ring, and correct either way. */
-.authSkeleton{
+/* Skeleton instead of a spinner, and specifically one that previews the
+   real page underneath in roughly its real position - a first attempt at
+   this was one generic set of centered bars reused on every page (wrong:
+   flagged directly as not previewing anything, just decoration in the
+   middle of the screen). Each page below gets its own shape, aligned near
+   the top the way the real content will be, not vertically centered.
+   Still can't know sign-in vs. dashboard on app.html specifically, but a
+   returning user (the common case) sees their real dashboard next, so
+   that's the shape to preview - the sign-in card is its own full overlay
+   on top of this either way, not a shape this needs to guess at too. */
+.authSkeletonPage{
     position: relative;
     z-index: 1;
-    width: min(360px, 84vw);
+    width: min(600px, 92vw);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 16px;
 }
 
-.authSkeletonBar{
-    height: 14px;
+.authSkeletonTitleBar{
+    height: 26px;
+    width: 150px;
     border-radius: var(--radius-pill);
     background: linear-gradient(90deg, rgba(170, 152, 255, 0.14) 25%, rgba(170, 152, 255, 0.3) 37%, rgba(170, 152, 255, 0.14) 63%);
     background-size: 400% 100%;
 }
 
-.authSkeletonBar--title{
-    height: 20px;
-    width: 55%;
+/* App.html/group dashboard shape: title, then the task-input row (a long
+   bar plus two button-shaped placeholders), then a few task rows - reuses
+   .taskSkeletonRow/-Check/-Bar exactly, same markup as the real skeleton
+   rows shown once the page itself takes over post-auth (see script.js's
+   renderTaskListSkeleton / group.js's renderGroupTasks), so there's no
+   visible shape change at the handoff. */
+.authSkeletonInputRow{
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
-.authSkeletonBar:nth-child(3){ width: 92%; }
-.authSkeletonBar:nth-child(4){ width: 100%; }
-.authSkeletonBar:nth-child(5){ width: 72%; }
+.authSkeletonInputBar{
+    flex: 1;
+    height: 44px;
+    border-radius: var(--radius-sm);
+}
+
+.authSkeletonPillBtn{
+    width: 92px;
+    height: 36px;
+    border-radius: var(--radius-pill);
+}
+
+.authSkeletonCircleBtn{
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-circle);
+}
+
+.authSkeletonTaskRows{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Group dashboard shape only: a row of tab-shaped pills between the title
+   and the task input, matching the real Tasks/Team/Calendar/Leaderboard/
+   Activity tab row. */
+.authSkeletonTabRow{
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.authSkeletonTabPill{
+    height: 30px;
+    width: 84px;
+    border-radius: var(--radius-pill);
+}
+
+/* group/browse.html ("My Groups") shape: a card grid instead of task rows -
+   that page has no task input or task list at all. */
+.authSkeletonCardGrid{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.authSkeletonCard{
+    height: 88px;
+    border-radius: var(--radius-md);
+    background: linear-gradient(90deg, rgba(170, 152, 255, 0.1) 25%, rgba(170, 152, 255, 0.2) 37%, rgba(170, 152, 255, 0.1) 63%);
+    background-size: 400% 100%;
+}
 
 @media (prefers-reduced-motion: no-preference){
-    .authSkeletonBar{
+    .authSkeletonTitleBar,
+    .authSkeletonInputBar,
+    .authSkeletonPillBtn,
+    .authSkeletonCircleBtn,
+    .authSkeletonTabPill,
+    .authSkeletonCard{
         animation: skeletonShimmer 1.6s ease-in-out infinite;
     }
 }

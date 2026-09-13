@@ -623,6 +623,13 @@ let currentUser = null;
 let groups = undefined; // undefined = loading, [] = none yet
 let selectedGroupId = null;
 let groupTasks = [];
+// False until subscribeToGroupTasks's first callback fires for the
+// currently-selected group - lets renderGroupTasks show a loading
+// skeleton instead of falsely claiming "No tasks yet" before the first
+// snapshot has actually arrived. Reset on every group switch (see
+// watchSelectedGroupTasks) since a different group needs its own fresh
+// loading state, not whatever the previous group's was.
+let hasLoadedGroupTasksOnce = false;
 // 'month' | 'week'; groupCalendarAnchorDate is whichever date the currently
 // visible month/week is anchored to - same state shape as solo's script.js,
 // kept in this file's own module scope (no shared state between the two
@@ -3220,6 +3227,26 @@ function renderGroupTasks() {
     const group = getSelectedGroup();
     groupTasksList.innerHTML = '';
 
+    // A group is selected but its first task snapshot hasn't arrived yet -
+    // show loading skeleton rows (same shimmering .taskSkeletonRow markup/
+    // CSS as solo's script.js) instead of falsely claiming "No tasks yet"
+    // while data is still in flight. See hasLoadedGroupTasksOnce.
+    if (group && !hasLoadedGroupTasksOnce) {
+        for (let i = 0; i < 3; i++) {
+            const row = document.createElement('li');
+            row.className = 'taskSkeletonRow';
+            row.innerHTML = `
+                <span class="taskSkeletonCheck"></span>
+                <span class="taskSkeletonLines">
+                    <span class="taskSkeletonBar taskSkeletonBar--text"></span>
+                    <span class="taskSkeletonBar taskSkeletonBar--meta"></span>
+                </span>
+            `;
+            groupTasksList.appendChild(row);
+        }
+        return;
+    }
+
     if (!group || groupTasks.length === 0) {
         const emptyMsg = document.createElement('li');
         emptyMsg.classList.add('emptyTasksMsg');
@@ -5118,6 +5145,7 @@ function watchSelectedGroupTasks() {
     }
 
     const group = getSelectedGroup();
+    hasLoadedGroupTasksOnce = false;
     if (!group) {
         groupTasks = [];
         groupHistoryEntries = [];
@@ -5128,10 +5156,12 @@ function watchSelectedGroupTasks() {
 
     unsubscribeTasks = subscribeToGroupTasks(group.id, (tasks) => {
         groupTasks = tasks;
+        hasLoadedGroupTasksOnce = true;
         renderApp();
     }, (error) => {
         console.error('Failed to load group tasks:', error);
         groupTasks = [];
+        hasLoadedGroupTasksOnce = true;
         renderApp();
     });
 
