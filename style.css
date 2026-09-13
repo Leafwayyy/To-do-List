@@ -663,9 +663,12 @@ body{
 
 .priorityControls{
     width: 92%;
-    margin-top: 14px;
-    padding: 10px 12px;
-    border-radius: 10px;
+    margin-top: 10px;
+    padding: 8px 12px;
+    /* Was a raw 10px, sitting between the actual --radius-sm/-md tokens
+       (8/12px) rather than matching either - snapped to the scale so
+       corners stop drifting from every other card on the page. */
+    border-radius: var(--radius-md);
     background: rgba(255, 255, 255, 0.33);
     border: 2px solid rgba(103, 159, 255, 0.6);
 }
@@ -2329,7 +2332,6 @@ body::after{
 .detailsToggleBtn,
 .sortOnceBtn,
 .alertToggleBtn,
-.taskViewBtn,
 .deadlinePresetBtn{
     background: var(--violet-surface);
     border-color: var(--violet-border-soft);
@@ -2507,13 +2509,6 @@ body::after{
         linear-gradient(145deg, rgba(49, 34, 117, 0.92), rgba(32, 22, 86, 0.94));
 }
 
-/* Filter buttons (All/Focus Now/Overdue/...) stay flat and quiet at rest -
-   same reasoning as .priorityControls above. .active still gets a clear,
-   bold treatment below so the current filter is obvious; every other
-   pill just needs to read as a plain, low-emphasis toggle. */
-.taskViewBtn{
-    background: var(--violet-surface-soft);
-}
 
 .addBtn,
 .calendarBtn,
@@ -2646,10 +2641,20 @@ body::after{
 .detailsToggleBtn,
 .sortOnceBtn,
 .alertToggleBtn,
-.taskViewBtn,
 .deadlinePresetBtn{
     background:
         linear-gradient(145deg, rgba(39, 27, 92, 0.9), rgba(27, 18, 72, 0.9));
+}
+
+/* Filter buttons (All/Focus Now/Overdue/...) stay flat and quiet at rest,
+   deliberately excluded from every gradient pass above (there were three
+   layered on this same selector group over time, all now consolidated to
+   the two above) - .taskViewBtn.active still gets a clear, bold treatment
+   further down so the current filter stays obvious; every other pill just
+   needs to read as a plain, low-emphasis toggle so the task list itself is
+   what stands out. */
+.taskViewBtn{
+    background: var(--violet-surface-soft);
 }
 
 /* Dark outlined pills, not solid pastel fills - consulting.com's small
