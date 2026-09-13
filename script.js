@@ -1999,17 +1999,30 @@ function getRecommendedTask() {
 
 function getPriorityReasons(task) {
     const reasons = [];
-    const status = getDeadlineStatus(task.dueAt);
+    // Real bug this fixes: getRecommendedTask() picks its task via
+    // compareByPriority -> getPriorityScore -> getTaskUrgencyStatus, which
+    // is subtask-aware (a task can get recommended purely because one of
+    // its steps is overdue/due soon, even with the task's own deadline
+    // weeks off - see getEffectiveDueAt in task-shared.js). This function
+    // used to check getDeadlineStatus(task.dueAt) directly - the task's
+    // own literal deadline only - so a task recommended because of an
+    // urgent STEP showed no deadline-related reason at all, or fell
+    // through to the generic "Best overall priority score" line, leaving
+    // no real explanation for why it was actually picked.
+    const status = getTaskUrgencyStatus(task);
     const matrix = getValidMatrixValue(task.matrix);
     const difficulty = getValidDifficultyLevel(task.difficulty);
+    const drivingSubtask = status.fromStep
+        ? (task.subtasks || []).find((subtask) => subtask.id === status.fromStep)
+        : null;
 
     if (status.isOverdue) {
-        reasons.push('This task is overdue right now.');
+        reasons.push(drivingSubtask ? `A step ("${drivingSubtask.text}") is overdue right now.` : 'This task is overdue right now.');
     } else if (status.hasDeadline) {
         if (status.timeUntilMs <= 7200000) {
-            reasons.push('Deadline is very close (within 2 hours).');
+            reasons.push(drivingSubtask ? `A step ("${drivingSubtask.text}") is due very soon (within 2 hours).` : 'Deadline is very close (within 2 hours).');
         } else if (status.timeUntilMs <= 86400000) {
-            reasons.push('Deadline is due today.');
+            reasons.push(drivingSubtask ? `A step ("${drivingSubtask.text}") is due today.` : 'Deadline is due today.');
         }
     }
 
