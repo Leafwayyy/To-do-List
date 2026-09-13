@@ -92,11 +92,11 @@
                 max-width: 480px;
                 max-height: 86vh;
                 overflow-y: auto;
-                background: linear-gradient(150deg, #050225, #0a0537, #140a46);
+                background: linear-gradient(150deg, var(--card-1, #2a1c58), var(--card-2, #1a113e), var(--card-3, #0c082a));
                 border: 1px solid rgba(170, 152, 255, 0.36);
                 border-radius: 16px;
-                color: #f6f4ff;
-                font-family: 'Inter', system-ui, sans-serif;
+                color: var(--violet-text, #f6f4ff);
+                font-family: 'Outfit', system-ui, sans-serif;
                 padding: 22px 24px 26px;
             }
             .settingsHeader {
@@ -109,7 +109,7 @@
             .settingsCloseBtn {
                 background: transparent;
                 border: none;
-                color: #f6f4ff;
+                color: var(--violet-text, #f6f4ff);
                 font-size: 1.4rem;
                 cursor: pointer;
                 line-height: 1;
@@ -123,27 +123,27 @@
             .settingsSection h3 {
                 margin: 0 0 8px;
                 font-size: 0.95rem;
-                color: #b58bff;
+                color: var(--violet-accent, #b58bff);
                 text-transform: uppercase;
                 letter-spacing: 0.04em;
             }
-            .settingsHint { margin: 0 0 10px; font-size: 0.88rem; color: #d7d0ff; }
-            .settingsEmail { margin: 0 0 12px; font-size: 0.9rem; color: #d7d0ff; }
-            .settingsFieldLabel { display: block; font-size: 0.82rem; margin-bottom: 6px; color: #d7d0ff; }
+            .settingsHint { margin: 0 0 10px; font-size: 0.88rem; color: var(--violet-muted, #d7d0ff); }
+            .settingsEmail { margin: 0 0 12px; font-size: 0.9rem; color: var(--violet-muted, #d7d0ff); }
+            .settingsFieldLabel { display: block; font-size: 0.82rem; margin-bottom: 6px; color: var(--violet-muted, #d7d0ff); }
             .settingsInlineRow { display: flex; gap: 8px; }
             .settingsNameInput {
                 flex: 1;
                 background: rgba(255, 255, 255, 0.06);
                 border: 1px solid rgba(170, 152, 255, 0.3);
                 border-radius: 8px;
-                color: #f6f4ff;
+                color: var(--violet-text, #f6f4ff);
                 padding: 8px 10px;
                 font: inherit;
             }
             .settingsSaveNameBtn, .settingsSignOutBtn, .settingsExportBtn, .settingsLinkBtn, .settingsDeleteBtn, .settingsMemoryManageBtn, .settingsMemoryAddBtn {
                 background: rgba(181, 139, 255, 0.16);
                 border: 1px solid rgba(170, 152, 255, 0.44);
-                color: #f6f4ff;
+                color: var(--violet-text, #f6f4ff);
                 border-radius: 8px;
                 padding: 8px 14px;
                 font: inherit;
@@ -158,7 +158,7 @@
             .settingsDangerSection h3 { color: #e08a8a; }
             .settingsDeleteBtn { background: rgba(224, 90, 90, 0.14); border-color: rgba(224, 90, 90, 0.5); }
             .settingsDeleteBtn.isArmed { background: rgba(224, 90, 90, 0.32); }
-            .settingsCard a { color: #b58bff; }
+            .settingsCard a { color: var(--violet-accent, #b58bff); }
             .settingsMemoryManageCount { opacity: 0.8; }
             /* A nested panel (opened from the "Manage memories" button, see
                openMemoryOverlay) rather than an inline list in the main
@@ -183,11 +183,11 @@
                 max-width: 420px;
                 max-height: 80vh;
                 overflow-y: auto;
-                background: linear-gradient(150deg, #050225, #0a0537, #140a46);
+                background: linear-gradient(150deg, var(--card-1, #2a1c58), var(--card-2, #1a113e), var(--card-3, #0c082a));
                 border: 1px solid rgba(170, 152, 255, 0.36);
                 border-radius: 16px;
-                color: #f6f4ff;
-                font-family: 'Inter', system-ui, sans-serif;
+                color: var(--violet-text, #f6f4ff);
+                font-family: 'Outfit', system-ui, sans-serif;
                 padding: 22px 24px 26px;
             }
             /* These two toggle "hidden" via JS (refreshMemoryList) - each
@@ -211,7 +211,7 @@
                 background: rgba(255, 255, 255, 0.06);
                 border: 1px solid rgba(170, 152, 255, 0.3);
                 border-radius: 8px;
-                color: #f6f4ff;
+                color: var(--violet-text, #f6f4ff);
                 padding: 8px 10px;
                 font: inherit;
                 font-size: 0.86rem;
@@ -247,7 +247,7 @@
                 flex: 0 0 auto;
                 font-size: 0.68rem;
                 font-weight: 700;
-                color: #d7d0ff;
+                color: var(--violet-muted, #d7d0ff);
                 background: rgba(255, 255, 255, 0.08);
                 border: 1px solid rgba(170, 152, 255, 0.3);
                 border-radius: 999px;
@@ -259,7 +259,7 @@
                 flex: 0 0 auto;
                 background: transparent;
                 border: none;
-                color: #d7d0ff;
+                color: var(--violet-muted, #d7d0ff);
                 cursor: pointer;
                 font-size: 1rem;
                 line-height: 1;
@@ -269,7 +269,7 @@
             .settingsMemoryImportToggleBtn {
                 background: transparent;
                 border: none;
-                color: #b58bff;
+                color: var(--violet-accent, #b58bff);
                 font: inherit;
                 font-size: 0.82rem;
                 font-weight: 700;
@@ -296,14 +296,14 @@
                 background: rgba(255, 255, 255, 0.06);
                 border: 1px solid rgba(170, 152, 255, 0.3);
                 border-radius: 8px;
-                color: #f6f4ff;
+                color: var(--violet-text, #f6f4ff);
                 padding: 8px 10px;
                 font: inherit;
                 font-size: 0.86rem;
                 box-sizing: border-box;
             }
             .settingsMemoryImportFileRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-            .settingsMemoryImportFile { flex: 1; min-width: 0; font-size: 0.8rem; color: #d7d0ff; }
+            .settingsMemoryImportFile { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--violet-muted, #d7d0ff); }
             .settingsMemoryImportBtn { padding: 8px 16px; white-space: nowrap; }
             .settingsMemoryImportStatus { margin: 0; }
             .settingsMemoryImportStatus.hidden { display: none; }
@@ -330,7 +330,7 @@
                 flex: 0 0 auto;
                 font-size: 0.68rem;
                 font-weight: 700;
-                color: #d7d0ff;
+                color: var(--violet-muted, #d7d0ff);
                 background: rgba(255, 255, 255, 0.08);
                 border: 1px solid rgba(170, 152, 255, 0.3);
                 border-radius: 999px;
@@ -360,11 +360,11 @@
                 max-width: 420px;
                 max-height: 80vh;
                 overflow-y: auto;
-                background: linear-gradient(150deg, #050225, #0a0537, #140a46);
+                background: linear-gradient(150deg, var(--card-1, #2a1c58), var(--card-2, #1a113e), var(--card-3, #0c082a));
                 border: 1px solid rgba(170, 152, 255, 0.36);
                 border-radius: 16px;
-                color: #f6f4ff;
-                font-family: 'Inter', system-ui, sans-serif;
+                color: var(--violet-text, #f6f4ff);
+                font-family: 'Outfit', system-ui, sans-serif;
                 padding: 22px 24px 26px;
             }
             .settingsFeedbackCategory {
@@ -372,14 +372,14 @@
                 background: rgba(255, 255, 255, 0.06);
                 border: 1px solid rgba(170, 152, 255, 0.3);
                 border-radius: 8px;
-                color: #f6f4ff;
+                color: var(--violet-text, #f6f4ff);
                 padding: 8px 10px;
                 font: inherit;
                 font-size: 0.86rem;
                 margin-bottom: 8px;
                 box-sizing: border-box;
             }
-            .settingsFeedbackCategory option { background: #140a46; color: #f6f4ff; }
+            .settingsFeedbackCategory option { background: #140a46; color: var(--violet-text, #f6f4ff); }
             .settingsFeedbackMessage {
                 width: 100%;
                 min-height: 90px;
@@ -387,7 +387,7 @@
                 background: rgba(255, 255, 255, 0.06);
                 border: 1px solid rgba(170, 152, 255, 0.3);
                 border-radius: 8px;
-                color: #f6f4ff;
+                color: var(--violet-text, #f6f4ff);
                 padding: 8px 10px;
                 font: inherit;
                 font-size: 0.86rem;
@@ -406,7 +406,7 @@
                    together (the common, pre-submission state). */
                 margin: 20px 0 8px;
                 font-size: 0.82rem;
-                color: #b58bff;
+                color: var(--violet-accent, #b58bff);
                 text-transform: uppercase;
                 letter-spacing: 0.04em;
             }
@@ -424,7 +424,7 @@
                 border-radius: 999px;
                 padding: 2px 8px;
                 white-space: nowrap;
-                color: #d7d0ff;
+                color: var(--violet-muted, #d7d0ff);
                 background: rgba(255, 255, 255, 0.08);
                 border: 1px solid rgba(170, 152, 255, 0.3);
             }

@@ -169,8 +169,17 @@
         }
         if (userBadgeAvatar) {
             if (user.photoURL) {
-                userBadgeAvatar.src = user.photoURL;
+                // Shimmer placeholder while the actual photo bytes load over
+                // the network (setting .src doesn't mean the image is ready
+                // to paint) - .isLoadingAvatar's background shows through an
+                // unloaded <img>, then this clears it on the real load/error
+                // event instead of guessing at a timeout.
+                userBadgeAvatar.classList.add('isLoadingAvatar');
                 userBadgeAvatar.classList.remove('hidden');
+                const clearLoadingState = () => userBadgeAvatar.classList.remove('isLoadingAvatar');
+                userBadgeAvatar.addEventListener('load', clearLoadingState, { once: true });
+                userBadgeAvatar.addEventListener('error', clearLoadingState, { once: true });
+                userBadgeAvatar.src = user.photoURL;
             } else {
                 userBadgeAvatar.classList.add('hidden');
             }

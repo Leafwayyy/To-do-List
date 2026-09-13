@@ -5134,25 +5134,47 @@ body.authChecking .authLoadingScreen{
     display: flex;
 }
 
-.authSpinner{
+/* Skeleton instead of a spinner - a spinner tells you "something is
+   happening" but not what; this at least gestures at the shape of what's
+   about to arrive (a page of text/rows), per the standard "skeleton over
+   spinner" guidance. This screen can't know yet whether it's about to show
+   the sign-in card or the task dashboard, so the shape is a generic
+   title-plus-rows approximation rather than a pixel-exact match to either -
+   still more informative than a bare ring, and correct either way. */
+.authSkeleton{
     position: relative;
     z-index: 1;
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius-circle);
-    border: 3px solid rgba(170, 152, 255, 0.25);
-    border-top-color: var(--violet-accent, #b58bff);
-    animation: authSpinnerSpin 0.9s linear infinite;
+    width: min(360px, 84vw);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
-@keyframes authSpinnerSpin{
-    to{ transform: rotate(360deg); }
+.authSkeletonBar{
+    height: 14px;
+    border-radius: var(--radius-pill);
+    background: linear-gradient(90deg, rgba(170, 152, 255, 0.14) 25%, rgba(170, 152, 255, 0.3) 37%, rgba(170, 152, 255, 0.14) 63%);
+    background-size: 400% 100%;
 }
 
-@media (prefers-reduced-motion: reduce){
-    .authSpinner{
-        animation: none;
+.authSkeletonBar--title{
+    height: 20px;
+    width: 55%;
+}
+
+.authSkeletonBar:nth-child(3){ width: 92%; }
+.authSkeletonBar:nth-child(4){ width: 100%; }
+.authSkeletonBar:nth-child(5){ width: 72%; }
+
+@media (prefers-reduced-motion: no-preference){
+    .authSkeletonBar{
+        animation: skeletonShimmer 1.6s ease-in-out infinite;
     }
+}
+
+@keyframes skeletonShimmer{
+    0%{ background-position: 100% 50%; }
+    100%{ background-position: 0% 50%; }
 }
 
 .userBadge{
@@ -5183,6 +5205,17 @@ body.authChecking .authLoadingScreen{
 
 .userBadgeAvatar.hidden{
     display: none;
+}
+
+.userBadgeAvatar.isLoadingAvatar{
+    background: linear-gradient(90deg, rgba(170, 152, 255, 0.14) 25%, rgba(170, 152, 255, 0.3) 37%, rgba(170, 152, 255, 0.14) 63%);
+    background-size: 400% 100%;
+}
+
+@media (prefers-reduced-motion: no-preference){
+    .userBadgeAvatar.isLoadingAvatar{
+        animation: skeletonShimmer 1.6s ease-in-out infinite;
+    }
 }
 
 .userBadgeName{
