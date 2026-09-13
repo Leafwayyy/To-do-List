@@ -5,18 +5,13 @@
 }
 
 body{
-    /* Real bug found while making this change: 'Poppins' was never
-       actually loaded anywhere (no <link> for it in any HTML file, only
-       'Inter'+'Playfair Display' are), so every non-serif element in the
-       app has been silently falling back to the OS's generic sans-serif
-       this whole time, not this declared font at all. -apple-system/
-       BlinkMacSystemFont resolve to the real native San Francisco on
-       macOS/iOS Safari and Chrome (Apple doesn't distribute SF as a
-       downloadable web font, this is the standard way to actually get it);
-       everywhere else now correctly gets 'Inter', which was already being
-       loaded via the Google Fonts <link> in every HTML file but never
-       referenced by anything - so this also fixes a dead, wasted font load. */
-    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    /* Swapped from Inter to Outfit: Inter-everywhere is one of the most
+       recognizable "an AI made this" tells, and Playfair Display already
+       covers the two brand-title spots (see .title/.authBrandTitle below),
+       so this is the base sans-serif for literally everything else.
+       -apple-system/BlinkMacSystemFont stay first in the stack as the
+       fastest-available fallback while the Google Fonts <link> loads. */
+    font-family: -apple-system, BlinkMacSystemFont, 'Outfit', 'Segoe UI', sans-serif;
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
@@ -42,16 +37,6 @@ body{
     margin: 0 auto;
 }
 
-
-.to-doList{
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    flex-direction: column;
-    width: 100%;
-    height: auto;
-    padding: 35px 14px;
-}
 
 .title{
     font-family: 'Playfair Display', serif;
@@ -712,7 +697,10 @@ body{
 .priorityModeHint{
     margin-top: 6px;
     font-size: 12px;
-    color: #29334a;
+    /* Was #29334a (a leftover from the original light-mode pass, never
+       repainted for dark) - near-black on the dark violet card background,
+       functionally invisible. Real contrast bug, not a style choice. */
+    color: var(--violet-muted, #d7d0ff);
 }
 
 .sortOnceBtn{
@@ -2162,6 +2150,11 @@ body{
 html{
     position: relative;
     background: linear-gradient(150deg, var(--violet-bg-1), var(--violet-bg-2), var(--violet-bg-3));
+    /* Dark-only site: tell the browser once at the root so native chrome
+       (scrollbars, date/time pickers, form-control defaults) renders dark
+       everywhere, not just on the handful of inputs that set this
+       individually. */
+    color-scheme: dark;
 }
 
 /* Quieter, single-tone corner glow instead of the old mixed purple+blue
@@ -2491,30 +2484,6 @@ body::after{
     }
 }
 
-/* Gradient-everywhere pass */
-.container{
-    background:
-        radial-gradient(140% 120% at 0% 0%, rgba(181, 133, 255, 0.24), transparent 56%),
-        radial-gradient(120% 120% at 100% 100%, rgba(124, 141, 255, 0.22), transparent 52%),
-        linear-gradient(165deg, rgba(35, 22, 92, 0.95), rgba(20, 12, 64, 0.94) 48%, rgba(12, 8, 44, 0.95));
-}
-
-.to-doList{
-    background:
-        radial-gradient(95% 80% at 8% 0%, rgba(173, 127, 255, 0.16), transparent 58%),
-        radial-gradient(95% 80% at 95% 100%, rgba(124, 142, 255, 0.14), transparent 62%);
-}
-
-.motivatorContainer,
-.activityPanel,
-.taskDetailsPanel.open,
-.urgencyAlert,
-.priorityControls,
-.tasks li{
-    background:
-        linear-gradient(155deg, rgba(50, 34, 118, 0.84), rgba(30, 21, 83, 0.88) 52%, rgba(22, 14, 66, 0.9));
-}
-
 .taskInput,
 .matrixSelect,
 .difficultySelect,
@@ -2533,10 +2502,17 @@ body::after{
 .detailsToggleBtn,
 .sortOnceBtn,
 .alertToggleBtn,
-.taskViewBtn,
 .deadlinePresetBtn{
     background:
         linear-gradient(145deg, rgba(49, 34, 117, 0.92), rgba(32, 22, 86, 0.94));
+}
+
+/* Filter buttons (All/Focus Now/Overdue/...) stay flat and quiet at rest -
+   same reasoning as .priorityControls above. .active still gets a clear,
+   bold treatment below so the current filter is obvious; every other
+   pill just needs to read as a plain, low-emphasis toggle. */
+.taskViewBtn{
+    background: var(--violet-surface-soft);
 }
 
 .addBtn,
@@ -2634,27 +2610,30 @@ body::after{
     opacity: 1;
 }
 
-/* Wrapper and panel gradient polish */
+/* Main wrapper background - single source of truth (a duplicate, fully-
+   overwritten earlier pass with the same selector used to sit above this
+   one; removed rather than merged since every one of its properties was
+   already dead). */
 .container{
     background:
         linear-gradient(165deg, rgba(39, 24, 96, 0.94) 0%, rgba(22, 14, 62, 0.93) 38%, rgba(12, 8, 44, 0.94) 100%);
-}
-
-.to-doList{
-    background:
-        radial-gradient(90% 80% at 10% 0%, rgba(173, 128, 255, 0.12), transparent 55%),
-        radial-gradient(90% 80% at 95% 100%, rgba(123, 139, 255, 0.1), transparent 58%);
 }
 
 .motivatorContainer,
 .activityPanel,
 .taskDetailsPanel.open,
 .urgencyAlert,
-.priorityControls,
 .tasks li{
     background:
         linear-gradient(160deg, rgba(34, 22, 87, 0.82) 0%, rgba(23, 16, 66, 0.86) 52%, rgba(17, 11, 53, 0.88) 100%);
 }
+
+/* .priorityControls deliberately stays out of the gradient group above -
+   it's secondary chrome (auto-sort/alerts/visibility toggles), not primary
+   content, so it gets the app's existing flat --violet-surface-soft token
+   (see the base rule earlier in the file) instead of the same heavy
+   gradient every card/panel uses. One quiet surface here gives the actual
+   task list somewhere to visually stand out against. */
 
 .taskInput,
 .matrixSelect,
@@ -2998,6 +2977,16 @@ body::after{
 .brainDumpTaskCardDifficulty,
 .brainDumpTaskCardDeadline{
     color-scheme: dark;
+    /* Real contrast bug: .matrixSelect/.difficultySelect/.recurrenceSelect
+       and the editor/brain-dump-card variants never got their text color
+       repainted when the app moved to this dark violet theme, so they were
+       still showing #1e1e1e (near-black) on a dark violet background -
+       effectively unreadable. .groupCreatePrivacySelect/
+       .groupSettingsPrivacySelect/.brainDumpTaskCardDeadline were built
+       after the dark theme and already set their own correct light color
+       further down the file, which still wins over this (later + equal
+       specificity); this line only changes the selects that were missed. */
+    color: var(--violet-text, #f6f4ff);
 }
 
 .matrixSelect option,
@@ -3178,13 +3167,6 @@ body::after{
 @media (min-width: 1060px){
     .container{
         width: min(1160px, 96vw);
-    }
-
-    .to-doList{
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 330px;
-        column-gap: 16px;
-        align-items: start;
     }
 
     .title,
