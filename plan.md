@@ -1,5 +1,20 @@
 # UI/UX Fix Plan
 
+> **STATUS: COMPLETED (2026-09-13 audit).** Every item below, including the
+> navigation restructuring, has already shipped, in the "UI/UX rework step
+> 1-8b" commit series (`a79ab36`, `498ed72`, `af52f2f`, `b6a2ae5`, `7d486b8`,
+> `7d8d4c5`, `65088c4`, `eb2894d`, `8ba377e`, `c5bb42b`, `9f30ee4`) plus a
+> later group-nav refinement (`0a7c14f`) and a related bug fix (`a6865c5`) -
+> all dated 2026-09-01/02, well before this file was next read as if it were
+> an open backlog. Confirmed by git log/spot-check, not assumption: tab-based
+> nav (solo Tasks/Calendar/Activity, group Tasks/Team/Calendar/Leaderboard/
+> Activity), group Leave/Delete moved into the Group Settings overlay,
+> member-scope avatar chips, task row differentiation, Prioritize panel
+> two-tier disclosure, and the code-level findings (font scale, spacing,
+> border-radius, color tokens) were all independently verified still true.
+> Don't re-assign anything here as new work - if you're auditing current UX,
+> start from a fresh look at the live UI instead of this doc's checkboxes.
+
 Built from two inputs: the `ui-ux-design` skill (`.claude/skills/ui-ux-design/`, the 19 Laws of UX plus visual design fundamentals) applied against the actual current UI, and real feedback ("it's a bit unclear, had to really look around," compared unfavorably to ChatGPT's simplicity, praise for the deadline-vs-schedule tour copy and the "clicky and cool" feel). Every fix below cites the specific law or craft principle driving it, not general taste. This is a plan to review and prioritize, not a queue to execute top to bottom.
 
 ## How this is organized
