@@ -40,49 +40,79 @@
                 <p class="landingCtaNote">No credit card. Sign up with Google or email in seconds.</p>
             </div>
 
-            <div class="landingMockWrap" aria-hidden="true">
-                <div class="landingMockHeader">
-                    <span class="landingMockLabel"><i class="fa-solid fa-arrow-down-wide-short"></i> Sorted for you, automatically</span>
-                    <span class="landingMockLive">Live</span>
+            <!-- .landingMockStage is the new perspective/parallax root - it owns
+                 nothing visual itself, just gives the tilt (mock card) and
+                 depth (float cards) below something to be 3D-transformed
+                 relative to. .landingMockWrap keeps every rule it already
+                 had; this only wraps it and adds two floating annotation
+                 cards. See the closing script tag for the pointer-driven
+                 tilt/parallax/spotlight logic, and style.css's "Landing
+                 page: cinematic motion pass" block for the CSS. -->
+            <div class="landingMockStage">
+                <div class="landingMockWrap" aria-hidden="true">
+                    <div class="landingMockHeader">
+                        <span class="landingMockLabel"><i class="fa-solid fa-arrow-down-wide-short"></i> Sorted for you, automatically</span>
+                        <span class="landingMockLive">Live</span>
+                    </div>
+                    <ul class="tasks landingMockTasks">
+                        <li class="status-overdue">
+                            <span class="landingRankBadge rank-1">1</span>
+                            <div class="taskTopRow">
+                                <button class="checkBtn" tabindex="-1"><i class="fa-regular fa-circle"></i></button>
+                                <span class="taskText">Finish quarterly report</span>
+                            </div>
+                            <div class="taskMeta">
+                                <span class="matrixBadge matrix-do">Do</span>
+                                <span class="difficultyBadge">Hard</span>
+                                <span class="deadlineBadge deadline-overdue">Due yesterday</span>
+                            </div>
+                        </li>
+                        <li class="status-critical">
+                            <span class="landingRankBadge rank-2">2</span>
+                            <div class="taskTopRow">
+                                <button class="checkBtn" tabindex="-1"><i class="fa-regular fa-circle"></i></button>
+                                <span class="taskText">Reply to client email</span>
+                            </div>
+                            <div class="taskMeta">
+                                <span class="matrixBadge matrix-delegate">Delegate</span>
+                                <span class="difficultyBadge">Easy</span>
+                                <span class="deadlineBadge deadline-critical">Due in 2h</span>
+                            </div>
+                        </li>
+                        <li>
+                            <span class="landingRankBadge rank-3">3</span>
+                            <div class="taskTopRow">
+                                <button class="checkBtn" tabindex="-1"><i class="fa-regular fa-circle"></i></button>
+                                <span class="taskText">Buy groceries</span>
+                            </div>
+                            <div class="taskMeta">
+                                <span class="matrixBadge matrix-schedule">Schedule</span>
+                                <span class="difficultyBadge">Very Easy</span>
+                                <span class="deadlineBadge deadline-normal">Due Sat</span>
+                            </div>
+                        </li>
+                    </ul>
                 </div>
-                <ul class="tasks landingMockTasks">
-                    <li class="status-overdue">
-                        <span class="landingRankBadge rank-1">1</span>
-                        <div class="taskTopRow">
-                            <button class="checkBtn" tabindex="-1"><i class="fa-regular fa-circle"></i></button>
-                            <span class="taskText">Finish quarterly report</span>
-                        </div>
-                        <div class="taskMeta">
-                            <span class="matrixBadge matrix-do">Do</span>
-                            <span class="difficultyBadge">Hard</span>
-                            <span class="deadlineBadge deadline-overdue">Due yesterday</span>
-                        </div>
-                    </li>
-                    <li class="status-critical">
-                        <span class="landingRankBadge rank-2">2</span>
-                        <div class="taskTopRow">
-                            <button class="checkBtn" tabindex="-1"><i class="fa-regular fa-circle"></i></button>
-                            <span class="taskText">Reply to client email</span>
-                        </div>
-                        <div class="taskMeta">
-                            <span class="matrixBadge matrix-delegate">Delegate</span>
-                            <span class="difficultyBadge">Easy</span>
-                            <span class="deadlineBadge deadline-critical">Due in 2h</span>
-                        </div>
-                    </li>
-                    <li>
-                        <span class="landingRankBadge rank-3">3</span>
-                        <div class="taskTopRow">
-                            <button class="checkBtn" tabindex="-1"><i class="fa-regular fa-circle"></i></button>
-                            <span class="taskText">Buy groceries</span>
-                        </div>
-                        <div class="taskMeta">
-                            <span class="matrixBadge matrix-schedule">Schedule</span>
-                            <span class="difficultyBadge">Very Easy</span>
-                            <span class="deadlineBadge deadline-normal">Due Sat</span>
-                        </div>
-                    </li>
-                </ul>
+
+                <!-- Floating annotation cards - illustrative product moments,
+                     not literal stat claims about any real account. data-depth
+                     sets how far each drifts under the pointer-parallax script
+                     relative to the mock card itself; different layers moving
+                     by different amounts is what actually reads as "3D" - one
+                     flat layer moving together would just read as a tilted
+                     photo. -->
+                <div class="landingFloatCard landingFloatCard--streak" data-depth="1.5" aria-hidden="true">
+                    <div class="landingFloatCardInner">
+                        <span class="landingFloatIcon landingFloatIconFire"><i class="fa-solid fa-fire"></i></span>
+                        <span class="landingFloatText"><strong>9-day streak</strong>Keep it going</span>
+                    </div>
+                </div>
+                <div class="landingFloatCard landingFloatCard--dusty" data-depth="0.7" aria-hidden="true">
+                    <div class="landingFloatCardInner">
+                        <span class="landingFloatIcon landingFloatIconDusty"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+                        <span class="landingFloatText"><strong>Sorted in seconds</strong>From one message to Dusty</span>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -199,6 +229,89 @@
                 });
             }, { threshold: 0.15, rootMargin: '0px 0px -60px 0px' });
             targets.forEach(function (el) { observer.observe(el); });
+        })();
+
+        // Hero 3D tilt/parallax/spotlight - pointer-driven, desktop-with-a-
+        // real-mouse only (touch has no hover, and a reduced-motion request
+        // means "don't", full stop). Everything here only ever sets CSS
+        // custom properties consumed by style.css's own transforms/gradients
+        // - if this never runs, .landingMockStage's own default var values
+        // (flat, centered) already look correct on their own.
+        (function () {
+            var prefersMotion = window.matchMedia('(prefers-reduced-motion: no-preference)').matches;
+            var hasFinePointer = window.matchMedia('(pointer: fine)').matches;
+            if (!prefersMotion || !hasFinePointer) return;
+
+            var stage = document.querySelector('.landingMockStage');
+            if (!stage) return;
+            var card = stage.querySelector('.landingMockWrap');
+            var floats = stage.querySelectorAll('[data-depth]');
+
+            var targetX = 0, targetY = 0, curX = 0, curY = 0, raf = null;
+
+            function tick() {
+                // Simple exponential smoothing toward the latest pointer
+                // reading - gives the tilt real weight/inertia instead of
+                // snapping straight to the cursor, the difference between
+                // "animated" and "cinematic."
+                curX += (targetX - curX) * 0.08;
+                curY += (targetY - curY) * 0.08;
+
+                if (card) {
+                    card.style.setProperty('--tiltX', (curY * -9).toFixed(2) + 'deg');
+                    card.style.setProperty('--tiltY', (curX * 11).toFixed(2) + 'deg');
+                }
+                floats.forEach(function (el) {
+                    var depth = parseFloat(el.getAttribute('data-depth')) || 1;
+                    el.style.setProperty('--parX', (curX * 24 * depth).toFixed(1) + 'px');
+                    el.style.setProperty('--parY', (curY * 24 * depth).toFixed(1) + 'px');
+                });
+                stage.style.setProperty('--spotX', ((curX + 0.5) * 100).toFixed(1) + '%');
+                stage.style.setProperty('--spotY', ((curY + 0.5) * 100).toFixed(1) + '%');
+
+                if (Math.abs(targetX - curX) > 0.001 || Math.abs(targetY - curY) > 0.001) {
+                    raf = requestAnimationFrame(tick);
+                } else {
+                    raf = null;
+                }
+            }
+
+            stage.addEventListener('pointermove', function (e) {
+                var rect = stage.getBoundingClientRect();
+                targetX = (e.clientX - rect.left) / rect.width - 0.5;
+                targetY = (e.clientY - rect.top) / rect.height - 0.5;
+                if (!raf) raf = requestAnimationFrame(tick);
+            });
+
+            stage.addEventListener('pointerleave', function () {
+                targetX = 0;
+                targetY = 0;
+                if (!raf) raf = requestAnimationFrame(tick);
+            });
+        })();
+
+        // Benefit-card tilt-on-hover - same pointer/motion gating as the hero,
+        // a much smaller effect (these are secondary content, not the hero
+        // focal point) so it reads as a considered detail rather than the
+        // whole page tilting whenever you move the mouse.
+        (function () {
+            var prefersMotion = window.matchMedia('(prefers-reduced-motion: no-preference)').matches;
+            var hasFinePointer = window.matchMedia('(pointer: fine)').matches;
+            if (!prefersMotion || !hasFinePointer) return;
+
+            document.querySelectorAll('.landingBenefitCard').forEach(function (card) {
+                card.addEventListener('pointermove', function (e) {
+                    var rect = card.getBoundingClientRect();
+                    var px = (e.clientX - rect.left) / rect.width - 0.5;
+                    var py = (e.clientY - rect.top) / rect.height - 0.5;
+                    card.style.setProperty('--tiltX', (py * -6).toFixed(2) + 'deg');
+                    card.style.setProperty('--tiltY', (px * 7).toFixed(2) + 'deg');
+                });
+                card.addEventListener('pointerleave', function () {
+                    card.style.setProperty('--tiltX', '0deg');
+                    card.style.setProperty('--tiltY', '0deg');
+                });
+            });
         })();
     </script>
 
