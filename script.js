@@ -47,6 +47,9 @@ const deadlinePresetButtons = Array.from(document.querySelectorAll('.deadlinePre
 const schedulePresetButtons = Array.from(document.querySelectorAll('.schedulePresetBtn'));
 const scheduleInput = document.querySelector('.scheduleInput');
 const scheduleContainer = document.querySelector('.scheduleContainer');
+const pendingStepsList = document.querySelector('.pendingStepsList');
+const pendingStepInput = document.querySelector('.pendingStepInput');
+const pendingStepAddBtn = document.querySelector('.pendingStepAddBtn');
 const taskViewButtons = Array.from(document.querySelectorAll('.taskViewBtn'));
 const overdueViewButton = document.querySelector('.taskViewBtn[data-view="overdue"]');
 const overdueCountBadge = overdueViewButton?.querySelector('.overdueCountBadge');
@@ -740,6 +743,83 @@ function hideQuickAddHint() {
     quickAddHint?.classList.add('hidden');
 }
 
+// Steps added before a task even exists yet - text-only drafts (no id,
+// no completed state) since they aren't real subtasks until addTaskFromInputs
+// commits them. Kept as plain strings rather than reusing the real subtask
+// shape so there's no ambiguity about these being "live" data mid-draft.
+let pendingNewTaskSteps = [];
+
+function renderPendingStepsList() {
+    if (!pendingStepsList) {
+        return;
+    }
+    pendingStepsList.innerHTML = '';
+    pendingNewTaskSteps.forEach((stepText, index) => {
+        const item = document.createElement('div');
+        item.classList.add('subtaskItem', 'pendingStepItem');
+        item.setAttribute('role', 'listitem');
+
+        const row = document.createElement('div');
+        row.classList.add('subtaskRow');
+
+        const text = document.createElement('span');
+        text.classList.add('subtaskText');
+        text.textContent = stepText;
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.classList.add('subtaskDeleteBtn');
+        deleteBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        deleteBtn.setAttribute('aria-label', 'Remove step');
+        deleteBtn.addEventListener('click', () => {
+            playClickSound();
+            removePendingStep(index);
+        });
+
+        row.appendChild(text);
+        row.appendChild(deleteBtn);
+        item.appendChild(row);
+        pendingStepsList.appendChild(item);
+    });
+}
+
+function addPendingStepFromInput() {
+    if (!pendingStepInput) {
+        return;
+    }
+    const trimmed = pendingStepInput.value.trim();
+    if (trimmed === '') {
+        return;
+    }
+    playClickSound();
+    pendingNewTaskSteps.push(trimmed.slice(0, 240));
+    pendingStepInput.value = '';
+    renderPendingStepsList();
+    pendingStepInput.focus();
+}
+
+function removePendingStep(index) {
+    pendingNewTaskSteps.splice(index, 1);
+    renderPendingStepsList();
+}
+
+function clearPendingSteps() {
+    pendingNewTaskSteps = [];
+    renderPendingStepsList();
+}
+
+if (pendingStepAddBtn) {
+    pendingStepAddBtn.addEventListener('click', addPendingStepFromInput);
+}
+if (pendingStepInput) {
+    pendingStepInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            addPendingStepFromInput();
+        }
+    });
+}
+
 function addTaskFromInputs() {
     playClickSound();
 
@@ -790,8 +870,14 @@ function addTaskFromInputs() {
         createdAt: timestamp,
         updatedAt: timestamp,
         manualOrder: nextManualOrder,
-        subtasks: [],
-        subtasksExpanded: false
+        subtasks: pendingNewTaskSteps.map((stepText) => ({
+            id: generateSubtaskId(),
+            text: stepText,
+            completed: false,
+            createdAt: timestamp,
+            dueAt: null
+        })),
+        subtasksExpanded: pendingNewTaskSteps.length > 0
     };
 
     tasks.push(newTask);
@@ -811,6 +897,7 @@ function addTaskFromInputs() {
     if (scheduleInput) {
         scheduleInput.value = '';
     }
+    clearPendingSteps();
     hideDeadlinePresets();
     hideQuickAddHint();
     updateDurationInputVisibility();

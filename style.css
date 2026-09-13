@@ -3512,6 +3512,30 @@ body > .viewTabs{
     width: 100%;
 }
 
+/* Steps at creation time (app.html/group/index.html's .detailsStepsGroup) -
+   reuses .subtaskItem/.subtaskAddRow/.subtaskInput/.subtaskAddBtn from the
+   per-task steps UI (see the block starting at .subtasksSection) so drafted
+   steps look identical to real ones with no separate color/theme rules
+   needed here, just the layout this group itself needs. */
+.detailsStepsGroup{
+    margin-top: var(--space-3);
+}
+
+.pendingStepsList{
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.pendingStepsList:empty{
+    margin-bottom: 0;
+}
+
+.pendingStepItem .subtaskRow{
+    justify-content: space-between;
+}
+
 /* Real bug found and fixed while adding the above: .editorPrimaryGrid
    (task editor overlay, initializeTaskEditor/initializeGroupTaskEditor)
    never actually carried the base .detailsGrid class the way the inline

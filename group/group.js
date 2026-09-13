@@ -583,6 +583,9 @@ const deadlineInput = document.querySelector('.deadlineInput:not(.scheduleInput)
 const recurrenceSelect = document.querySelector('.recurrenceSelect');
 const scheduleContainer = document.querySelector('.scheduleContainer');
 const scheduleInput = document.querySelector('.scheduleInput');
+const pendingStepsList = document.querySelector('.pendingStepsList');
+const pendingStepInput = document.querySelector('.pendingStepInput');
+const pendingStepAddBtn = document.querySelector('.pendingStepAddBtn');
 const typePills = Array.from(document.querySelectorAll('.typePill'));
 const durationInput = document.querySelector('.durationInput');
 const durationWrap = document.querySelector('.durationWrap');
@@ -4773,6 +4776,85 @@ difficultySelect?.addEventListener('change', playClickSound);
 durationInput?.addEventListener('input', syncDurationChipState);
 sanitizeNumberInputAsPositiveInteger(durationInput);
 
+// Steps added before a task even exists yet - same reasoning/shape as
+// solo's pendingNewTaskSteps in script.js, kept as plain strings until
+// addTaskFromInputs hands them to addGroupTask, which already knows how to
+// turn {text, dueAt} entries into real subtasks (see its initialSubtasks
+// mapping - this was previously only ever populated by Dusty, never by
+// manual entry).
+let pendingNewTaskSteps = [];
+
+function renderPendingStepsList() {
+    if (!pendingStepsList) {
+        return;
+    }
+    pendingStepsList.innerHTML = '';
+    pendingNewTaskSteps.forEach((stepText, index) => {
+        const item = document.createElement('div');
+        item.classList.add('subtaskItem', 'pendingStepItem');
+        item.setAttribute('role', 'listitem');
+
+        const row = document.createElement('div');
+        row.classList.add('subtaskRow');
+
+        const text = document.createElement('span');
+        text.classList.add('subtaskText');
+        text.textContent = stepText;
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.classList.add('subtaskDeleteBtn');
+        deleteBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        deleteBtn.setAttribute('aria-label', 'Remove step');
+        deleteBtn.addEventListener('click', () => {
+            playClickSound();
+            removePendingStep(index);
+        });
+
+        row.appendChild(text);
+        row.appendChild(deleteBtn);
+        item.appendChild(row);
+        pendingStepsList.appendChild(item);
+    });
+}
+
+function addPendingStepFromInput() {
+    if (!pendingStepInput) {
+        return;
+    }
+    const trimmed = pendingStepInput.value.trim();
+    if (trimmed === '') {
+        return;
+    }
+    playClickSound();
+    pendingNewTaskSteps.push(trimmed.slice(0, 240));
+    pendingStepInput.value = '';
+    renderPendingStepsList();
+    pendingStepInput.focus();
+}
+
+function removePendingStep(index) {
+    pendingNewTaskSteps.splice(index, 1);
+    renderPendingStepsList();
+}
+
+function clearPendingSteps() {
+    pendingNewTaskSteps = [];
+    renderPendingStepsList();
+}
+
+if (pendingStepAddBtn) {
+    pendingStepAddBtn.addEventListener('click', addPendingStepFromInput);
+}
+if (pendingStepInput) {
+    pendingStepInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            addPendingStepFromInput();
+        }
+    });
+}
+
 function addTaskFromInputs() {
     playClickSound();
     const group = getSelectedGroup();
@@ -4806,7 +4888,8 @@ function addTaskFromInputs() {
         recurrence,
         scheduledAt,
         taskType,
-        estimateMinutes
+        estimateMinutes,
+        subtasks: pendingNewTaskSteps.map((stepText) => ({ text: stepText, dueAt: null }))
     }).catch((error) => console.error('Failed to add task:', error));
 
     if (recurrenceSelect) {
@@ -4821,6 +4904,7 @@ function addTaskFromInputs() {
     if (scheduleInput) {
         scheduleInput.value = '';
     }
+    clearPendingSteps();
     setTaskTypePillState('open');
     updateDurationInputVisibility();
     quickAddHint?.classList.add('hidden');
