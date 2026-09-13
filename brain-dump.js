@@ -140,7 +140,7 @@ function brainDumpSummarizeTask(task) {
         // is already an edge case the AI editing path doesn't need to
         // handle perfectly.
         subtasks: Array.isArray(task.subtasks)
-            ? task.subtasks.slice(0, 20).map((subtask) => ({ text: subtask.text, completed: Boolean(subtask.completed) }))
+            ? task.subtasks.slice(0, 20).map((subtask) => ({ text: subtask.text, completed: Boolean(subtask.completed), dueAt: subtask.dueAt || null }))
             : []
     };
 }
@@ -1082,6 +1082,120 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         row.remove();
     }
 
+    // A draft's subtasks can arrive as either shape: the new {text, dueAt}
+    // objects the Worker now sends, or a bare string (defensive - an older
+    // in-flight response, or a manually-constructed draft elsewhere).
+    // Normalizing once here means every reader downstream can assume the
+    // real shape without re-checking it itself.
+    function normalizeDraftSubtasks(subtasks) {
+        return (Array.isArray(subtasks) ? subtasks : [])
+            .map((entry) => (typeof entry === 'string' ? { text: entry, dueAt: null } : { text: entry?.text || '', dueAt: entry?.dueAt || null }))
+            .filter((entry) => entry.text);
+    }
+
+    // A row-per-step editor for a review card's subtasks - shared by
+    // createTaskReviewCard (new tasks) and createTaskEditReviewCard (edits),
+    // so a Dusty-proposed step gets the exact same per-step deadline control
+    // the real task list already has (.subtaskDeadlineBtn in script.js),
+    // instead of the old plain one-line-per-step textarea, which had no way
+    // to carry a date at all. Returns { element, read() } like every other
+    // card piece here - read() always reflects the live rows, including any
+    // added/removed since the draft first rendered.
+    function createSubtaskRowsEditor(initialSubtasks) {
+        const wrap = document.createElement('div');
+        wrap.classList.add('brainDumpSubtaskRowsWrap');
+
+        const list = document.createElement('div');
+        list.classList.add('brainDumpSubtaskRows');
+        wrap.appendChild(list);
+
+        const rows = []; // { rowEl, textInput, deadlineInput }
+
+        function addRow(subtask) {
+            const row = document.createElement('div');
+            row.classList.add('brainDumpSubtaskRow');
+
+            const textInput = document.createElement('input');
+            textInput.type = 'text';
+            textInput.classList.add('brainDumpSubtaskRowText');
+            textInput.placeholder = 'Step...';
+            textInput.value = subtask?.text || '';
+
+            const deadlineBtn = document.createElement('button');
+            deadlineBtn.type = 'button';
+            deadlineBtn.classList.add('brainDumpSubtaskRowDeadlineBtn');
+            deadlineBtn.innerHTML = '<i class="fa-solid fa-clock"></i>';
+
+            const deadlineInput = document.createElement('input');
+            deadlineInput.type = 'datetime-local';
+            deadlineInput.classList.add('brainDumpSubtaskRowDeadlineInput', 'hidden');
+            deadlineInput.setAttribute('aria-label', 'Step deadline');
+            if (subtask?.dueAt && !Number.isNaN(new Date(subtask.dueAt).getTime())) {
+                deadlineInput.value = brainDumpToDatetimeLocalValue(new Date(subtask.dueAt));
+                deadlineBtn.classList.add('hasDeadline');
+            }
+            deadlineBtn.setAttribute('aria-label', deadlineInput.value ? 'Change step deadline' : 'Set step deadline');
+
+            deadlineBtn.addEventListener('click', () => {
+                deadlineInput.classList.toggle('hidden');
+                if (!deadlineInput.classList.contains('hidden')) {
+                    if (typeof deadlineInput.showPicker === 'function') {
+                        deadlineInput.showPicker();
+                    } else {
+                        deadlineInput.focus();
+                    }
+                }
+            });
+            deadlineInput.addEventListener('change', () => {
+                deadlineBtn.classList.toggle('hasDeadline', Boolean(deadlineInput.value));
+                deadlineBtn.setAttribute('aria-label', deadlineInput.value ? 'Change step deadline' : 'Set step deadline');
+            });
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.classList.add('brainDumpSubtaskRowRemoveBtn');
+            removeBtn.setAttribute('aria-label', 'Remove step');
+            removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+            removeBtn.addEventListener('click', () => {
+                row.remove();
+                const index = rows.findIndex((entry) => entry.rowEl === row);
+                if (index !== -1) {
+                    rows.splice(index, 1);
+                }
+            });
+
+            row.appendChild(textInput);
+            row.appendChild(deadlineBtn);
+            row.appendChild(deadlineInput);
+            row.appendChild(removeBtn);
+            list.appendChild(row);
+            rows.push({ rowEl: row, textInput, deadlineInput });
+        }
+
+        normalizeDraftSubtasks(initialSubtasks).forEach(addRow);
+
+        const addRowBtn = document.createElement('button');
+        addRowBtn.type = 'button';
+        addRowBtn.classList.add('brainDumpSubtaskAddRowBtn');
+        addRowBtn.textContent = '+ Add step';
+        addRowBtn.addEventListener('click', () => {
+            addRow(null);
+            rows[rows.length - 1]?.textInput.focus();
+        });
+        wrap.appendChild(addRowBtn);
+
+        function read() {
+            return rows
+                .map((entry) => ({
+                    text: entry.textInput.value.trim(),
+                    dueAt: entry.deadlineInput.value ? new Date(entry.deadlineInput.value).toISOString() : null
+                }))
+                .filter((entry) => entry.text);
+        }
+
+        return { element: wrap, read };
+    }
+
     // Returns { element, read() } rather than stashing state on the DOM
     // node - read() closes over the actual live input elements so it
     // always reflects whatever the user has since edited/unchecked.
@@ -1200,21 +1314,8 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         row.appendChild(recurrenceSelectEl);
         fields.appendChild(row);
 
-        // One subtask per line - simpler to read/edit than a full dynamic
-        // add/remove-row UI, and matches how short these lists actually are.
-        // Sized to its actual line count (via the rows attribute, not a
-        // fixed height + scrollbar) so every step is visible without
-        // scrolling, and grows/shrinks live as the user edits it.
-        const subtasksInputEl = document.createElement('textarea');
-        subtasksInputEl.classList.add('brainDumpTaskCardSubtasks');
-        subtasksInputEl.placeholder = 'Steps (one per line, optional)';
-        subtasksInputEl.value = Array.isArray(draft.subtasks) ? draft.subtasks.filter(Boolean).join('\n') : '';
-        const resizeSubtasksInput = () => {
-            subtasksInputEl.rows = Math.min(8, Math.max(2, subtasksInputEl.value.split('\n').length));
-        };
-        resizeSubtasksInput();
-        subtasksInputEl.addEventListener('input', resizeSubtasksInput);
-        fields.appendChild(subtasksInputEl);
+        const subtasksEditor = createSubtaskRowsEditor(draft.subtasks);
+        fields.appendChild(subtasksEditor.element);
 
         card.appendChild(header);
         card.appendChild(fields);
@@ -1233,7 +1334,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             // recurrence picked here with the deadline field left empty
             // would otherwise silently do nothing once committed.
             recurrence: dueAtInputEl.value ? (getValidRecurrenceValue(recurrenceSelectEl.value) || null) : null,
-            subtasks: subtasksInputEl.value.split('\n').map((line) => line.trim()).filter(Boolean)
+            subtasks: subtasksEditor.read()
         });
 
         const markAdded = () => {
@@ -1267,71 +1368,26 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         return { element: card, read, markAdded };
     }
 
+    // Real bug reported live: new-task proposals had no way to say "I don't
+    // want any of these" - this used to be its own hand-rolled footer,
+    // predating appendReviewSection's shared Dismiss button below, and was
+    // never migrated over when that shipped for task-edits/suggestions/
+    // comments. Collapsed into the same shared scaffold those three already
+    // use, so all four review types get Dismiss identically instead of
+    // needing to remember to patch a second (or third...) copy next time.
     function appendTaskReview(tasks, typeLabel) {
-        if (!tasks || tasks.length === 0) {
+        if (!commitTasks || !tasks || tasks.length === 0) {
             return;
         }
-
-        const section = document.createElement('div');
-        section.classList.add('brainDumpTaskReview');
-
-        if (typeLabel) {
-            const label = document.createElement('p');
-            label.classList.add('brainDumpReviewTypeLabel');
-            label.textContent = typeLabel;
-            section.appendChild(label);
-        }
-
-        const cards = tasks.map((draft) => {
-            const { element, read } = createTaskReviewCard(draft);
-            section.appendChild(element);
-            return { read };
+        appendReviewSection({
+            drafts: tasks,
+            buildCard: createTaskReviewCard,
+            commit: commitTasks,
+            sectionClass: 'brainDumpNewTaskReview',
+            addBtnLabel: 'Add checked tasks',
+            doneLabel: 'Added',
+            typeLabel
         });
-
-        const footer = document.createElement('div');
-        footer.classList.add('brainDumpTaskReviewFooter');
-
-        const status = document.createElement('p');
-        status.classList.add('brainDumpTaskReviewStatus');
-        footer.appendChild(status);
-
-        // Not a static count in the label - individual "Add" buttons on
-        // each card (see createTaskReviewCard) can change how many are
-        // actually still checked before this is ever clicked.
-        const addBtnLabel = 'Add checked tasks';
-        const addBtn = document.createElement('button');
-        addBtn.type = 'button';
-        addBtn.classList.add('brainDumpAddBtn');
-        addBtn.textContent = addBtnLabel;
-        addBtn.addEventListener('click', async () => {
-            const confirmed = cards.map((card) => card.read()).filter((draft) => draft.included && draft.text.trim());
-            if (confirmed.length === 0) {
-                status.textContent = 'Nothing checked to add.';
-                return;
-            }
-
-            addBtn.disabled = true;
-            addBtn.textContent = 'Adding...';
-            try {
-                await commitTasks(confirmed);
-                section.innerHTML = '';
-                const done = document.createElement('p');
-                done.classList.add('brainDumpTaskReviewDone');
-                done.textContent = confirmed.length === 1 ? 'Added 1 task.' : `Added ${confirmed.length} tasks.`;
-                section.appendChild(done);
-                scrollToBottom();
-            } catch (error) {
-                console.error('Failed to add brain-dump tasks:', error);
-                addBtn.disabled = false;
-                addBtn.textContent = addBtnLabel;
-                status.textContent = 'Could not add those - try again.';
-            }
-        });
-        footer.appendChild(addBtn);
-
-        section.appendChild(footer);
-        messagesEl.appendChild(section);
-        scrollToBottom();
     }
 
     // "Edit an existing task" draft - only ever populated when the user
@@ -1506,27 +1562,20 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
 
         // subtasks is a full REPLACEMENT of the task's step list (the
         // Worker's prompt tells Dusty to carry forward any existing step it
-        // has no reason to change, not just the ones the user asked about),
-        // so the review card shows exactly that - editable, one step per
-        // line, same control as the new-task card's subtasks field.
+        // has no reason to change, including its own dueAt, not just the
+        // ones the user asked about), so the review card shows exactly
+        // that - editable per-step rows, same control (and the same
+        // per-step deadline button) as the new-task card's subtasks field.
         if (Object.prototype.hasOwnProperty.call(draft, 'subtasks') && Array.isArray(draft.subtasks)) {
-            const row = document.createElement('label');
+            const row = document.createElement('div');
             row.classList.add('brainDumpTaskEditRow', 'brainDumpTaskEditSubtasksRow');
             const labelSpan = document.createElement('span');
             labelSpan.textContent = 'Steps';
             row.appendChild(labelSpan);
-            const subtasksInputEl = document.createElement('textarea');
-            subtasksInputEl.classList.add('brainDumpTaskCardSubtasks');
-            subtasksInputEl.placeholder = 'Steps (one per line)';
-            subtasksInputEl.value = draft.subtasks.filter(Boolean).join('\n');
-            const resizeSubtasksInput = () => {
-                subtasksInputEl.rows = Math.min(8, Math.max(2, subtasksInputEl.value.split('\n').length));
-            };
-            resizeSubtasksInput();
-            subtasksInputEl.addEventListener('input', resizeSubtasksInput);
-            row.appendChild(subtasksInputEl);
+            const subtasksEditor = createSubtaskRowsEditor(draft.subtasks);
+            row.appendChild(subtasksEditor.element);
             fields.appendChild(row);
-            fieldReaders.subtasks = () => subtasksInputEl.value.split('\n').map((line) => line.trim()).filter(Boolean);
+            fieldReaders.subtasks = () => subtasksEditor.read();
         }
 
         card.appendChild(header);

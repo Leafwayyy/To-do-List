@@ -848,15 +848,21 @@ function commitAiTasksSolo(draftTasks) {
         // Same "needs a dueAt to repeat from" rule manual entry already
         // follows - a recurrence with no deadline would silently never fire.
         const recurrence = dueAt ? getValidRecurrenceValue(draft.recurrence) : null;
+        // draft.subtasks entries are {text, dueAt} objects (see the
+        // Worker's SUBTASK_ITEM_SCHEMA) - a bare string is tolerated
+        // defensively (same normalizeDraftSubtasks reasoning brain-dump.js
+        // uses) but shouldn't come from a real AI draft going forward.
         const subtasks = (Array.isArray(draft.subtasks) ? draft.subtasks : [])
-            .map((subtaskText) => (subtaskText || '').trim())
-            .filter(Boolean)
+            .map((entry) => (typeof entry === 'string' ? { text: entry, dueAt: null } : { text: entry?.text, dueAt: entry?.dueAt }))
+            .map((entry) => ({ ...entry, text: (entry.text || '').trim() }))
+            .filter((entry) => entry.text)
             .slice(0, 200)
-            .map((subtaskText) => ({
+            .map((entry) => ({
                 id: generateSubtaskId(),
-                text: subtaskText.slice(0, 240),
+                text: entry.text.slice(0, 240),
                 completed: false,
-                createdAt: timestamp
+                createdAt: timestamp,
+                dueAt: entry.dueAt && isValidDateValue(entry.dueAt) ? new Date(entry.dueAt).toISOString() : null
             }));
 
         tasks.push({

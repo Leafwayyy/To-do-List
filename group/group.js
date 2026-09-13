@@ -189,16 +189,20 @@ async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, re
     const validTaskType = getValidTaskType(taskType);
     // Optional - manual entry never passes this, so it defaults to [] same
     // as before; Brain Dump's commitAiTasksGroup is the only caller that
-    // populates it (see brain-dump.js).
+    // populates it (see brain-dump.js). Entries are {text, dueAt} objects
+    // (see the Worker's SUBTASK_ITEM_SCHEMA) - a bare string is tolerated
+    // defensively but shouldn't come from a real AI draft going forward.
     const initialSubtasks = (Array.isArray(subtasks) ? subtasks : [])
-        .map((subtaskText) => (subtaskText || '').trim())
-        .filter(Boolean)
+        .map((entry) => (typeof entry === 'string' ? { text: entry, dueAt: null } : { text: entry?.text, dueAt: entry?.dueAt }))
+        .map((entry) => ({ ...entry, text: (entry.text || '').trim() }))
+        .filter((entry) => entry.text)
         .slice(0, 200)
-        .map((subtaskText) => ({
+        .map((entry) => ({
             id: generateSubtaskId(),
-            text: subtaskText.slice(0, 240),
+            text: entry.text.slice(0, 240),
             completed: false,
-            createdAt: timestamp
+            createdAt: timestamp,
+            dueAt: entry.dueAt && isValidDateValue(entry.dueAt) ? new Date(entry.dueAt).toISOString() : null
         }));
 
     await setDoc(doc(db(), 'groups', groupId, 'tasks', generateTaskId()), {

@@ -87,10 +87,9 @@ Never let "tasks" be empty AND "reply" say nothing useful (no questions, no answ
 
 FOR EVERY TASK YOU DO PROPOSE, reason carefully about these two fields - don't leave them blank/empty out of laziness, they matter for good prioritization:
 - dueAt: when it must be DONE BY. Reason from context even with no date stated outright - if the message mentions a fixed event (a class, an appointment), anything that needs to happen before that event is due at or before that event's start ("find a quiet place before my 9:30am class" is due by 9:30am). A prep task for tomorrow is due tonight or before tomorrow's event, not left blank. Only leave it null if there's truly no anchoring event or stated timeframe AND (per step 2/3) you've asked about it instead of guessing.
-- subtasks: if a task realistically has a few concrete steps (e.g. "prepare for my first day" implies packing a bag, checking the syllabus, finding the classroom), list 2-6 short ones. An empty array is fine ONLY for genuinely single-step tasks - don't skip this by default, actually check whether the task has real sub-steps first.
-
+- subtasks: if a task realistically has a few concrete steps (e.g. "prepare for my first day" implies packing a bag, checking the syllabus, finding the classroom), list 2-6 short ones, each an object {"text": ..., "dueAt": ...}. An empty array is fine ONLY for genuinely single-step tasks - don't skip this by default, actually check whether the task has real sub-steps first. Leave each step's own dueAt null in the ordinary case - it exists so an individual step can carry its OWN deadline, separate from the task's overall one, when the user's message actually describes per-step timing (e.g. "read chapter 1 by Monday, chapter 2 by Wednesday, chapter 3 by Friday" - three steps, three different dueAt values, spread across the days the user actually named). Don't invent per-step dates that weren't asked for just because the task has multiple steps - most tasks' steps stay null and are only paced by the task's own single deadline.
 EXAMPLE - message: "tomorrow is my first day at university, I have an english class online 9:30-10:45am, then nothing until my 12-1pm CS tutorial, and I want to start working out for the first time at the gym."
-Good tasks this turn: [{"text":"Prepare for first day of classes","dueAt":"<tonight or before 9:30am tomorrow>","subtasks":["Pack bag/laptop/notebook","Check syllabus for both classes","Test the online class link works"],...}, {"text":"Find a quiet spot on campus for the online English class","dueAt":"<before 9:30am tomorrow>","subtasks":[],...}]. Left OUT this turn (genuinely ambiguous): the gym task - do they have workout clothes/a gym pass, what time. Good reply: "Added prep for tomorrow and finding a study spot before your 9:30 class. For the gym - do you already have workout gear and a membership sorted, or do you need to handle that first? And were you thinking of going during your break, or after your day's done?"
+Good tasks this turn: [{"text":"Prepare for first day of classes","dueAt":"<tonight or before 9:30am tomorrow>","subtasks":[{"text":"Pack bag/laptop/notebook","dueAt":null},{"text":"Check syllabus for both classes","dueAt":null},{"text":"Test the online class link works","dueAt":null}],...}, {"text":"Find a quiet spot on campus for the online English class","dueAt":"<before 9:30am tomorrow>","subtasks":[],...}]. Left OUT this turn (genuinely ambiguous): the gym task - do they have workout clothes/a gym pass, what time. Good reply: "Added prep for tomorrow and finding a study spot before your 9:30 class. For the gym - do you already have workout gear and a membership sorted, or do you need to handle that first? And were you thinking of going during your break, or after your day's done?"
 
 For each proposed task, fill in:
 - text: a short, clear task description (not a copy of the whole message)
@@ -101,7 +100,7 @@ For each proposed task, fill in:
 - dueAt: an ISO 8601 datetime string per the reasoning above (resolve relative dates like "tomorrow" or "next Friday" against the current time given below), or null only per the rule above
 - scheduledAt: an ISO 8601 datetime string only if the user said specifically when they plan to work on it, otherwise null
 - recurrence: 'daily', 'weekly', 'monthly', or null. Set this whenever the user's own words describe the task as repeating or ongoing, not a one-time thing - "every day", "every morning", "each week", "workout routine", "daily habit", "every Monday" (weekly), "once a month" all count, even without the word "repeat" itself. A recurring task NEEDS a dueAt to repeat from (the first occurrence) - if the user describes something as repeating but gave no anchoring time at all, treat the timing as under-specified per STEP 2/3 (ask, don't guess a time just to force a recurrence through) rather than setting recurrence with dueAt left null, since it would silently do nothing.
-- subtasks: array of short subtask strings per the guidance above, or [] only for genuinely single-step tasks
+- subtasks: array of {"text", "dueAt"} objects per the guidance above, or [] only for genuinely single-step tasks
 
 EDITING EXISTING TASKS - a separate capability from proposing new ones. You may propose "taskEdits" (changes to a task that ALREADY EXISTS, from the workload list below) when the user's CURRENT message clearly asks to change something about a specific existing task (e.g. "push my dentist appointment to Friday", "mark the grocery run as done", "that report is actually pretty hard, bump the difficulty up", "clear the deadline on the laundry task"). Never propose one as a side effect of a general planning/brain-dump message, never because you think a task's priority looks off, never unprompted - only when the user is clearly asking to change that specific task right now.
 
@@ -109,7 +108,9 @@ THE HARD RULE: only propose an edit for a task that is unambiguously identifiabl
 
 Only include the specific field(s) actually changing in each taskEdits item - never restate a field that isn't part of what the user asked to change. To explicitly clear a deadline or schedule, set that field to null; to leave a field untouched, omit it from the item entirely.
 
-subtasks is a full REPLACEMENT of the task's step list, not a merge - the task list above shows each task's current steps (and which are already done) specifically so you can do this well. When the user asks to change/add/remove one or a few steps, include the COMPLETE new list: repeat back every existing step you have no reason to change exactly as given, and only actually add/remove/reword the specific one(s) the user asked about - dropping an unrelated step by leaving it out of the array would delete it, which is never the intent unless the user asked to remove it. Only propose subtasks when the user is clearly asking to change this task's steps specifically, same "only when clearly asked" rule as every other edit here. Unlike a brand new task's subtasks (2-6 short ones per the guidance above), an EDIT'S subtasks list has no such cap - if the user is asking you to break an existing task down into everything it actually involves (e.g. "add proper steps for each part of this"), give it as many real, concrete steps as that genuinely takes, one per step, however many that is.
+subtasks is a full REPLACEMENT of the task's step list, not a merge - the task list above shows each task's current steps, whether each is already done, AND each step's own dueAt if it has one, specifically so you can do this well. Each item is an object {"text", "dueAt"}, same shape as a new task's subtasks. When the user asks to change/add/remove one or a few steps, include the COMPLETE new list: repeat back every existing step you have no reason to change EXACTLY as given, both its text and its existing dueAt (copy that value forward, don't null it out just because you're not the one touching it right now), and only actually add/remove/reword/re-date the specific one(s) the user asked about - dropping an unrelated step by leaving it out of the array would delete it, which is never the intent unless the user asked to remove it, and silently clearing a step's existing deadline by forgetting to carry its dueAt forward is just as much an unintended data loss. Only propose subtasks when the user is clearly asking to change this task's steps specifically, same "only when clearly asked" rule as every other edit here. Unlike a brand new task's subtasks (2-6 short ones per the guidance above), an EDIT'S subtasks list has no such cap - if the user is asking you to break an existing task down into everything it actually involves (e.g. "add proper steps for each part of this"), give it as many real, concrete steps as that genuinely takes, one per step, however many that is.
+
+A step's own dueAt is where "spread this out instead of leaving it all for one deadline" actually happens - it's a real, independent deadline the app tracks on its own (it'll surface in Today/Overdue and on the Calendar the moment that specific step's date gets close, even while the task's overall deadline is still weeks off). Set one whenever the user is explicitly pacing a breakdown across days ("space these out this week", "do two chapters a day", "chapter 1 by Monday, chapter 2 by Wednesday"), or when they ask you to add proper/detailed steps for something that clearly has to happen across more than one day to hit the real deadline - reason backward from the task's own dueAt the same way you'd reason about the task's own timing, so the LAST step's dueAt lands at or before the task's deadline, not after it. Leave a step's dueAt null when the user didn't ask for that kind of pacing - most step edits are just about the steps' text, not a schedule.
 
 text (the task's own title) MUST stay a short, single-line label, the same as any new task's text field - never a paragraph, never a list, never multiple items run together. If the user's request produces a lot of structured detail (a syllabus, a multi-part breakdown, several stages), that detail belongs entirely in subtasks (one item per line), never appended to or replacing text with something long. If you notice your own draft answer for text would run more than roughly a dozen words, that is a sign the content belongs in subtasks instead - restart it as a short title and move the detail there.
 
@@ -327,10 +328,11 @@ function describeContextTask(task, includeId) {
     if (task.owner) parts.push(`assigned to ${task.owner}`);
     // Needed for the EDITING EXISTING TASKS "subtasks" capability - the
     // model can't sensibly rewrite a step list (carrying forward whatever
-    // it has no reason to change) if it can't see what's already there.
+    // it has no reason to change, including each step's own dueAt if it
+    // has one) if it can't see what's already there.
     if (Array.isArray(task.subtasks) && task.subtasks.length > 0) {
         const stepList = task.subtasks
-            .map((subtask) => `${subtask.completed ? '[done] ' : ''}${String(subtask.text || '').slice(0, 120)}`)
+            .map((subtask) => `${subtask.completed ? '[done] ' : ''}${String(subtask.text || '').slice(0, 120)}${subtask.dueAt ? ` (due ${subtask.dueAt})` : ''}`)
             .join(' | ');
         parts.push(`steps: ${stepList}`);
     }
@@ -547,6 +549,23 @@ function buildGeminiRequest(body) {
     const includeTeammateFeatures = body.context === 'group' && Boolean(currentGroupId);
     const teammateInstruction = includeTeammateFeatures ? TEAMMATE_INSTRUCTION : '';
 
+    // Shared by tasks[].subtasks and taskEdits[].subtasks below, so the two
+    // never drift into different shapes. dueAt is required (not just
+    // optional/omittable) for the same reason the top-level task dueAt is
+    // required, not omittable - a per-item omit-vs-explicit-null convention
+    // across a whole array is a subtler thing to get reliably right than
+    // the same convention on a single top-level field, so this keeps the
+    // simpler, already-proven "always decide, null is a real answer"
+    // contract instead of introducing a new one just for array items.
+    const SUBTASK_ITEM_SCHEMA = {
+        type: 'OBJECT',
+        properties: {
+            text: { type: 'STRING' },
+            dueAt: { type: 'STRING', nullable: true }
+        },
+        required: ['text', 'dueAt']
+    };
+
     const properties = {
         reply: { type: 'STRING' },
         tasks: {
@@ -567,7 +586,7 @@ function buildGeminiRequest(body) {
                     dueAt: { type: 'STRING', nullable: true },
                     scheduledAt: { type: 'STRING', nullable: true },
                     recurrence: { type: 'STRING', enum: ['daily', 'weekly', 'monthly'], nullable: true },
-                    subtasks: { type: 'ARRAY', items: { type: 'STRING' } }
+                    subtasks: { type: 'ARRAY', items: SUBTASK_ITEM_SCHEMA }
                 },
                 // dueAt/subtasks required (not just optional) so the model
                 // must explicitly commit to a value (even null/[]) every
@@ -622,7 +641,7 @@ function buildGeminiRequest(body) {
                     // Full replacement, not a merge - see the prompt's own
                     // "subtasks is a full REPLACEMENT" rule for why this
                     // isn't just the steps being added/removed.
-                    subtasks: { type: 'ARRAY', items: { type: 'STRING' } }
+                    subtasks: { type: 'ARRAY', items: SUBTASK_ITEM_SCHEMA }
                 },
                 required: ['taskId', 'taskPreview']
             }
