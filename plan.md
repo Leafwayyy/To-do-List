@@ -15,6 +15,59 @@
 > Don't re-assign anything here as new work - if you're auditing current UX,
 > start from a fresh look at the live UI instead of this doc's checkboxes.
 
+> **Per-item accuracy pass (2026-09-13, follow-up audit).** The banner above
+> was right about the commit series but was a git-log/citation check, not a
+> line-by-line one. This pass re-verified individual items directly against
+> the live code (not just commit messages) and found the picture is *mostly*
+> accurate with one real correction:
+>
+> - **0.1 (Dusty persistent label): NOT done as literally written, but the
+>   underlying problem is solved a different way.** There's still no visible
+>   text label under/beside the FAB in `app.html`/`group/index.html` (checked
+>   directly - only an `aria-label`/`title`, not on-screen text). Instead,
+>   `brain-dump.js` now auto-opens the brain-dump panel for a first-time
+>   visitor (`maybeAutoOpenForFirstVisit`, once ever via `dustyIntroSeen`) and
+>   shows recurring rotating idle-hint bubbles for everyone afterward
+>   (`scheduleIdleHint`/`showIdleHint`, replacing the old fixed-visibility bug
+>   documented in `offsetparent-fixed-position-bug`). That's a stronger fix
+>   for the same Jakob's-Law discoverability problem than a static label
+>   would have been. Don't re-add a persistent label without checking with
+>   whoever owns `brain-dump.js` first - it may be intentionally superseded.
+> - **0.2 (tour matrix/difficulty split): confirmed done** (verified
+>   independently by to-do-list-db this session).
+> - **0.3 (snooze text label): confirmed done.** `snoozeBtn` renders
+>   `<span class="taskBtnLabel">Snooze</span>` alongside the icon in both
+>   `script.js` and `group/group.js`, not just a hover title.
+> - **0.4 (plain-language subtitle for jargon): confirmed done.** A
+>   "Task Matrix" plain-language subtitle is present in `app.html`,
+>   `group/index.html`, `script.js`, and `group/group.js`.
+> - **0.5 + Navigation restructuring: confirmed done.** Checked `app.html`
+>   and `group/index.html` directly - the old always-on side column
+>   (Prioritize controls, activity heatmap, leaderboard, recently-finished)
+>   is gone; that content now lives behind `viewTabs` (solo: Tasks/Calendar/
+>   Activity; group: Tasks/Team/Calendar/Leaderboard/Activity), matching what
+>   the plan itself predicted ("collapse the side column" became "move it to
+>   its own view").
+> - **Code-level findings: still genuinely open, re-confirmed with fresh
+>   numbers, not stale.** Font-size: still ~17 distinct values from 8px to
+>   36px in `style.css` today. Border-radius: still 11+ distinct non-pill/
+>   non-circle pixel values. Color tokens: improved but not resolved - now
+>   270 `var(--violet...)` usages vs. 140 hardcoded violet `rgba(...)`
+>   literals (roughly 2:1 in favor of tokens, up from near 1:1), so real
+>   progress, just not the full consolidation the plan calls for. Icon
+>   consistency (deadline calendar vs. schedule clock): partially fixed -
+>   `script.js`'s task editor now uses `fa-solid` for both, but
+>   `brain-dump.js`'s Dusty-driven date pickers still mix `fa-regular
+>   fa-calendar` with `fa-solid fa-clock`. None of this is a surprise; it's
+>   exactly the pass the "Suggested order" section already defers to last,
+>   after structural changes settle.
+> - **Sections 1.2-1.4, 2.1, 2.3, 2.4, 3, 4 (per-row/per-panel craft
+>   details):** not independently re-checked pixel-by-pixel this pass. The
+>   commit series (steps 4c, 6, 7, 8a) covers this ground per git log with no
+>   sign of regression, but that's citation, not a fresh visual check -
+>   flag for whoever runs the code-level-findings cleanup pass, since it
+>   touches this same CSS anyway.
+
 Built from two inputs: the `ui-ux-design` skill (`.claude/skills/ui-ux-design/`, the 19 Laws of UX plus visual design fundamentals) applied against the actual current UI, and real feedback ("it's a bit unclear, had to really look around," compared unfavorably to ChatGPT's simplicity, praise for the deadline-vs-schedule tour copy and the "clicky and cool" feel). Every fix below cites the specific law or craft principle driving it, not general taste. This is a plan to review and prioritize, not a queue to execute top to bottom.
 
 ## How this is organized
