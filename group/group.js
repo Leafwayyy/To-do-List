@@ -669,6 +669,10 @@ let lastGroupRealtimeDayKey = null;
 
 let unsubscribeGroups = null;
 let unsubscribeTasks = null;
+// Which group unsubscribeTasks is actually subscribed to right now - lets
+// watchSelectedGroupTasks tell "the user switched groups" apart from
+// "something else about the groups list changed" (see the comment there).
+let watchedGroupId = null;
 let unsubscribeSuggestions = null;
 let unsubscribeHistory = null;
 let unsubscribeJoinRequests = null;
@@ -5145,7 +5149,18 @@ function watchSelectedGroupTasks() {
     }
 
     const group = getSelectedGroup();
-    hasLoadedGroupTasksOnce = false;
+    // Real bug found in review: this function doesn't only run when the
+    // user switches groups - subscribeToMyGroups's own onSnapshot callback
+    // calls it too, on any change to the groups list (a rename, a member
+    // joining, etc.) with the same group still selected. Unconditionally
+    // resetting the flag there discarded the real, already-loaded task
+    // list and flashed the skeleton rows for no reason. Only an actual
+    // switch to a different group (or to no group) should reset it.
+    const isActualGroupSwitch = (group?.id || null) !== watchedGroupId;
+    watchedGroupId = group?.id || null;
+    if (isActualGroupSwitch) {
+        hasLoadedGroupTasksOnce = false;
+    }
     if (!group) {
         groupTasks = [];
         groupHistoryEntries = [];

@@ -9368,9 +9368,19 @@ body.authGateActive .authOverlay{
     .landingMockLive::after{
         content: '';
         position: absolute;
+        /* Real bug found in review: no `top` (or transform) was set, so
+           this fell back to CSS's static-position fallback instead of
+           lining up with the flex-centered dot - it needs an explicit
+           vertical position same as the horizontal one below. Centered
+           via top:50%+margin instead of transform, since the pulse
+           animation's own transform:scale() already needs the full
+           property and scales outward from the element's default center
+           origin correctly once it starts from the right spot. */
+        top: 50%;
         left: var(--space-2);
         width: 6px;
         height: 6px;
+        margin-top: -3px;
         border-radius: 50%;
         background: var(--color-success);
         animation: livePing 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
