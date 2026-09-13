@@ -5186,7 +5186,43 @@ body.authChecking .userBadge{
     justify-content: center;
     overflow: hidden;
     overflow-y: auto;
-    padding-top: clamp(50px, 9vh, 100px);
+    /* Matches body's real clamp(12px, 2.6vh, 24px) top padding exactly -
+       an earlier version of this guessed at a much bigger value, which is
+       exactly why the title sat with a large gap above it that the real
+       page doesn't have. */
+    padding-top: clamp(12px, 2.6vh, 24px);
+}
+
+/* Fixed top-right placeholder mirroring the real .userBadge (position,
+   size, shape) exactly - the earlier skeleton omitted it entirely, even
+   though it's one of the first things visible on every real page. */
+.authSkeletonUserBadge{
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    z-index: 1901;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 30px;
+}
+
+.authSkeletonUserBadgeAvatar,
+.authSkeletonUserBadgePill{
+    background: linear-gradient(90deg, rgba(170, 152, 255, 0.14) 25%, rgba(170, 152, 255, 0.3) 37%, rgba(170, 152, 255, 0.14) 63%);
+    background-size: 400% 100%;
+}
+
+.authSkeletonUserBadgeAvatar{
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-circle);
+}
+
+.authSkeletonUserBadgePill{
+    height: 22px;
+    width: 64px;
+    border-radius: var(--radius-pill);
 }
 
 body.authChecking .authLoadingScreen{
@@ -5297,7 +5333,9 @@ body.authChecking .authLoadingScreen{
     .authSkeletonPillBtn,
     .authSkeletonCircleBtn,
     .authSkeletonTabPill,
-    .authSkeletonCard{
+    .authSkeletonCard,
+    .authSkeletonUserBadgeAvatar,
+    .authSkeletonUserBadgePill{
         animation: skeletonShimmer 1.6s ease-in-out infinite;
     }
 }
