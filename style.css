@@ -5242,9 +5242,31 @@ body.authChecking .authLoadingScreen{
 .authSkeletonPage{
     position: relative;
     z-index: 1;
-    width: min(600px, 92vw);
+    /* Matches .container's real, always-applying width exactly (see the
+       "Structural layout split" rule - it looks media-query-scoped to
+       1060px+ at a glance, but that's dead code superseded by this same
+       unconditional value at every viewport). Was hardcoded to a flat
+       600px before, so on any normal desktop window the real page (up to
+       1280px) rendered roughly half the real width - the "tiny centered
+       skeleton vs. full-width real content" bug. */
+    width: min(1280px, 97vw);
     display: flex;
     flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+/* The real page's actual content (title/input/cards/task rows) isn't
+   .container's full width either - at 1060px+ it's the main column of a
+   two-column grid (.appShell), narrower than .container itself. Not
+   attempting to replicate that grid's exact math here (a bigger lift than
+   a loading placeholder needs); this caps content at a plausible width
+   instead of either extreme (full 1280px or the old flat 600px). */
+.authSkeletonMain{
+    width: min(700px, 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     gap: 16px;
 }
 
@@ -5286,6 +5308,22 @@ body.authChecking .authLoadingScreen{
     height: 36px;
     border-radius: var(--radius-circle);
 }
+
+/* Placeholders for the two cards that sit between the input row and the
+   task list on the real page - the "Keep it up!" progress/streak card
+   (.motivatorContainer) and the "Do This Next" recommendation
+   (.nextTaskPanel). Both hidden/collapsed states aside, a returning user
+   with tasks already added sees both, so they belong in the preview. */
+.authSkeletonMotivatorCard,
+.authSkeletonNextTaskCard{
+    width: 92%;
+    border-radius: 10px;
+    background: linear-gradient(90deg, rgba(170, 152, 255, 0.1) 25%, rgba(170, 152, 255, 0.2) 37%, rgba(170, 152, 255, 0.1) 63%);
+    background-size: 400% 100%;
+}
+
+.authSkeletonMotivatorCard{ height: 64px; }
+.authSkeletonNextTaskCard{ height: 46px; }
 
 .authSkeletonTaskRows{
     list-style: none;
@@ -5335,7 +5373,9 @@ body.authChecking .authLoadingScreen{
     .authSkeletonTabPill,
     .authSkeletonCard,
     .authSkeletonUserBadgeAvatar,
-    .authSkeletonUserBadgePill{
+    .authSkeletonUserBadgePill,
+    .authSkeletonMotivatorCard,
+    .authSkeletonNextTaskCard{
         animation: skeletonShimmer 1.6s ease-in-out infinite;
     }
 }
