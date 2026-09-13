@@ -2091,25 +2091,19 @@ body{
        near-identical literal gradient (see .tasks li, .taskEditorCard,
        .brainDumpCard, .activityDetailsCard, .tourCard, .rewardCard,
        .authCard, .groupHistoryPanel, .leaderboardMemberModalCard,
-       .nextTaskPanel below).
-       Second attempt at "near-black cards" - the first attempt (see git
-       history) went near-black and got reverted as flat/lifeless, because
-       it tried to solve flatness by keeping a violet-tinted fill. This
-       time the fill goes genuinely neutral, and depth comes from real
-       elevation instead of color: a soft inset top highlight (a "glass
-       edge" catching light), a shadow tinted toward the page's own violet-
-       black rather than generic pure-black, and a boosted top-accent
-       border, since that hairline is now the one color signal per card
-       instead of competing with a colored fill. */
-    --card-1: rgba(23, 22, 27, 0.96);
-    --card-2: rgba(16, 15, 19, 0.97);
-    --card-3: rgba(9, 9, 12, 0.98);
-    --card-border: rgba(255, 255, 255, 0.07);
-    --card-top-accent: rgba(181, 139, 255, 0.72);
-    --card-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.05),
-        0 18px 40px -8px rgba(4, 2, 14, 0.55),
-        0 4px 10px -2px rgba(0, 0, 0, 0.4);
+       .nextTaskPanel below). Dark, but still a real violet gradient, not
+       a near-monochrome one - a near-black version of these tokens was
+       tried twice (see git history) and reverted both times as flat/
+       uglier, once with a colored fill and once with the fill neutral and
+       depth carried by shadow/border instead. Settled: the visible violet
+       gradient stays. Don't retry near-black here again without a
+       genuinely different approach, not just another shadow recipe. */
+    --card-1: rgba(42, 28, 88, 0.95);
+    --card-2: rgba(26, 17, 62, 0.96);
+    --card-3: rgba(12, 8, 42, 0.97);
+    --card-border: rgba(181, 139, 255, 0.22);
+    --card-top-accent: rgba(181, 139, 255, 0.55);
+    --card-shadow: 0 22px 54px rgba(0, 0, 0, 0.65);
 
     /* Subtle noise tile layered under body's background gradient - a tiny
        inline SVG (feTurbulence, alpha dropped to ~0.025 via feColorMatrix)
