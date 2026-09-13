@@ -98,7 +98,8 @@ const DUSTY_IDLE_HINTS_SOLO = [
     "Not sure what to focus on? Ask me what's most urgent.",
     "Need to add a bunch of tasks at once? I've got you.",
     'Plans changed? I can edit an existing task too, just ask.',
-    'Stuck on how to break a task down? I can suggest some steps.'
+    'Stuck on how to break a task down? I can suggest some steps.',
+    'Ask me what could go wrong with your week, and what to do about it.'
 ];
 const DUSTY_IDLE_HINTS_GROUP = [
     "Got a lot on your mind? Just tell me about it.",
@@ -106,7 +107,8 @@ const DUSTY_IDLE_HINTS_GROUP = [
     'I can suggest a task to a teammate for you, just ask.',
     "I can comment on a teammate's task too.",
     "Not sure what to focus on? Ask me what's most urgent.",
-    'Plans changed? I can edit an existing task too, just ask.'
+    'Plans changed? I can edit an existing task too, just ask.',
+    'Ask me what could go wrong with your week, and what to do about it.'
 ];
 // ~30s between hints, per explicit request (was ~15s) - kept a small
 // amount of jitter either side rather than a flat 30000 so it doesn't feel
