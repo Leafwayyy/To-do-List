@@ -2091,17 +2091,25 @@ body{
        near-identical literal gradient (see .tasks li, .taskEditorCard,
        .brainDumpCard, .activityDetailsCard, .tourCard, .rewardCard,
        .authCard, .groupHistoryPanel, .leaderboardMemberModalCard,
-       .nextTaskPanel below). Dark, but still a real violet gradient, not
-       a near-monochrome one - per feedback, going near-black flattened
-       these out more than intended; the ambient page background/orbs stay
-       quiet, but the cards themselves keep visible color and contrast
-       between their gradient stops. */
-    --card-1: rgba(42, 28, 88, 0.95);
-    --card-2: rgba(26, 17, 62, 0.96);
-    --card-3: rgba(12, 8, 42, 0.97);
-    --card-border: rgba(181, 139, 255, 0.22);
-    --card-top-accent: rgba(181, 139, 255, 0.55);
-    --card-shadow: 0 22px 54px rgba(0, 0, 0, 0.65);
+       .nextTaskPanel below).
+       Second attempt at "near-black cards" - the first attempt (see git
+       history) went near-black and got reverted as flat/lifeless, because
+       it tried to solve flatness by keeping a violet-tinted fill. This
+       time the fill goes genuinely neutral, and depth comes from real
+       elevation instead of color: a soft inset top highlight (a "glass
+       edge" catching light), a shadow tinted toward the page's own violet-
+       black rather than generic pure-black, and a boosted top-accent
+       border, since that hairline is now the one color signal per card
+       instead of competing with a colored fill. */
+    --card-1: rgba(23, 22, 27, 0.96);
+    --card-2: rgba(16, 15, 19, 0.97);
+    --card-3: rgba(9, 9, 12, 0.98);
+    --card-border: rgba(255, 255, 255, 0.07);
+    --card-top-accent: rgba(181, 139, 255, 0.72);
+    --card-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 18px 40px -8px rgba(4, 2, 14, 0.55),
+        0 4px 10px -2px rgba(0, 0, 0, 0.4);
 
     /* Subtle noise tile layered under body's background gradient - a tiny
        inline SVG (feTurbulence, alpha dropped to ~0.025 via feColorMatrix)
@@ -2605,22 +2613,30 @@ body::after{
     opacity: 1;
 }
 
-/* Main wrapper background - single source of truth (a duplicate, fully-
-   overwritten earlier pass with the same selector used to sit above this
-   one; removed rather than merged since every one of its properties was
-   already dead). */
-.container{
-    background:
-        linear-gradient(165deg, rgba(39, 24, 96, 0.94) 0%, rgba(22, 14, 62, 0.93) 38%, rgba(12, 8, 44, 0.94) 100%);
-}
+/* Correction to a claim made earlier in this same redesign pass: this was
+   called "single source of truth" for .container's background, but it
+   never actually was - a later, unconditional .container{background:
+   transparent; border:none; box-shadow:none;} rule (search for "Structural
+   layout split") has been winning the whole time, both before and after
+   that edit. Removed rather than left as dead weight. .container renders
+   no visible surface of its own at all; .tasks li/.motivatorContainer/
+   .taskDetailsPanel/etc. are the actual visible cards, floating directly
+   on the page's own background - not one big outer frame. */
 
+/* Same near-black-plus-accent-border recipe as the shared --card-* tokens
+   (.tasks li gets its own later, identical-in-spirit rule further down -
+   this covers the other primary panels so every visible surface on the
+   page reads as one consistent system, not several different violet
+   intensities). */
 .motivatorContainer,
 .activityPanel,
 .taskDetailsPanel.open,
-.urgencyAlert,
-.tasks li{
+.urgencyAlert{
     background:
-        linear-gradient(160deg, rgba(34, 22, 87, 0.82) 0%, rgba(23, 16, 66, 0.86) 52%, rgba(17, 11, 53, 0.88) 100%);
+        linear-gradient(160deg, var(--card-1) 0%, var(--card-2) 52%, var(--card-3) 100%);
+    border-color: var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    box-shadow: var(--card-shadow);
 }
 
 /* .priorityControls deliberately stays out of the gradient group above -
@@ -9104,6 +9120,33 @@ body.authGateActive .authOverlay{
     box-shadow: 0 0 0 3px var(--color-success-soft);
 }
 
+/* The dot earns an actual "live" pulse - a radar-ping ring expanding and
+   fading, the standard live/recording-indicator motion, not decoration
+   for its own sake: it's the one word on the page claiming to be live,
+   so it should look like it. transform+opacity only, and only runs when
+   motion is welcome. */
+@media (prefers-reduced-motion: no-preference){
+    .landingMockLive{
+        position: relative;
+    }
+
+    .landingMockLive::after{
+        content: '';
+        position: absolute;
+        left: var(--space-2);
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--color-success);
+        animation: livePing 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+    }
+
+    @keyframes livePing{
+        0%{ transform: scale(1); opacity: 0.7; }
+        75%, 100%{ transform: scale(2.8); opacity: 0; }
+    }
+}
+
 /* Real component reuse, not a mockup image - .tasks/.tasks li/.taskMeta/
    the badge classes are the app's own, unmodified. Perfect message match:
    the very first visual proof a visitor sees is pixel-identical to what
@@ -9139,6 +9182,22 @@ body.authGateActive .authOverlay{
 .landingRankBadge.rank-1{
     background: linear-gradient(135deg, #ffb3b3, var(--color-danger));
     color: #3a0d0d;
+}
+
+/* A slow breathing glow on #1 only - not decoration, it's pointing at the
+   actual claim on this page ("know exactly what to do next"): the eye
+   should land on the one thing ranked most urgent, without a single
+   scroll or click. Opacity/box-shadow only, no layout-affecting property,
+   so it can't cause jitter. */
+@media (prefers-reduced-motion: no-preference){
+    .landingRankBadge.rank-1{
+        animation: rankOnePulse 2.6s ease-in-out infinite;
+    }
+
+    @keyframes rankOnePulse{
+        0%, 100%{ box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.45); }
+        50%{ box-shadow: 0 0 0 6px rgba(255, 107, 107, 0); }
+    }
 }
 
 .landingRankBadge.rank-2{
