@@ -4924,8 +4924,6 @@ function refreshSubtaskDeadlineBadges(taskItem, task) {
 }
 
 function refreshDeadlineBadges() {
-    let notificationCandidate = null;
-
     tasksList.querySelectorAll('li').forEach((taskItem) => {
         const taskId = taskItem.dataset.taskId;
         if (!taskId) {
@@ -4964,7 +4962,24 @@ function refreshDeadlineBadges() {
 
         effortBadge.textContent = getEffortLabel(task);
         refreshSubtaskDeadlineBadges(taskItem, task);
+    });
 
+    notifyMostUrgentTask();
+}
+
+// Real bug: notification candidates used to be picked only from whatever
+// task rows were actually rendered in tasksList, which reflects the
+// active filter tab (getVisibleTasks/activeView) - a task sitting outside
+// today's filter (e.g. the Completed or Today tab left open while a
+// different task quietly goes overdue) was never even considered, so
+// popup alerts silently depended on which tab happened to be open rather
+// than working regardless. Scans every task the user has, not just the
+// ones currently on screen.
+function notifyMostUrgentTask() {
+    let notificationCandidate = null;
+
+    tasks.forEach((task) => {
+        const urgencyStatus = getTaskUrgencyStatus(task);
         if (!isNotifiableUrgency(task, urgencyStatus)) {
             return;
         }
