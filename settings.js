@@ -480,8 +480,19 @@
 
                 <section class="settingsSection">
                     <h3>Sound</h3>
+                    <!-- .toggleSwitch/.toggleSwitchTrack/.toggleSwitchThumb are styled in
+                         style.css, not this file's own injected <style> above - the one
+                         deliberate exception to this file's usual self-contained-styles
+                         convention, since style.css is already a hard dependency of every
+                         page this overlay ever renders on, and .metaVisibilityRow's
+                         difficulty-chip toggle (app.html, reparented into this same
+                         overlay below) needs to look identical, not a second hand-copied
+                         version that can drift out of sync. -->
                     <label class="settingsToggleRow" for="settingsMuteToggle">
-                        <input type="checkbox" id="settingsMuteToggle" class="settingsMuteToggle">
+                        <span class="toggleSwitch">
+                            <input type="checkbox" id="settingsMuteToggle" class="settingsMuteToggle">
+                            <span class="toggleSwitchTrack"><span class="toggleSwitchThumb"></span></span>
+                        </span>
                         <span>Mute click and completion sounds</span>
                     </label>
                 </section>

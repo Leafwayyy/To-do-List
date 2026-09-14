@@ -767,14 +767,12 @@ body{
 /* Now living in Settings (section A of the UI/UX rework - see settings.js's
    buildOverlay), so it's unconditionally visible there rather than only
    ≤900px the way it was in its old sideColumn spot - Settings itself is
-   reachable regardless of viewport. Matches .settingsToggleRow's own plain-
-   native-checkbox pattern (settings.js) rather than importing the old
-   sideColumn's bespoke pill-switch look, since consistency with its new
-   neighbor (the Mute toggle, right above it) matters more here than
-   preserving the old spot's own one-off styling. .settingsCard itself is
-   dark/violet (settings.js's injected styles), not light - the old
-   sideColumn version's #4d617f-family colors would have been unreadable
-   against it. */
+   reachable regardless of viewport. Uses the shared .toggleSwitch component
+   below (also used by settings.js's own Mute toggle, right above this one) -
+   an earlier version of this comment noted this matched .settingsToggleRow's
+   plain-native-checkbox look instead of the old sideColumn's bespoke pill
+   switch; direct feedback that a bare native checkbox "looks plain default"
+   reversed that call for both of them at once, not just this one. */
 .settingsAlertsSection .metaVisibilityRow{
     display: flex;
     align-items: center;
@@ -784,9 +782,82 @@ body{
     cursor: pointer;
 }
 
-.settingsAlertsSection .metaVisibilityRow input{
-    accent-color: var(--violet-accent, #b58bff);
+/* ===================================================================
+   Toggle switch - a real custom on/off control for boolean settings,
+   replacing what was a bare native checkbox with only accent-color
+   applied (looked like unstyled browser chrome next to everything else
+   in Settings - direct feedback). Standard hidden-input + track + thumb
+   structure (see app.html's .metaVisibilityRow and settings.js's own
+   Mute toggle markup for usage), not appearance:none plus pseudo-
+   elements on the <input> itself - ::before/::after support on <input>
+   is inconsistent across browsers, real sibling elements aren't. Lives
+   here rather than duplicated into settings.js's own injected <style>
+   (see the comment there) since style.css is already a hard dependency
+   of every page settings.js runs on - one canonical version beats two
+   that can quietly drift apart.
+   =================================================================== */
+.toggleSwitch{
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+    width: 40px;
+    height: 22px;
+}
+
+.toggleSwitch input{
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    margin: 0;
+    opacity: 0;
     cursor: pointer;
+}
+
+.toggleSwitchTrack{
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid var(--violet-border, rgba(181, 139, 255, 0.35));
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.toggleSwitchThumb{
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #f3f0ea;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease;
+}
+
+.toggleSwitch input:checked + .toggleSwitchTrack{
+    background: linear-gradient(135deg, var(--violet-accent, #b58bff), var(--violet-accent-2, #7f6fe8));
+    border-color: transparent;
+}
+
+.toggleSwitch input:checked + .toggleSwitchTrack .toggleSwitchThumb{
+    transform: translateX(18px);
+    background: #120b30;
+}
+
+.toggleSwitch input:hover + .toggleSwitchTrack{
+    border-color: var(--violet-accent, #b58bff);
+}
+
+.toggleSwitch input:focus-visible + .toggleSwitchTrack{
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(181, 139, 255, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce){
+    .toggleSwitchTrack,
+    .toggleSwitchThumb{
+        transition: none;
+    }
 }
 
 /* .alertToggleBtn's base rule (above) has margin-left:auto, meant to push it
