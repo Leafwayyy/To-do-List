@@ -193,6 +193,23 @@
                             </div>
                         </div>
 
+                        <!-- New-member catch-up: a one-time orientation card for
+                             someone who just joined an already-established group
+                             (never the owner, never shown twice - see
+                             renderNewMemberCatchUp/maybeShowNewMemberCatchUp in
+                             group.js). Its own bounded card, not folded into
+                             .groupOnboardingHint below - that one teaches the
+                             app itself, this one reports what already happened,
+                             a different message with a different lifetime. -->
+                        <div class="groupCatchUpCard hidden" role="note" aria-live="polite">
+                            <div class="groupCatchUpHeader">
+                                <span class="groupCatchUpIcon"><i class="fa-solid fa-compass" aria-hidden="true"></i></span>
+                                <p class="groupCatchUpTitle">Welcome to <span class="groupCatchUpGroupName"></span></p>
+                            </div>
+                            <p class="groupCatchUpText"></p>
+                            <button type="button" class="groupCatchUpDismissBtn">Got it</button>
+                        </div>
+
                         <div class="motivatorContainer">
                             <p class="motivatorText">Keep it up!</p>
                             <div class="progressBarContainer">

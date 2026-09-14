@@ -563,6 +563,10 @@ const navAttentionMenu = document.querySelector('.navAttentionMenu');
 const groupOnboardingHint = document.querySelector('.groupOnboardingHint');
 const groupOnboardingStartTourBtn = document.querySelector('.groupOnboardingStartTourBtn');
 const groupOnboardingDismissBtn = document.querySelector('.groupOnboardingDismissBtn');
+const groupCatchUpCard = document.querySelector('.groupCatchUpCard');
+const groupCatchUpGroupName = document.querySelector('.groupCatchUpGroupName');
+const groupCatchUpText = document.querySelector('.groupCatchUpText');
+const groupCatchUpDismissBtn = document.querySelector('.groupCatchUpDismissBtn');
 const groupWelcomeOverlay = document.querySelector('.groupWelcomeOverlay');
 const groupWelcomeNameInput = document.querySelector('.groupWelcomeNameInput');
 const groupWelcomeContinueBtn = document.querySelector('.groupWelcomeContinueBtn');
@@ -3939,6 +3943,7 @@ function renderApp() {
         renderMemberRoster(group, { isOwner, isAdmin });
         renderGroupLeaderboard(group);
         renderGroupHistory(group);
+        renderNewMemberCatchUp(group);
         renderSuggestForMemberBanner(group);
         renderSuggestionsForYou(group.id);
         renderGroupTasks();
@@ -4204,6 +4209,125 @@ function updateGroupUrgencyAlert() {
         const soonLabel = top.status.urgencyLevel === 'critical' ? 'Due very soon' : 'Due soon';
         groupUrgencyAlertText.textContent = `${soonLabel}: ${top.task.text} (${ownerLabel}, ${top.status.countdownLabel}).`;
     }
+}
+
+// Same subtask-aware urgency check updateGroupUrgencyAlert already uses,
+// factored out here rather than reading a shared variable, so this stays
+// correct independent of whatever order the two happen to run in during a
+// render (renderApp calls the urgency update separately from this card).
+function countGroupOverdueTasks() {
+    return groupTasks
+        .filter((task) => !task.completed)
+        .map((task) => getTaskUrgencyStatus(task))
+        .filter((status) => status.hasDeadline && status.urgencyLevel === 'overdue')
+        .length;
+}
+
+// New-member catch-up (C.4): a compact "here's what you've missed" summary,
+// built entirely from data already loaded for the dashboard itself (recent
+// completions, the all-time leader, the overdue count) - no new Firestore
+// reads. Capped at 3 short lines so it stays a glance, not a report; each
+// omitted when it wouldn't say anything real (e.g. no leader yet in a group
+// with only one completion logged).
+function buildCatchUpSummaryLines(group) {
+    const lines = [];
+
+    if (groupHistoryEntries.length > 0) {
+        const latest = groupHistoryEntries[0];
+        const who = latest.ownerId === currentUser?.uid ? 'You' : (latest.ownerName || 'A teammate');
+        lines.push(`${who} last finished "${latest.taskText}" ${formatFriendlyDateTime(new Date(latest.completedAt))}.`);
+    }
+
+    const memberIds = group.memberIds || [];
+    const memberNames = group.memberNames || [];
+    if (memberIds.length > 1 && groupHistoryEntries.length > 0) {
+        const counts = memberIds.map((memberId, index) => ({
+            memberId,
+            name: resolveMemberName(memberId, memberNames[index], groupTasks),
+            count: groupHistoryEntries.filter((entry) => entry.ownerId === memberId).length
+        })).sort((a, b) => b.count - a.count);
+        const leader = counts[0];
+        // Skip only the exact redundant case - the same person is both the
+        // most-recent completer (line above) AND the sole leader in a
+        // two-person group, where a second line would just restate the
+        // first. In a bigger group, "also leads the team" is still new
+        // information even about the same person, so it stays.
+        const wouldRestateFirstLine = memberIds.length === 2 && groupHistoryEntries[0]?.ownerId === leader?.memberId;
+        if (leader && leader.count > 0 && !wouldRestateFirstLine) {
+            const leaderLabel = leader.memberId === currentUser?.uid ? 'You' : leader.name;
+            const verb = leader.memberId === currentUser?.uid ? 'lead' : 'leads';
+            lines.push(`${leaderLabel} ${verb} the leaderboard with ${leader.count} task${leader.count === 1 ? '' : 's'} finished.`);
+        }
+    }
+
+    const overdueCount = countGroupOverdueTasks();
+    if (overdueCount > 0) {
+        lines.push(overdueCount === 1
+            ? '1 task across the group is currently overdue.'
+            : `${overdueCount} tasks across the group are currently overdue.`);
+    }
+
+    return lines.slice(0, 3);
+}
+
+// Eligible only for a member who (a) didn't create this group - nothing to
+// catch up on in a group you just made yourself, (b) has a real recorded
+// join time - memberJoinedAt is only ever set going forward from when this
+// feature shipped (see joinGroup/approveJoinRequest in groups-data.js), so
+// an existing member from before that never gets this retroactively, the
+// same "don't dump stale notifications on everyone at once" discipline this
+// plan's own C.1 section calls out for a different feature, (c) hasn't
+// already dismissed it for this group specifically, persisted server-side
+// (catchUpDismissed) rather than a local flag, so it can't refire on a
+// different device or after clearing site data, and (d) there's actually
+// something to report - a brand-new group a member is invited into within
+// seconds of its creation has nothing worth catching up on yet.
+function shouldShowNewMemberCatchUp(group) {
+    if (!currentUser || !group || group.ownerId === currentUser.uid) {
+        return false;
+    }
+    const joinedAt = group.memberJoinedAt && group.memberJoinedAt[currentUser.uid];
+    if (!joinedAt) {
+        return false;
+    }
+    if (group.catchUpDismissed && group.catchUpDismissed[currentUser.uid]) {
+        return false;
+    }
+    return groupHistoryEntries.length > 0 || countGroupOverdueTasks() > 0;
+}
+
+function renderNewMemberCatchUp(group) {
+    if (!groupCatchUpCard) {
+        return;
+    }
+    if (!shouldShowNewMemberCatchUp(group)) {
+        groupCatchUpCard.classList.add('hidden');
+        return;
+    }
+    if (groupCatchUpGroupName) {
+        groupCatchUpGroupName.textContent = group.name;
+    }
+    if (groupCatchUpText) {
+        groupCatchUpText.textContent = buildCatchUpSummaryLines(group).join('\n');
+    }
+    groupCatchUpCard.classList.remove('hidden');
+}
+
+if (groupCatchUpDismissBtn) {
+    groupCatchUpDismissBtn.addEventListener('click', () => {
+        playClickSound();
+        // Hide right away rather than waiting on the round-trip - the
+        // dismiss is a one-way, never-undone action (see
+        // dismissNewMemberCatchUp), so there's nothing the eventual
+        // snapshot update could disagree with once this write lands.
+        groupCatchUpCard?.classList.add('hidden');
+        const group = getSelectedGroup();
+        if (group && currentUser) {
+            dismissNewMemberCatchUp(group.id, currentUser.uid).catch((error) => {
+                console.error('Failed to dismiss the catch-up card:', error);
+            });
+        }
+    });
 }
 
 function loadGroupSettings() {

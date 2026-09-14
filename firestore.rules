@@ -164,7 +164,14 @@ service cloud.firestore {
         && (
           (
             (resource.data.privacy == 'open' || !('privacy' in resource.data))
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames'])
+            // memberJoinedAt is allowed here too (a dot-path write from the
+            // client only ever touches your own key in it - see joinGroup
+            // in groups-data.js) but not deeply validated key-by-key, same
+            // trust level memberNames' actual string contents already get
+            // below; it's informational (drives a friendly one-time UI
+            // card), not access-gating, so that's an intentional choice,
+            // not an oversight.
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames', 'memberJoinedAt'])
             && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
             && request.resource.data.memberNames.size() == request.resource.data.memberIds.size()
             && request.auth.uid in request.resource.data.memberIds
@@ -216,7 +223,11 @@ service cloud.firestore {
           // this can't be used to add an arbitrary uid out of nowhere.
           || (
             isOwnerOrAdmin(resource.data)
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames'])
+            // memberJoinedAt allowed here too - same reasoning as the direct-
+            // join branch above (approveJoinRequest in groups-data.js sets
+            // it, dot-path, for the requester being approved in this same
+            // write).
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames', 'memberJoinedAt'])
             && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
             && request.resource.data.memberNames.size() == request.resource.data.memberIds.size()
             && request.resource.data.memberIds.hasAll(resource.data.memberIds)
@@ -268,6 +279,21 @@ service cloud.firestore {
             request.auth.uid == resource.data.ownerId
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['privacy'])
             && request.resource.data.privacy in ['open', 'invite-only', 'closed']
+          )
+          // Dismissing your own new-member catch-up card: any member may
+          // update ONLY catchUpDismissed, and only ever set their OWN uid's
+          // entry (never anyone else's, never someone else's card) to true.
+          // Not membership-only trust the way memberJoinedAt above is - this
+          // one gates a real never-comes-back state, so it's actually
+          // validated key-by-key via a map diff of its own, not just a
+          // top-level affectedKeys() check.
+          || (
+            request.auth.uid in resource.data.memberIds
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['catchUpDismissed'])
+            && request.resource.data.catchUpDismissed[request.auth.uid] == true
+            && request.resource.data.catchUpDismissed
+                .diff(('catchUpDismissed' in resource.data) ? resource.data.catchUpDismissed : {})
+                .affectedKeys().hasOnly([request.auth.uid])
           )
         );
 

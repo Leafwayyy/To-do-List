@@ -110,7 +110,16 @@ async function createGroup(name, user, privacy = 'open') {
                 inviteCode: code,
                 privacy: normalizedPrivacy,
                 adminIds: [],
-                createdAt: serverTimestamp()
+                createdAt: serverTimestamp(),
+                // Recorded for every member (owner included, here) so the
+                // new-member catch-up card (see maybeShowNewMemberCatchUp in
+                // group.js) can tell "joined before this feature existed" -
+                // no entry at all - from a real join it should react to.
+                // The owner never sees that card regardless (nothing to
+                // catch up on in a group you just created), but gets an
+                // entry too for consistency, in case anything else ever
+                // wants "member since" per person.
+                memberJoinedAt: { [user.uid]: serverTimestamp() }
             });
             return code;
         } catch (error) {
@@ -138,11 +147,16 @@ async function joinGroup(code, user) {
         throw new Error('Enter an invite code.');
     }
 
-    const { doc, updateDoc, arrayUnion } = fs();
+    const { doc, updateDoc, arrayUnion, serverTimestamp } = fs();
     try {
         await updateDoc(doc(db(), 'groups', normalizedCode), {
             memberIds: arrayUnion(user.uid),
-            memberNames: arrayUnion(displayNameFor(user))
+            memberNames: arrayUnion(displayNameFor(user)),
+            // Dot-path so this only ever adds/overwrites your own entry in
+            // the map, never touching anyone else's - see the new-member
+            // catch-up card's gating in group.js for why this needs to be
+            // real, per-member, server-side data rather than a client flag.
+            [`memberJoinedAt.${user.uid}`]: serverTimestamp()
         });
         return { groupId: normalizedCode, status: 'joined' };
     } catch (directJoinError) {
@@ -176,11 +190,16 @@ async function requestToJoinGroup(code, user) {
 // member and clears their request in one batch, so a partial failure can't
 // leave them "approved" without membership or "pending" without a request.
 async function approveJoinRequest(groupId, requesterUid, requesterName) {
-    const { doc, writeBatch, arrayUnion } = fs();
+    const { doc, writeBatch, arrayUnion, serverTimestamp } = fs();
     const batch = writeBatch(db());
     batch.update(doc(db(), 'groups', groupId), {
         memberIds: arrayUnion(requesterUid),
-        memberNames: arrayUnion(requesterName)
+        memberNames: arrayUnion(requesterName),
+        // Same reasoning as joinGroup's direct-join path - the requester is
+        // becoming a real member right now, in this write, so this is the
+        // correct moment to record it, not whenever they first happen to
+        // load the dashboard afterward.
+        [`memberJoinedAt.${requesterUid}`]: serverTimestamp()
     });
     batch.delete(doc(db(), 'groups', groupId, 'joinRequests', requesterUid));
     await batch.commit();
@@ -268,6 +287,19 @@ async function setGroupPrivacy(groupId, privacy) {
     }
     const { doc, updateDoc } = fs();
     await updateDoc(doc(db(), 'groups', groupId), { privacy });
+}
+
+// Any member dismissing their own new-member catch-up card (group.js) -
+// dot-path so the write can only ever touch your own entry in the map,
+// never anyone else's (enforced again, for real, by the security rule -
+// this client-side shape just has to match what that rule expects). Once
+// true, this never gets unset - there's no "un-dismiss" path anywhere in
+// the app, by design, since the whole point is "never reappear."
+async function dismissNewMemberCatchUp(groupId, uid) {
+    const { doc, updateDoc } = fs();
+    await updateDoc(doc(db(), 'groups', groupId), {
+        [`catchUpDismissed.${uid}`]: true
+    });
 }
 
 // Rebuilds memberIds/memberNames with your own entry spliced out (rather

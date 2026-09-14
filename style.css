@@ -8225,6 +8225,87 @@ body.authGateActive .authOverlay{
     color: var(--violet-text);
 }
 
+/* New-member catch-up card (C.4) - same card-token family .nextTaskPanel
+   already established (gradient body, accent top border) so it reads as
+   part of the same visual system, not a one-off; the icon badge in its
+   own header row is what actually differentiates it from that panel and
+   from .groupOnboardingHint below, since this is a distinct message (what
+   already happened) with a distinct lifetime (once, ever, per member,
+   never the tutorial-style "haven't dismissed this session" reset). */
+.groupCatchUpCard{
+    position: relative;
+    width: 92%;
+    margin-top: 10px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--card-border);
+    border-top: 2px solid var(--card-top-accent);
+    background: linear-gradient(155deg, var(--card-1), var(--card-2));
+}
+
+.groupCatchUpCard.hidden{
+    display: none;
+}
+
+.groupCatchUpHeader{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.groupCatchUpIcon{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--violet-accent), var(--violet-accent-2));
+    color: #120b30;
+    font-size: 12px;
+}
+
+.groupCatchUpTitle{
+    margin: 0;
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--violet-text);
+}
+
+.groupCatchUpGroupName{
+    color: var(--violet-accent);
+}
+
+.groupCatchUpText{
+    margin: 0 0 10px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--violet-muted);
+    /* Each fact (recent completion, current leader, overdue count) is its
+       own line - a joined \n\n from group.js's buildCatchUpSummaryLines,
+       not one run-together sentence - so it reads as a short scannable
+       list, not a paragraph to parse. */
+    white-space: pre-line;
+}
+
+.groupCatchUpDismissBtn{
+    height: 30px;
+    padding: 0 14px;
+    border: 1px solid rgba(221, 208, 255, 0.75);
+    border-radius: 999px;
+    background: rgba(233, 222, 255, 0.2);
+    color: #f8f3ff;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.groupCatchUpDismissBtn:hover{
+    background: rgba(245, 238, 255, 0.28);
+}
+
 .memberRoster{
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
