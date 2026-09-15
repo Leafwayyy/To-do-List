@@ -357,6 +357,27 @@ service cloud.firestore {
         // never the task's real content - which is what lets the
         // unread-comments indicator work off the already-loaded task list
         // instead of a listener per task.
+        //
+        // Security review fix: this used to accept ANY value for
+        // commentCount/lastCommentAt as long as no other field changed, so
+        // any group member could set commentCount to an arbitrary number
+        // (hide real unread comments by zeroing it, or fake activity with a
+        // huge one) and fake lastCommentAt to any timestamp. Now split into
+        // two shapes: a real add/delete only ever moves commentCount by
+        // exactly 1 and, if it also touches lastCommentAt, that value must
+        // be request.time (a real server timestamp, not client-supplied) -
+        // matches addComment/deleteComment in group.js exactly. The second
+        // shape is healCommentCountIfStale's one-field correction (comments
+        // that predate this counter never bumped it, so the stored number
+        // can be stale) - commentCount-only, any integer value (see the
+        // branch's own comment for why there's no floor), still can't touch
+        // lastCommentAt or the task's real content. Rules
+        // can't cheaply verify commentCount against the actual comments
+        // subcollection size, so a member using this second shape as cover
+        // could still write a plausible-but-wrong count; closing that fully
+        // would need a server-authoritative counter (a Cloud Function),
+        // out of scope here - this closes the actual reported gap (an
+        // arbitrary value combined with a faked "just happened" timestamp).
         allow update: if request.auth != null
           && (
             (
@@ -368,7 +389,33 @@ service cloud.firestore {
             )
             || (
               request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
-              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount', 'lastCommentAt'])
+              && (
+                (
+                  // No >= 0 floor here on purpose: deleteComment's
+                  // increment(-1) on a task whose stored count predates
+                  // this counter (never incremented for old comments, see
+                  // healCommentCountIfStale's own comment) can legitimately
+                  // go negative, and this is a batched write together with
+                  // the comment doc's own delete - rejecting it here would
+                  // fail that whole batch, undoing a real delete over a
+                  // cosmetic display number. Just requires it stay an int,
+                  // not the task's real content.
+                  request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount'])
+                  && request.resource.data.commentCount is int
+                )
+                || (
+                  request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount', 'lastCommentAt'])
+                  && request.resource.data.commentCount is int
+                  && (
+                    request.resource.data.commentCount == resource.data.commentCount + 1
+                    || request.resource.data.commentCount == resource.data.commentCount - 1
+                  )
+                  && (
+                    !('lastCommentAt' in request.resource.data.diff(resource.data).affectedKeys())
+                    || request.resource.data.lastCommentAt == request.time
+                  )
+                )
+              )
             )
           );
         allow delete: if request.auth != null && request.auth.uid == resource.data.ownerId;
@@ -407,12 +454,25 @@ service cloud.firestore {
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 240;
         // Only the person the suggestion is FOR can accept/dismiss it, and
-        // only the status field changes - they can't rewrite what was
-        // suggested.
+        // only status + resolvedAt change together - they can't rewrite
+        // what was suggested. resolvedAt (a real server timestamp, not
+        // status alone) is what group.js's suggestionOutcomesCount gates
+        // on, so a suggestion resolved before this field existed is never
+        // mistaken for a fresh outcome - see the C.1 plan's Risks section.
         allow update: if request.auth != null
           && request.auth.uid == resource.data.forUserId
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
-          && request.resource.data.status in ['accepted', 'dismissed'];
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'resolvedAt'])
+          && request.resource.data.status in ['accepted', 'dismissed']
+          && request.resource.data.resolvedAt is timestamp;
+        // The original sender marking a resolved outcome as seen - the
+        // only field they're ever allowed to touch, and only once the
+        // recipient has actually acted (status != 'pending'), so a sender
+        // can't use this to pre-clear their own notification before that.
+        allow update: if request.auth != null
+          && request.auth.uid == resource.data.fromUserId
+          && resource.data.status != 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acknowledgedBySender'])
+          && request.resource.data.acknowledgedBySender == true;
         // Either side of a still-pending suggestion can retract/clear it;
         // once acted on, it stays as a record.
         allow delete: if request.auth != null

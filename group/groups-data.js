@@ -18,7 +18,18 @@ const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 // cryptographically strong source, and an invite code is effectively a
 // short-lived credential (whoever has it can join the group), so it
 // shouldn't be guessable/predictable even in principle.
-function generateInviteCode(length = 6) {
+//
+// Security review fix: was length 6, which against this 32-character
+// alphabet is only 32^6 (~1.07 billion) possible codes - for an 'open'
+// group, knowing the code is the entire join check (firestore.rules'
+// self-join branch), so that's a real, if impractical-but-not-negligible,
+// enumeration target for a bot with no invitation at all. 8 chars raises
+// it to 32^8 (~1.1 trillion), the same defense-in-depth reasoning as the
+// crypto.getRandomValues choice above, without changing anything else
+// about the code (still typeable, still no join input length limit to
+// update). Existing 6-char groups are unaffected - this only changes
+// codes generated for new groups from here on.
+function generateInviteCode(length = 8) {
     const randomValues = new Uint32Array(length);
     crypto.getRandomValues(randomValues);
     let code = '';
