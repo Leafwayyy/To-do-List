@@ -7059,32 +7059,35 @@ body.authGateActive .authOverlay{
     color: rgba(217, 206, 255, 0.55);
 }
 
-/* Per-step rows for a review card's subtasks - replaced the old plain
-   one-line-per-step textarea specifically so a step can carry its own
-   deadline, same clock-button pattern as the real task list's own
-   .subtaskDeadlineBtn (script.js/group.js), just restyled to match this
-   card's own dark-purple palette instead of reusing those classes directly. */
-.brainDumpSubtaskRowsWrap{
+/* Per-step draft rows with their own deadline - originally built for Dusty's
+   review cards only (createSubtaskRowsEditor lived in brain-dump.js), now
+   moved into task-shared.js so the same component drives the always-visible
+   Steps field on manual task creation too (see .detailsStepsGroup in
+   app.html/script.js) - renamed from the old .brainDumpSubtaskRow* names
+   since it's no longer brain-dump-specific, just kept its existing
+   dark-purple palette, which was already self-contained (each row supplies
+   its own background) rather than depending on a specific parent card. */
+.stepDraftRowsWrap{
     width: 100%;
     display: flex;
     flex-direction: column;
     gap: 6px;
 }
 
-.brainDumpSubtaskRows{
+.stepDraftRows{
     display: flex;
     flex-direction: column;
     gap: 6px;
 }
 
-.brainDumpSubtaskRow{
+.stepDraftRow{
     display: flex;
     align-items: center;
     gap: 4px;
     flex-wrap: wrap;
 }
 
-.brainDumpSubtaskRowText{
+.stepDraftRowText{
     flex: 1 1 auto;
     min-width: 0;
     height: 30px;
@@ -7096,8 +7099,8 @@ body.authGateActive .authOverlay{
     font-size: 11px;
 }
 
-.brainDumpSubtaskRowDeadlineBtn,
-.brainDumpSubtaskRowRemoveBtn{
+.stepDraftRowDeadlineBtn,
+.stepDraftRowRemoveBtn{
     flex: 0 0 auto;
     width: 24px;
     height: 24px;
@@ -7112,19 +7115,19 @@ body.authGateActive .authOverlay{
     justify-content: center;
 }
 
-.brainDumpSubtaskRowDeadlineBtn:hover{
+.stepDraftRowDeadlineBtn:hover{
     color: var(--violet-accent, #b58bff);
 }
 
-.brainDumpSubtaskRowDeadlineBtn.hasDeadline{
+.stepDraftRowDeadlineBtn.hasDeadline{
     color: var(--violet-accent, #b58bff);
 }
 
-.brainDumpSubtaskRowRemoveBtn:hover{
+.stepDraftRowRemoveBtn:hover{
     color: #ff9d9d;
 }
 
-.brainDumpSubtaskRowDeadlineInput{
+.stepDraftRowDeadlineInput{
     flex: 1 1 100%;
     height: 30px;
     padding: 0 8px;
@@ -7136,11 +7139,11 @@ body.authGateActive .authOverlay{
     color-scheme: dark;
 }
 
-.brainDumpSubtaskRowDeadlineInput.hidden{
+.stepDraftRowDeadlineInput.hidden{
     display: none;
 }
 
-.brainDumpSubtaskAddRowBtn{
+.stepDraftAddRowBtn{
     align-self: flex-start;
     background: transparent;
     border: none;
@@ -7152,7 +7155,7 @@ body.authGateActive .authOverlay{
     padding: 2px 0;
 }
 
-.brainDumpSubtaskAddRowBtn:hover{
+.stepDraftAddRowBtn:hover{
     text-decoration: underline;
 }
 
@@ -8263,6 +8266,31 @@ body.authGateActive .authOverlay{
 
 .groupCopyInviteBtn:hover{
     color: var(--violet-text);
+}
+
+/* Was rendering with default browser button styling (no dedicated rule
+   existed at all) - gray and looking disabled right next to the properly
+   styled invite code pill and icon button beside it. Same small-pill
+   language as .groupCatchUpDismissBtn (translucent violet, pill radius),
+   just with room for the icon + label this one carries instead of being
+   icon-only like .groupCopyInviteBtn above. */
+.groupCopyInviteLinkBtn{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 14px;
+    border: 1px solid rgba(221, 208, 255, 0.75);
+    border-radius: 999px;
+    background: rgba(233, 222, 255, 0.2);
+    color: #f8f3ff;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.groupCopyInviteLinkBtn:hover{
+    background: rgba(245, 238, 255, 0.28);
 }
 
 /* New-member catch-up card (C.4) - same card-token family .nextTaskPanel
