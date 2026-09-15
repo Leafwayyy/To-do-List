@@ -7066,7 +7066,9 @@ body.authGateActive .authOverlay{
    app.html/script.js) - renamed from the old .brainDumpSubtaskRow* names
    since it's no longer brain-dump-specific, just kept its existing
    dark-purple palette, which was already self-contained (each row supplies
-   its own background) rather than depending on a specific parent card. */
+   its own background) rather than depending on a specific parent card.
+   (The old names briefly lived here too during the migration - removed now
+   that brain-dump.js calls the shared version and nothing sets them.) */
 .stepDraftRowsWrap{
     width: 100%;
     display: flex;
@@ -7155,7 +7157,8 @@ body.authGateActive .authOverlay{
     padding: 2px 0;
 }
 
-.stepDraftAddRowBtn:hover{
+.stepDraftAddRowBtn:hover,
+.brainDumpSubtaskAddRowBtn:hover{
     text-decoration: underline;
 }
 
