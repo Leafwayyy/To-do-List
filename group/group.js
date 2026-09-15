@@ -6312,6 +6312,36 @@ const GROUP_TOUR_STEPS = [
         }
     },
     {
+        // Same "most recently created task" targeting as the steps sequence
+        // above - the Handoff button only exists once a group has more than
+        // one member (see canHandoff in createGroupTaskItem), guarded below
+        // the same way the member-scope-tabs step already guards for a
+        // solo group.
+        selector: '.handoffBtn',
+        title: 'Hand off a task',
+        text: 'Got too much on your plate? Offer one of your own tasks to a specific teammate right from its buttons here. They\'ll see it waiting on them and can accept or decline, nothing changes until they do.',
+        isRelevant: () => (getSelectedGroup()?.memberIds || []).length > 1,
+        beforeShow: (step) => {
+            switchGroupView('tasks');
+            const latest = getMostRecentlyCreatedGroupTask();
+            if (latest) {
+                step.selector = `[data-task-id="${latest.id}"] .handoffBtn`;
+            }
+        }
+    },
+    {
+        selector: '.nextTaskPanel',
+        title: 'Do This Next',
+        text: 'This is Do This Next, the one task I think whoever\'s selected above should tackle first, and why, so nobody\'s stuck wondering where to start.',
+        // Guarded on there actually being a live recommendation right now,
+        // not just "does a task exist" - an earlier tour step above lets
+        // you switch member scope or filter the view, either of which can
+        // leave nothing recommendable in the CURRENT scope even though
+        // tasks exist elsewhere.
+        isRelevant: () => Boolean(getGroupRecommendedTask()),
+        beforeShow: () => switchGroupView('tasks')
+    },
+    {
         selector: '.groupMemberScopeTabs',
         title: 'Whose tasks',
         text: 'See everyone\'s tasks together, just your own, or drill into one teammate\'s. Go ahead and try one, you should even see the task you just added, and a Suggest a task button appears right here for whoever you pick.',
@@ -6368,9 +6398,21 @@ const GROUP_TOUR_STEPS = [
         beforeShow: () => switchGroupView('tasks')
     },
     {
+        selector: '.groupCopyInviteLinkBtn',
+        title: 'Bring your team in',
+        text: 'See the invite code and Copy link up top? Share either one to bring someone into this group, the code if you\'d rather they type it in themselves, or Copy link for a one-tap join with the code already filled in.',
+        beforeShow: () => switchGroupView('tasks')
+    },
+    {
         selector: '.groupAlertToggleBtn',
         title: 'Popup alerts',
         text: 'Turn this on any time you want a desktop notification when one of your own tasks in this group is due soon or overdue.',
+        beforeShow: () => switchGroupView('tasks')
+    },
+    {
+        selector: '.navAttentionBadge',
+        title: 'Notifications',
+        text: 'This bell is your one-stop notification center: unread comments, join requests if you own or admin the group, tasks suggested to you, and when a suggestion you sent gets accepted or dismissed. Tap it any time to jump straight to whatever needs you.',
         beforeShow: () => switchGroupView('tasks')
     },
     {
