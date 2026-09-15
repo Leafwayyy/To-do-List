@@ -134,6 +134,14 @@
 
         <p class="groupStatusMsg hidden"></p>
 
+        <!-- Outcome of a ?join=CODE link, handled once at sign-in (see
+             maybeHandleJoinLink in group.js) - its own dedicated banner
+             since it can fire whether the setup screen or a real dashboard
+             ends up showing underneath it, so it can't live inside either. -->
+        <div class="joinLinkBanner hidden" role="status" aria-live="polite">
+            <p class="joinLinkBannerText"></p>
+        </div>
+
         <div class="groupPageWrap hidden">
             <div class="yourNameRow">
                 <label for="yourNameInput">Your name (shown to teammates)</label>
@@ -186,6 +194,7 @@
                         <div class="groupDashboardHeader">
                             <p class="groupInviteRow">Invite code: <span class="groupInviteCode"></span>
                                 <button type="button" class="groupCopyInviteBtn" title="Copy invite code"><i class="fa-solid fa-copy"></i></button>
+                                <button type="button" class="groupCopyInviteLinkBtn" title="Copy a shareable join link"><i class="fa-solid fa-link"></i> Copy link</button>
                             </p>
                             <div class="groupDashboardHeaderActions">
                                 <button type="button" class="groupAlertToggleBtn hidden">Popup alerts: Off</button>
@@ -224,7 +233,23 @@
                             <p class="urgencyAlertText">No urgent deadlines right now.</p>
                         </div>
 
+                        <div class="nextTaskPanel hidden" aria-live="polite">
+                            <p class="nextTaskLabel">Do This Next</p>
+                            <p class="nextTaskTitle">No recommendation yet.</p>
+                            <div class="nextTaskReasonWrap">
+                                <p class="nextTaskReasonLabel">Why this is first:</p>
+                                <ul class="nextTaskReasons"></ul>
+                            </div>
+                        </div>
+
                         <div class="suggestionsForYouPanel hidden" aria-live="polite"></div>
+
+                        <!-- C.1: outcomes of suggestions YOU sent, see
+                             renderSuggestionOutcomes/jumpToSuggestionOutcomes
+                             in group.js. Its own panel, not folded into the
+                             one above - that one is "act on this", this one
+                             is "here's what happened", different purposes. -->
+                        <div class="suggestionOutcomesPanel hidden" aria-live="polite"></div>
 
                         <div class="inputContainer">
                             <input type="text" class="taskInput" placeholder="Type your task...">
@@ -496,6 +521,37 @@
             <div class="editorActions">
                 <button type="button" class="editorSaveBtn groupWelcomeContinueBtn">Continue</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Team pulse - the group's own version of solo's weekly recap
+         (app.html's .weeklyRecapOverlay). Same overlay/card classes reused
+         as-is for the identical calm, one-shot visual language rather than
+         inventing a second look - see group.js's maybeShowGroupTeamPulse.
+         Third stat is repurposed from solo's personal streak into this
+         week's top contributor, since a team streak isn't a real concept
+         here - no badges row, badges stay solo-only by design. -->
+    <div class="weeklyRecapOverlay hidden" aria-hidden="true">
+        <div class="weeklyRecapCard" role="dialog" aria-modal="true" aria-label="Your team's week in review">
+            <p class="weeklyRecapKicker">Your team's week in review</p>
+            <h3 class="weeklyRecapTitle"></h3>
+
+            <div class="weeklyRecapStats">
+                <div class="weeklyRecapStat">
+                    <p class="weeklyRecapStatValue weeklyRecapThisWeek"></p>
+                    <p class="weeklyRecapStatLabel">This week</p>
+                </div>
+                <div class="weeklyRecapStat">
+                    <p class="weeklyRecapStatValue weeklyRecapLastWeek"></p>
+                    <p class="weeklyRecapStatLabel">Last week</p>
+                </div>
+                <div class="weeklyRecapStat">
+                    <p class="weeklyRecapStatValue weeklyRecapStreak"></p>
+                    <p class="weeklyRecapStatLabel">Top this week</p>
+                </div>
+            </div>
+
+            <button class="weeklyRecapCloseBtn" type="button">Keep going</button>
         </div>
     </div>
 

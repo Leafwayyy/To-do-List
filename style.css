@@ -8375,6 +8375,49 @@ body.authGateActive .authOverlay{
     display: none;
 }
 
+/* Part B: outcome of a ?join=CODE link (see maybeHandleJoinLink in
+   group.js) - same bounded-banner shape as .suggestForMemberBanner above,
+   but sits at the page level above .groupPageWrap since it can fire
+   before a dashboard even exists yet (a first-time joiner) as easily as
+   after one does. */
+.joinLinkBanner{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 92%;
+    margin: 10px 0;
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--violet-border-soft);
+    background: var(--violet-surface-soft);
+    color: var(--violet-text);
+    font-size: var(--text-sm);
+}
+
+.joinLinkBanner.hidden{
+    display: none;
+}
+
+.joinLinkBannerText{
+    margin: 0;
+}
+
+.joinLinkBanner.joinLinkBannerSuccess{
+    border-color: rgba(127, 224, 163, 0.4);
+}
+
+.joinLinkBanner.joinLinkBannerSuccess .joinLinkBannerText{
+    color: #7fe0a3;
+}
+
+.joinLinkBanner.joinLinkBannerError{
+    border-color: rgba(255, 159, 159, 0.4);
+}
+
+.joinLinkBanner.joinLinkBannerError .joinLinkBannerText{
+    color: #ff9f9f;
+}
+
 .suggestForMemberBtn{
     display: inline-flex;
     align-items: center;
@@ -8518,6 +8561,30 @@ body.authGateActive .authOverlay{
     flex-wrap: wrap;
     gap: 6px;
     flex: 0 1 100%;
+}
+
+/* C.1: outcome of a suggestion YOU sent (renderSuggestionOutcomes in
+   group.js) - reuses the pill shape every other badge in this row family
+   already uses, just with the same green/red pairing groupFormInfo/
+   groupFormError already established elsewhere on this page, so "good"
+   and "not accepted" read consistently across the whole dashboard. */
+.suggestionOutcomeBadge{
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: var(--radius-pill);
+    font-size: var(--text-2xs);
+    font-weight: 700;
+}
+
+.suggestionOutcomeAccepted{
+    background: rgba(127, 224, 163, 0.16);
+    color: #7fe0a3;
+}
+
+.suggestionOutcomeDismissed{
+    background: rgba(255, 159, 159, 0.16);
+    color: #ff9f9f;
 }
 
 /* Section W: given real visual weight, since "who this is for" is the one
