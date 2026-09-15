@@ -3623,34 +3623,19 @@ body > .viewTabs{
     width: 100%;
 }
 
-/* Steps at creation time (.detailsStepsGroup) - solo (app.html/script.js)
-   now builds this with the shared createSubtaskRowsEditor (task-shared.js,
-   .pendingStepsEditorMount hosts its .stepDraftRowsWrap element, which
-   supplies its own layout) and sits always-visible right under
-   .inputContainer, not inside .detailsMoreOptions anymore - margin-top
-   here still reads fine as the first thing after the input row. Group's
-   own .detailsStepsGroup (group/index.html) hasn't been migrated yet and
-   still uses the older plain-text .pendingStepsList/.pendingStepItem
-   markup below (reusing .subtaskItem/.subtaskAddRow/.subtaskInput/
-   .subtaskAddBtn from the per-task steps UI) inside its own
-   .detailsMoreOptions - remove those two rules once group's mirror lands. */
+/* Steps at creation time (.detailsStepsGroup) - both solo (app.html/
+   script.js) and group (group/index.html/group.js) now build this with the
+   shared createSubtaskRowsEditor (task-shared.js, .pendingStepsEditorMount
+   hosts its .stepDraftRowsWrap element, which supplies its own layout) and
+   it sits always-visible right under .inputContainer on both pages, not
+   inside .detailsMoreOptions anymore - margin-top here still reads fine as
+   the first thing after the input row. The older plain-text
+   .pendingStepsList/.pendingStepItem markup (reusing .subtaskItem/
+   .subtaskAddRow/.subtaskInput/.subtaskAddBtn from the per-task steps UI)
+   group used to have is gone from both markup and here - nothing left
+   referencing it. */
 .detailsStepsGroup{
     margin-top: var(--space-3);
-}
-
-.pendingStepsList{
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 8px;
-}
-
-.pendingStepsList:empty{
-    margin-bottom: 0;
-}
-
-.pendingStepItem .subtaskRow{
-    justify-content: space-between;
 }
 
 /* Real bug found and fixed while adding the above: .editorPrimaryGrid

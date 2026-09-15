@@ -675,9 +675,7 @@ const deadlineInput = document.querySelector('.deadlineInput:not(.scheduleInput)
 const recurrenceSelect = document.querySelector('.recurrenceSelect');
 const scheduleContainer = document.querySelector('.scheduleContainer');
 const scheduleInput = document.querySelector('.scheduleInput');
-const pendingStepsList = document.querySelector('.pendingStepsList');
-const pendingStepInput = document.querySelector('.pendingStepInput');
-const pendingStepAddBtn = document.querySelector('.pendingStepAddBtn');
+const pendingStepsEditorMount = document.querySelector('.pendingStepsEditorMount');
 const typePills = Array.from(document.querySelectorAll('.typePill'));
 const durationInput = document.querySelector('.durationInput');
 const durationWrap = document.querySelector('.durationWrap');
@@ -5602,84 +5600,27 @@ difficultySelect?.addEventListener('change', playClickSound);
 durationInput?.addEventListener('input', syncDurationChipState);
 sanitizeNumberInputAsPositiveInteger(durationInput);
 
-// Steps added before a task even exists yet - same reasoning/shape as
-// solo's pendingNewTaskSteps in script.js, kept as plain strings until
-// addTaskFromInputs hands them to addGroupTask, which already knows how to
-// turn {text, dueAt} entries into real subtasks (see its initialSubtasks
-// mapping - this was previously only ever populated by Dusty, never by
-// manual entry).
-let pendingNewTaskSteps = [];
+// Steps added before a task even exists yet - uses the same
+// createSubtaskRowsEditor (task-shared.js) Dusty's review cards and solo's
+// own creation flow (script.js) use, so a drafted step can carry its own
+// deadline instead of plain text only. Rebuilt fresh (not just cleared)
+// after each task add/on first load - simpler than tracking a "reset"
+// concept inside the editor itself, and guarantees no leftover event
+// listeners from a previous instance. Mirrors script.js's identical
+// pattern exactly (previously this was its own plain-string
+// pendingNewTaskSteps implementation, replaced here to match solo).
+let pendingStepsEditor = null;
 
-function renderPendingStepsList() {
-    if (!pendingStepsList) {
+function mountPendingStepsEditor() {
+    if (!pendingStepsEditorMount) {
         return;
     }
-    pendingStepsList.innerHTML = '';
-    pendingNewTaskSteps.forEach((stepText, index) => {
-        const item = document.createElement('div');
-        item.classList.add('subtaskItem', 'pendingStepItem');
-        item.setAttribute('role', 'listitem');
-
-        const row = document.createElement('div');
-        row.classList.add('subtaskRow');
-
-        const text = document.createElement('span');
-        text.classList.add('subtaskText');
-        text.textContent = stepText;
-
-        const deleteBtn = document.createElement('button');
-        deleteBtn.type = 'button';
-        deleteBtn.classList.add('subtaskDeleteBtn');
-        deleteBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
-        deleteBtn.setAttribute('aria-label', 'Remove step');
-        deleteBtn.addEventListener('click', () => {
-            playClickSound();
-            removePendingStep(index);
-        });
-
-        row.appendChild(text);
-        row.appendChild(deleteBtn);
-        item.appendChild(row);
-        pendingStepsList.appendChild(item);
-    });
+    pendingStepsEditorMount.innerHTML = '';
+    pendingStepsEditor = createSubtaskRowsEditor([]);
+    pendingStepsEditorMount.appendChild(pendingStepsEditor.element);
 }
 
-function addPendingStepFromInput() {
-    if (!pendingStepInput) {
-        return;
-    }
-    const trimmed = pendingStepInput.value.trim();
-    if (trimmed === '') {
-        return;
-    }
-    playClickSound();
-    pendingNewTaskSteps.push(trimmed.slice(0, 240));
-    pendingStepInput.value = '';
-    renderPendingStepsList();
-    pendingStepInput.focus();
-}
-
-function removePendingStep(index) {
-    pendingNewTaskSteps.splice(index, 1);
-    renderPendingStepsList();
-}
-
-function clearPendingSteps() {
-    pendingNewTaskSteps = [];
-    renderPendingStepsList();
-}
-
-if (pendingStepAddBtn) {
-    pendingStepAddBtn.addEventListener('click', addPendingStepFromInput);
-}
-if (pendingStepInput) {
-    pendingStepInput.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            addPendingStepFromInput();
-        }
-    });
-}
+mountPendingStepsEditor();
 
 function addTaskFromInputs() {
     playClickSound();
@@ -5715,7 +5656,7 @@ function addTaskFromInputs() {
         scheduledAt,
         taskType,
         estimateMinutes,
-        subtasks: pendingNewTaskSteps.map((stepText) => ({ text: stepText, dueAt: null }))
+        subtasks: pendingStepsEditor ? pendingStepsEditor.read() : []
     }).catch((error) => console.error('Failed to add task:', error));
 
     if (recurrenceSelect) {
@@ -5730,7 +5671,7 @@ function addTaskFromInputs() {
     if (scheduleInput) {
         scheduleInput.value = '';
     }
-    clearPendingSteps();
+    mountPendingStepsEditor();
     setTaskTypePillState('open');
     updateDurationInputVisibility();
     quickAddHint?.classList.add('hidden');
@@ -6191,6 +6132,12 @@ const GROUP_TOUR_STEPS = [
         beforeShow: () => switchGroupView('tasks')
     },
     {
+        selector: '.detailsStepsGroup',
+        title: 'Steps',
+        text: 'If you already know how you\'ll break this one down, add steps right here, each one can even get its own deadline. Totally optional, skip it if you don\'t need it for this task.',
+        beforeShow: () => switchGroupView('tasks')
+    },
+    {
         selector: '.detailsToggleBtn',
         title: 'Let\'s open Prioritize',
         text: 'Now tap Prioritize, and I\'ll show you everything that helps me figure out what matters most for a new task.',
@@ -6228,7 +6175,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.detailsMoreToggleBtn',
         title: 'More options',
-        text: 'Tap here for a few more things: a rough time estimate, a schedule for when you actually plan to sit down and do it, and steps if you already know how you\'ll break this one down.',
+        text: 'Tap here for a couple more things: a rough time estimate, and a schedule for when you actually plan to sit down and do it.',
         action: { event: 'click' },
         beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); }
     },
