@@ -1295,6 +1295,11 @@ function createSubtaskRowsEditor(initialSubtasks) {
 
     const list = document.createElement('div');
     list.classList.add('stepDraftRows');
+    // Carried over from the old .pendingStepsList markup this replaced -
+    // without it, a screen reader has no way to know this is a list of
+    // steps being drafted, not just an unlabeled cluster of text inputs.
+    list.setAttribute('role', 'list');
+    list.setAttribute('aria-label', 'Steps to add');
     wrap.appendChild(list);
 
     const rows = []; // { rowEl, textInput, deadlineInput }
@@ -1307,6 +1312,11 @@ function createSubtaskRowsEditor(initialSubtasks) {
         textInput.type = 'text';
         textInput.classList.add('stepDraftRowText');
         textInput.placeholder = 'Step...';
+        // Same cap every other subtask-text path already enforces
+        // (applyEditedSubtasks' entry.text.slice(0, 240), Brain Dump's
+        // commit path) - lost when this editor replaced the old
+        // .pendingStepInput, which had the same maxlength.
+        textInput.maxLength = 240;
         textInput.value = subtask?.text || '';
 
         const deadlineBtn = document.createElement('button');
@@ -1377,7 +1387,12 @@ function createSubtaskRowsEditor(initialSubtasks) {
     function read() {
         return rows
             .map((entry) => ({
-                text: entry.textInput.value.trim(),
+                // maxLength above already stops normal typing, but doesn't
+                // catch a value set programmatically (e.g. restoring a
+                // draft) - the same defense-in-depth slice every other
+                // subtask-text path takes, not just relying on the input's
+                // own attribute.
+                text: entry.textInput.value.trim().slice(0, 240),
                 dueAt: entry.deadlineInput.value ? new Date(entry.deadlineInput.value).toISOString() : null
             }))
             .filter((entry) => entry.text);
