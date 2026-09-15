@@ -158,24 +158,37 @@ function subscribeToGroupSuggestions(groupId, callback, onError) {
 }
 
 async function acceptSuggestion(groupId, suggestion, user) {
-    const { doc, updateDoc } = fs();
+    const { doc, updateDoc, serverTimestamp } = fs();
     await addGroupTask(groupId, user, {
         text: suggestion.text,
         matrix: suggestion.matrix,
         difficulty: suggestion.difficulty,
         dueAt: suggestion.dueAt
     });
-    await updateDoc(doc(db(), 'groups', groupId, 'suggestions', suggestion.id), { status: 'accepted' });
+    // resolvedAt (not just status) is what suggestionOutcomesCount gates
+    // on below - see computeAttentionSummary's comment for why a bare
+    // status check isn't enough.
+    await updateDoc(doc(db(), 'groups', groupId, 'suggestions', suggestion.id), { status: 'accepted', resolvedAt: serverTimestamp() });
 }
 
 async function dismissSuggestion(groupId, suggestionId) {
-    const { doc, updateDoc } = fs();
-    await updateDoc(doc(db(), 'groups', groupId, 'suggestions', suggestionId), { status: 'dismissed' });
+    const { doc, updateDoc, serverTimestamp } = fs();
+    await updateDoc(doc(db(), 'groups', groupId, 'suggestions', suggestionId), { status: 'dismissed', resolvedAt: serverTimestamp() });
 }
 
 async function retractSuggestion(groupId, suggestionId) {
     const { doc, deleteDoc } = fs();
     await deleteDoc(doc(db(), 'groups', groupId, 'suggestions', suggestionId));
+}
+
+// The sender's own "I've seen this outcome" action - the counterpart to
+// accept/dismiss above, but only ever touches acknowledgedBySender (see
+// firestore.rules' separate update rule for this exact field). Only called
+// on an already-resolved suggestion (see jumpToSuggestionOutcomes), so
+// there's no risk of a sender using this to pre-clear a still-pending one.
+async function acknowledgeSuggestionOutcome(groupId, suggestionId) {
+    const { doc, updateDoc } = fs();
+    await updateDoc(doc(db(), 'groups', groupId, 'suggestions', suggestionId), { acknowledgedBySender: true });
 }
 
 async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, recurrence, scheduledAt, taskType, estimateMinutes, subtasks }) {
@@ -399,6 +412,8 @@ async function renameGroupSubtask(groupId, task, subtaskId, newText) {
 // ---------------------------------------------------------------------
 
 const groupStatusMsg = document.querySelector('.groupStatusMsg');
+const joinLinkBanner = document.querySelector('.joinLinkBanner');
+const joinLinkBannerText = document.querySelector('.joinLinkBannerText');
 const groupPageWrap = document.querySelector('.groupPageWrap');
 const groupBrowseAllLink = document.querySelector('.groupBrowseAllLink');
 const groupSetupSection = document.querySelector('.groupSetupSection');
@@ -515,6 +530,7 @@ groupCalendarModeButtons.forEach((button) => {
 
 const groupInviteCode = document.querySelector('.groupInviteCode');
 const groupCopyInviteBtn = document.querySelector('.groupCopyInviteBtn');
+const groupCopyInviteLinkBtn = document.querySelector('.groupCopyInviteLinkBtn');
 const groupRenameBtn = document.querySelector('.groupRenameBtn');
 const groupSettingsBtn = document.querySelector('.groupSettingsBtn');
 const groupSettingsCountBadge = groupSettingsBtn?.querySelector('.groupSettingsCountBadge');
@@ -554,6 +570,7 @@ const groupHistoryList = document.querySelector('.groupHistoryList');
 // tab itself now (still .historyUnreadDot, just relocated in index.html).
 const groupHistoryUnreadDot = document.querySelector('.historyUnreadDot');
 const suggestionsForYouPanel = document.querySelector('.suggestionsForYouPanel');
+const suggestionOutcomesPanel = document.querySelector('.suggestionOutcomesPanel');
 const brainDumpToggleBtn = document.querySelector('.brainDumpToggleBtn');
 const groupAlertToggleBtn = document.querySelector('.groupAlertToggleBtn');
 const helpTourBtn = document.querySelector('.helpTourBtn');
@@ -568,6 +585,16 @@ const groupWelcomeNameInput = document.querySelector('.groupWelcomeNameInput');
 const groupWelcomeContinueBtn = document.querySelector('.groupWelcomeContinueBtn');
 const groupUrgencyAlert = document.querySelector('.urgencyAlert');
 const groupUrgencyAlertText = document.querySelector('.urgencyAlertText');
+const groupNextTaskPanel = document.querySelector('.nextTaskPanel');
+const groupNextTaskLabel = document.querySelector('.nextTaskPanel .nextTaskLabel');
+const groupNextTaskTitle = document.querySelector('.nextTaskPanel .nextTaskTitle');
+const groupNextTaskReasons = document.querySelector('.nextTaskReasons');
+const teamPulseOverlay = document.querySelector('.weeklyRecapOverlay');
+const teamPulseTitle = document.querySelector('.weeklyRecapTitle');
+const teamPulseThisWeek = document.querySelector('.weeklyRecapThisWeek');
+const teamPulseLastWeek = document.querySelector('.weeklyRecapLastWeek');
+const teamPulseTopContributor = document.querySelector('.weeklyRecapStreak');
+const teamPulseCloseBtn = document.querySelector('.weeklyRecapCloseBtn');
 const overdueViewButton = document.querySelector('.taskViewBtn[data-view="overdue"]');
 const overdueCountBadge = document.querySelector('.overdueCountBadge');
 const taskInput = document.querySelector('.taskInput');
@@ -2225,6 +2252,7 @@ function setActiveMemberScope(scope) {
         renderSuggestForMemberBanner(group);
     }
     renderGroupTasks();
+    updateGroupNextTaskPanel();
 }
 
 // Suggesting a task is contextual to the Tasks tab now (not a button on
@@ -2394,6 +2422,27 @@ function getPendingSuggestionsForYou() {
     ));
 }
 
+// The other direction: suggestions YOU sent that the recipient has since
+// acted on, which you haven't seen yet. Gated on resolvedAt existing, not
+// just status !== 'pending' - a suggestion resolved before this field
+// shipped has no resolvedAt at all, so it's correctly excluded forever
+// rather than flooding every sender with months-old outcomes the moment
+// this goes live (see the plan's C.1 Risks section). Mutually exclusive
+// with getPendingSuggestionsForYou by construction: forUserId === you vs.
+// fromUserId === you can never both be true for the same doc unless
+// someone suggested a task to themselves, which the UI never offers.
+function getUnacknowledgedSuggestionOutcomes() {
+    if (!currentUser) {
+        return [];
+    }
+    return groupSuggestions.filter((suggestion) => (
+        suggestion.fromUserId === currentUser.uid
+        && suggestion.status !== 'pending'
+        && Boolean(suggestion.resolvedAt)
+        && !suggestion.acknowledgedBySender
+    ));
+}
+
 function renderSuggestionsForYou(groupId) {
     if (!suggestionsForYouPanel || !currentUser) {
         return;
@@ -2473,6 +2522,52 @@ function renderSuggestionsForYou(groupId) {
 
         row.appendChild(actions);
         suggestionsForYouPanel.appendChild(row);
+    });
+}
+
+// The other direction from renderSuggestionsForYou above - suggestions YOU
+// sent whose outcome you haven't seen yet. Deliberately read-only (no
+// accept/dismiss actions, that decision was already made by the
+// recipient) - just "here's what happened" plus a way to clear it.
+// Clearing happens via jumpToSuggestionOutcomes (acknowledging on view,
+// per the plan), not a per-row button, so this stays a plain summary list.
+function renderSuggestionOutcomes(groupId) {
+    if (!suggestionOutcomesPanel || !currentUser) {
+        return;
+    }
+
+    const outcomes = getUnacknowledgedSuggestionOutcomes();
+
+    suggestionOutcomesPanel.innerHTML = '';
+    suggestionOutcomesPanel.classList.toggle('hidden', outcomes.length === 0);
+
+    outcomes.forEach((suggestion) => {
+        const row = document.createElement('div');
+        row.classList.add('suggestionRow', 'suggestionOutcomeRow');
+        row.dataset.suggestionId = suggestion.id;
+
+        // Same textContent/createElement discipline as renderSuggestionsForYou
+        // above - suggestion.text is a user-authored string.
+        const text = document.createElement('p');
+        text.classList.add('suggestionRowText');
+        const fromSpan = document.createElement('span');
+        fromSpan.classList.add('suggestionRowFrom');
+        fromSpan.textContent = 'Your suggestion:';
+        text.appendChild(fromSpan);
+        text.appendChild(document.createTextNode(` ${suggestion.text || ''}`));
+        row.appendChild(text);
+
+        const badges = document.createElement('div');
+        badges.classList.add('suggestionRowBadges');
+
+        const outcomeBadge = document.createElement('span');
+        const wasAccepted = suggestion.status === 'accepted';
+        outcomeBadge.classList.add('suggestionOutcomeBadge', wasAccepted ? 'suggestionOutcomeAccepted' : 'suggestionOutcomeDismissed');
+        outcomeBadge.textContent = wasAccepted ? 'Accepted' : 'Dismissed';
+        badges.appendChild(outcomeBadge);
+        row.appendChild(badges);
+
+        suggestionOutcomesPanel.appendChild(row);
     });
 }
 
@@ -3941,6 +4036,7 @@ function renderApp() {
         renderGroupHistory(group);
         renderSuggestForMemberBanner(group);
         renderSuggestionsForYou(group.id);
+        renderSuggestionOutcomes(group.id);
         renderGroupTasks();
         renderGroupCalendarView();
         // The 6-button deadline-filter row isn't worth much with barely any
@@ -3951,9 +4047,11 @@ function renderApp() {
         deadlineViewTabs?.classList.toggle('condensed', groupTasks.length < 3);
         updateGroupMotivator();
         updateGroupUrgencyAlert();
+        updateGroupNextTaskPanel();
         updateNavAttentionBadge(group);
         renderGroupOnboardingHint();
         maybeAutoStartGroupTour();
+        maybeShowGroupTeamPulse(group);
     } else {
         ensureJoinRequestsSubscription(null, false);
         updateNavAttentionBadge(null);
@@ -3999,11 +4097,19 @@ function computeAttentionSummary() {
     const unreadCommentsCount = groupTasks.filter(hasUnreadComments).length;
     const joinRequestsCount = groupJoinRequests.length; // already role-gated by ensureJoinRequestsSubscription
     const suggestionsCount = getPendingSuggestionsForYou().length;
+    // suggestions you sent that got accepted/dismissed, not yet seen by
+    // you - see getUnacknowledgedSuggestionOutcomes for the resolvedAt
+    // gate that keeps this from flooding every sender with pre-existing
+    // resolved suggestions the moment this ships. Can never overlap with
+    // suggestionsCount above (forUserId === you vs. fromUserId === you),
+    // so total below never double-counts one suggestion.
+    const suggestionOutcomesCount = getUnacknowledgedSuggestionOutcomes().length;
     return {
         unreadCommentsCount,
         joinRequestsCount,
         suggestionsCount,
-        total: unreadCommentsCount + joinRequestsCount + suggestionsCount
+        suggestionOutcomesCount,
+        total: unreadCommentsCount + joinRequestsCount + suggestionsCount + suggestionOutcomesCount
     };
 }
 
@@ -4072,6 +4178,30 @@ function jumpToJoinRequests() {
     }, 30);
 }
 
+// Unlike the other three jump functions, this one also acknowledges what
+// it jumped to (per the plan: "flipped true when the sender views it via
+// a new jump function") - opening this from the nav menu IS the read
+// receipt, there's no separate per-row dismiss action in
+// renderSuggestionOutcomes. Fire-and-forget like every other Firestore
+// write triggered from a click in this file (acceptSuggestion,
+// dismissSuggestion above); a failed ack just means it resurfaces next
+// time the badge is opened, not a broken state.
+function jumpToSuggestionOutcomes() {
+    const group = getSelectedGroup();
+    if (!group) {
+        return;
+    }
+    const outcomes = getUnacknowledgedSuggestionOutcomes();
+    switchGroupView('tasks');
+    setTimeout(() => {
+        suggestionOutcomesPanel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        flashAttentionTarget(suggestionOutcomesPanel);
+    }, 30);
+    outcomes.forEach((suggestion) => {
+        acknowledgeSuggestionOutcome(group.id, suggestion.id).catch((error) => console.error('Failed to acknowledge suggestion outcome:', error));
+    });
+}
+
 function renderNavAttentionMenu(summary) {
     if (!navAttentionMenu) {
         return;
@@ -4093,6 +4223,11 @@ function renderNavAttentionMenu(summary) {
             icon: 'fa-solid fa-user-plus',
             label: `${summary.joinRequestsCount} pending join request${summary.joinRequestsCount === 1 ? '' : 's'}`,
             onClick: jumpToJoinRequests
+        },
+        summary.suggestionOutcomesCount > 0 && {
+            icon: 'fa-solid fa-circle-check',
+            label: `${summary.suggestionOutcomesCount} suggestion outcome${summary.suggestionOutcomesCount === 1 ? '' : 's'}`,
+            onClick: jumpToSuggestionOutcomes
         }
     ].filter(Boolean);
 
@@ -4126,7 +4261,8 @@ function updateNavAttentionBadge(group) {
     navAttentionBadge.title = summary.total === 0 ? '' : [
         summary.unreadCommentsCount && `${summary.unreadCommentsCount} unread comment${summary.unreadCommentsCount === 1 ? '' : 's'}`,
         summary.joinRequestsCount && `${summary.joinRequestsCount} pending join request${summary.joinRequestsCount === 1 ? '' : 's'}`,
-        summary.suggestionsCount && `${summary.suggestionsCount} suggestion${summary.suggestionsCount === 1 ? '' : 's'} for you`
+        summary.suggestionsCount && `${summary.suggestionsCount} suggestion${summary.suggestionsCount === 1 ? '' : 's'} for you`,
+        summary.suggestionOutcomesCount && `${summary.suggestionOutcomesCount} suggestion outcome${summary.suggestionOutcomesCount === 1 ? '' : 's'}`
     ].filter(Boolean).join(', ');
     renderNavAttentionMenu(summary);
     if (summary.total === 0) {
@@ -4157,6 +4293,7 @@ document.addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
         closeNavAttentionMenu();
+        closeGroupTeamPulse();
     }
 });
 
@@ -4204,6 +4341,270 @@ function updateGroupUrgencyAlert() {
         const soonLabel = top.status.urgencyLevel === 'critical' ? 'Due very soon' : 'Due soon';
         groupUrgencyAlertText.textContent = `${soonLabel}: ${top.task.text} (${ownerLabel}, ${top.status.countdownLabel}).`;
     }
+}
+
+// Solo's equivalent (getRecommendedTask/getPriorityReasons/updateNextTaskPanel
+// in script.js) had no group counterpart at all - group could sort by
+// priority (compareGroupTasksByPriority) but never told anyone what to
+// actually work on next or why. Scoped to whichever member-scope tab is
+// currently active (activeMemberScope), same tabs the Tasks view already
+// uses - "Everyone" recommends across the whole team, a specific teammate
+// recommends from just their tasks, matching what the panel's label ends
+// up saying.
+function getGroupRecommendedTask() {
+    const scopedTasks = activeMemberScope === 'all'
+        ? groupTasks
+        : groupTasks.filter((task) => task.ownerId === activeMemberScope);
+    const activeTasks = scopedTasks.filter((task) => !task.completed);
+    if (activeTasks.length === 0) {
+        return null;
+    }
+
+    return [...activeTasks].sort(compareGroupTasksByPriority)[0];
+}
+
+// Mirrors getPriorityReasons() in script.js (the subtask-aware "why this is
+// first" fix from f0c6430 - names the actual driving STEP, not the task,
+// when a step's own deadline is what's urgent) applied to group's own
+// scoring inputs. Deliberately does not cite task type/time estimate/
+// scheduledAt as reasons - getGroupPriorityScore doesn't weight those, so
+// listing them here would misrepresent why this task was actually picked.
+function getGroupPriorityReasons(task) {
+    const reasons = [];
+    const status = getTaskUrgencyStatus(task);
+    const matrix = getValidMatrixValue(task.matrix);
+    const difficulty = getValidDifficultyLevel(task.difficulty);
+    const drivingSubtask = status.fromStep
+        ? (task.subtasks || []).find((subtask) => subtask.id === status.fromStep)
+        : null;
+
+    if (status.isOverdue) {
+        reasons.push(drivingSubtask ? `A step ("${drivingSubtask.text}") is overdue right now.` : 'This task is overdue right now.');
+    } else if (status.hasDeadline) {
+        if (status.timeUntilMs <= 7200000) {
+            reasons.push(drivingSubtask ? `A step ("${drivingSubtask.text}") is due very soon (within 2 hours).` : 'Deadline is very close (within 2 hours).');
+        } else if (status.timeUntilMs <= 86400000) {
+            reasons.push(drivingSubtask ? `A step ("${drivingSubtask.text}") is due today.` : 'Deadline is due today.');
+        }
+    }
+
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    if (subtasks.length > 0) {
+        const doneCount = subtasks.filter((subtask) => subtask.completed).length;
+        if (doneCount > 0 && doneCount < subtasks.length) {
+            reasons.push(`Almost done: ${doneCount}/${subtasks.length} steps complete.`);
+        }
+    }
+
+    if (matrix === 'do') {
+        reasons.push('Marked as Important and Urgent.');
+    } else if (matrix === 'schedule') {
+        reasons.push('Marked as Important in the matrix.');
+    } else if (matrix === 'delegate') {
+        reasons.push('Marked as Urgent in the matrix.');
+    }
+
+    if (difficulty >= 4) {
+        reasons.push('High difficulty tasks are moved up to avoid delay.');
+    }
+
+    if (reasons.length === 0) {
+        reasons.push('Best overall priority score across the group right now.');
+    }
+
+    return reasons.slice(0, 3);
+}
+
+function updateGroupNextTaskPanel() {
+    if (!groupNextTaskPanel || !groupNextTaskTitle || !groupNextTaskReasons) {
+        return;
+    }
+
+    const recommended = getGroupRecommendedTask();
+    if (!recommended) {
+        groupNextTaskPanel.classList.add('hidden');
+        return;
+    }
+
+    groupNextTaskPanel.classList.remove('hidden');
+
+    // Label reflects the same scope the recommendation was actually drawn
+    // from, so switching the whose-tasks tab never leaves a stale "is this
+    // my task or theirs" implication sitting on screen.
+    if (groupNextTaskLabel) {
+        if (activeMemberScope === 'all') {
+            groupNextTaskLabel.textContent = 'Do This Next';
+        } else if (activeMemberScope === currentUser?.uid) {
+            groupNextTaskLabel.textContent = 'Do This Next (you)';
+        } else {
+            groupNextTaskLabel.textContent = `Do This Next for ${recommended.ownerName || 'this teammate'}`;
+        }
+    }
+
+    groupNextTaskTitle.textContent = recommended.text;
+    groupNextTaskReasons.innerHTML = '';
+
+    getGroupPriorityReasons(recommended).forEach((reason) => {
+        const reasonItem = document.createElement('li');
+        reasonItem.textContent = reason;
+        groupNextTaskReasons.appendChild(reasonItem);
+    });
+}
+
+// ---------------------------------------------------------------------
+// Team pulse - group's own version of solo's weekly recap (script.js's
+// maybeShowWeeklyRecap/showWeeklyRecap). Every existing group recognition
+// mechanic (leaderboard, the roster streak flame) is about ONE person;
+// this is the one moment that's about the team together. Same one-shot
+// weekly-trigger mechanism and calm-card visual language, just pointed at
+// groups/{groupId}/history instead of the personal one - see the plan's
+// C.3 section.
+// ---------------------------------------------------------------------
+
+const GROUP_TEAM_PULSE_SHOWN_PREFIX = 'todoGroupTeamPulseShownAtV1_';
+// In-memory only, per group id - a real "have we shown it" decision is a
+// localStorage + Firestore round trip, not something to redo every time
+// renderApp() re-runs off an unrelated snapshot update (a teammate ticking
+// one checkbox shouldn't re-trigger this check).
+const teamPulseCheckedGroupIds = new Set();
+
+async function maybeShowGroupTeamPulse(group) {
+    if (!group || !currentUser || teamPulseCheckedGroupIds.has(group.id)) {
+        return;
+    }
+    teamPulseCheckedGroupIds.add(group.id);
+
+    let lastShownAt = 0;
+    try {
+        lastShownAt = Number(localStorage.getItem(GROUP_TEAM_PULSE_SHOWN_PREFIX + group.id)) || 0;
+    } catch {
+        lastShownAt = 0;
+    }
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    if (Date.now() - lastShownAt < sevenDaysMs) {
+        return;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const currentWeekStart = new Date(today);
+    currentWeekStart.setDate(today.getDate() - today.getDay());
+    const lastWeekStart = new Date(currentWeekStart);
+    lastWeekStart.setDate(currentWeekStart.getDate() - 7);
+
+    let thisWeekCount = 0;
+    let lastWeekCount = 0;
+    // Tallied by ownerName (already denormalized on every history entry,
+    // see logGroupTaskCompletion) so "top contributor" needs no extra
+    // lookups - just counting this-week entries by whoever completed them.
+    const thisWeekCountsByOwner = new Map();
+    try {
+        const { collection, query, where, getDocs } = fs();
+        // One bounded 14-day range query, split into this-week/last-week
+        // client-side - mirrors solo's maybeShowWeeklyRecap exactly, rather
+        // than relying on the already-subscribed groupHistoryEntries (that
+        // one's capped at 50 most recent across the WHOLE group and isn't
+        // date-bounded, so an active group could blow past a week's worth
+        // within that cap and undercount).
+        const historyQuery = query(
+            collection(db(), 'groups', group.id, 'history'),
+            where('completedAt', '>=', lastWeekStart.toISOString())
+        );
+        const snapshot = await getDocs(historyQuery);
+        const currentWeekStartIso = currentWeekStart.toISOString();
+        snapshot.docs.forEach((entryDoc) => {
+            const entry = entryDoc.data();
+            if (typeof entry.completedAt !== 'string') {
+                return;
+            }
+            if (entry.completedAt >= currentWeekStartIso) {
+                thisWeekCount += 1;
+                const ownerName = entry.ownerName || 'Teammate';
+                thisWeekCountsByOwner.set(ownerName, (thisWeekCountsByOwner.get(ownerName) || 0) + 1);
+            } else {
+                lastWeekCount += 1;
+            }
+        });
+    } catch (error) {
+        console.error('Failed to load team pulse data:', error);
+        return;
+    }
+
+    // Nothing happened yet this group's whole history AND nothing last
+    // week either - too early for a "your week in review" to mean
+    // anything (mirrors solo's totalCompletions === 0 guard).
+    if (thisWeekCount === 0 && lastWeekCount === 0) {
+        try {
+            localStorage.setItem(GROUP_TEAM_PULSE_SHOWN_PREFIX + group.id, String(Date.now()));
+        } catch {
+        }
+        return;
+    }
+
+    let topContributorName = null;
+    let topContributorCount = 0;
+    thisWeekCountsByOwner.forEach((count, ownerName) => {
+        if (count > topContributorCount) {
+            topContributorCount = count;
+            topContributorName = ownerName;
+        }
+    });
+
+    showGroupTeamPulse(thisWeekCount, lastWeekCount, topContributorName);
+
+    try {
+        localStorage.setItem(GROUP_TEAM_PULSE_SHOWN_PREFIX + group.id, String(Date.now()));
+    } catch {
+    }
+}
+
+function showGroupTeamPulse(thisWeekCount, lastWeekCount, topContributorName) {
+    if (!teamPulseOverlay || !teamPulseTitle) {
+        return;
+    }
+
+    let titleText;
+    if (thisWeekCount > lastWeekCount) {
+        titleText = 'The team picked up the pace';
+    } else if (thisWeekCount > 0 && thisWeekCount === lastWeekCount) {
+        titleText = 'Steady as ever';
+    } else if (thisWeekCount > 0) {
+        titleText = 'Still moving forward';
+    } else {
+        titleText = 'A quieter week';
+    }
+    teamPulseTitle.textContent = titleText;
+    teamPulseThisWeek.textContent = String(thisWeekCount);
+    teamPulseLastWeek.textContent = String(lastWeekCount);
+    if (teamPulseTopContributor) {
+        teamPulseTopContributor.textContent = topContributorName || '—';
+    }
+
+    teamPulseOverlay.classList.remove('hidden');
+    teamPulseOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function closeGroupTeamPulse() {
+    if (!teamPulseOverlay) {
+        return;
+    }
+    teamPulseOverlay.classList.add('hidden');
+    teamPulseOverlay.setAttribute('aria-hidden', 'true');
+}
+
+if (teamPulseCloseBtn) {
+    teamPulseCloseBtn.addEventListener('click', () => {
+        playClickSound();
+        closeGroupTeamPulse();
+    });
+}
+
+if (teamPulseOverlay) {
+    teamPulseOverlay.addEventListener('click', (event) => {
+        if (event.target === teamPulseOverlay) {
+            closeGroupTeamPulse();
+        }
+    });
 }
 
 function loadGroupSettings() {
@@ -4534,6 +4935,39 @@ if (groupCopyInviteBtn) {
         } catch {
             // Clipboard API can be unavailable (permissions, insecure
             // context) - the code is still shown on screen to copy by hand.
+        }
+    });
+}
+
+// The link is a UI convenience for the exact same joinGroup() call the
+// manual-entry form above already makes - see maybeHandleJoinLink below,
+// which reads this same ?join= param and hands it to the identical
+// function. Nothing about how the code arrives changes what it's allowed
+// to do; firestore.rules' group-membership write rule is what actually
+// decides whether the join succeeds, same as it always has.
+function buildGroupJoinLink(code) {
+    // location.pathname already ends in "index.html" (or the bare "/group/"
+    // directory) depending on how this page was reached - either way,
+    // replacing everything after the last "/" with "index.html" gives a
+    // real, working relative URL without hardcoding a leading-slash path
+    // (see this project's own deploy-subpath convention).
+    const basePath = location.pathname.replace(/[^/]*$/, 'index.html');
+    return `${location.origin}${basePath}?join=${encodeURIComponent(code)}`;
+}
+
+if (groupCopyInviteLinkBtn) {
+    groupCopyInviteLinkBtn.addEventListener('click', async () => {
+        playClickSound();
+        const group = getSelectedGroup();
+        if (!group) {
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(buildGroupJoinLink(group.inviteCode || group.id));
+            groupCopyInviteLinkBtn.title = 'Copied!';
+        } catch {
+            // Same clipboard-unavailable fallback as the bare-code button -
+            // the code itself is still visible on screen to share by hand.
         }
     });
 }
@@ -5328,6 +5762,22 @@ if (yourNameSaveBtn && yourNameInput) {
 const GROUP_WELCOME_KEY = 'todoGroupWelcomeSeenV1';
 const GROUP_COACH_KEY = 'todoGroupCoachV1';
 
+// Same purpose as solo's getMostRecentlyCreatedTask (script.js), scoped to
+// groupTasks instead - used by GROUP_TOUR_STEPS' subtask-sequence steps
+// below to find the task the tour itself just created, not whichever task
+// happens to render first. createdAt on a group task is an ISO string (see
+// addTaskToGroup), compared the same way this file already compares it
+// elsewhere (localeCompare), not solo's plain > (which only works because
+// solo's are also strings, but this file already has its own convention).
+function getMostRecentlyCreatedGroupTask() {
+    return groupTasks.reduce((newest, task) => {
+        if (!task.createdAt) {
+            return newest;
+        }
+        return (!newest || task.createdAt.localeCompare(newest.createdAt) > 0) ? task : newest;
+    }, null);
+}
+
 // Hosted by Dusty now, speaking to you directly in first and second person
 // throughout, same reasoning and same action-gating rules as solo's
 // TOUR_STEPS (script.js) - he introduces himself up front, nearly every
@@ -5386,7 +5836,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.detailsMoreToggleBtn',
         title: 'More options',
-        text: 'Tap here for two more things, a rough time estimate, and a schedule for when you actually plan to sit down and do it.',
+        text: 'Tap here for a few more things: a rough time estimate, a schedule for when you actually plan to sit down and do it, and steps if you already know how you\'ll break this one down.',
         action: { event: 'click' },
         beforeShow: () => { switchGroupView('tasks'); taskDetailsPanel?.classList.add('open'); }
     },
@@ -5410,6 +5860,64 @@ const GROUP_TOUR_STEPS = [
         text: 'You\'ve set it up exactly how you want it. Go ahead, tap + and let\'s actually put this task on the list.',
         action: { event: 'click' },
         beforeShow: () => switchGroupView('tasks')
+    },
+    {
+        // Placeholder selector - every step below rewrites its own
+        // step.selector inside beforeShow(step), scoped to whichever task
+        // getMostRecentlyCreatedGroupTask() finds, same reasoning as
+        // solo's own equivalent steps (script.js's TOUR_STEPS): a tour
+        // RESTART (the always-available .helpTourBtn) can run on a group
+        // that already has tasks, so a bare document.querySelector would
+        // grab whichever task happens to render first, not necessarily the
+        // one this tour just created.
+        selector: '.subtasksToggleBtn',
+        title: 'Break it into steps',
+        text: 'Big tasks go down easier in pieces. Tap here to open up steps for what you just added.',
+        action: { event: 'click' },
+        beforeShow: (step) => {
+            switchGroupView('tasks');
+            const latest = getMostRecentlyCreatedGroupTask();
+            if (latest) {
+                step.selector = `[data-task-id="${latest.id}"] .subtasksToggleBtn`;
+            }
+        }
+    },
+    {
+        selector: '.subtaskInput',
+        title: 'Add a step',
+        text: 'Type one real thing this task involves, right here.',
+        action: { event: 'input', validate: (target) => (target.value || '').trim() !== '' },
+        beforeShow: (step) => {
+            const latest = getMostRecentlyCreatedGroupTask();
+            if (latest) {
+                step.selector = `[data-task-id="${latest.id}"] .subtaskInput`;
+            }
+        }
+    },
+    {
+        selector: '.subtaskAddBtn',
+        title: 'Add it',
+        text: 'Tap + to actually add that step. Anyone on the task can check steps off one at a time, separately from the task itself.',
+        action: { event: 'click' },
+        beforeShow: (step) => {
+            const latest = getMostRecentlyCreatedGroupTask();
+            if (latest) {
+                step.selector = `[data-task-id="${latest.id}"] .subtaskAddBtn`;
+            }
+        }
+    },
+    {
+        selector: '.subtaskDeadlineBtn',
+        title: 'Give that step its own deadline',
+        text: 'A step can have its own deadline, separate from the task\'s overall one. Tap the clock, and it\'ll show up in Today, Overdue, and the Calendar the moment that step\'s own date gets close, even if the whole task isn\'t due for weeks. That\'s how you spread a big project across several days instead of leaving it all for one deadline at the end.',
+        action: { event: 'click' },
+        beforeShow: (step) => {
+            const latest = getMostRecentlyCreatedGroupTask();
+            const newestSubtask = latest?.subtasks?.[latest.subtasks.length - 1];
+            if (latest && newestSubtask) {
+                step.selector = `[data-task-id="${latest.id}"] [data-subtask-id="${newestSubtask.id}"] .subtaskDeadlineBtn`;
+            }
+        }
     },
     {
         selector: '.groupMemberScopeTabs',
@@ -5438,7 +5946,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.memberRoster',
         title: 'Team',
-        text: 'Everyone in the group, their role, and their current progress. Go ahead, click a card, that switches Tasks over to just their work, same as picking them above.',
+        text: 'Everyone in the group, their role, and their current progress. Keep an eye out for a little flame next to a name, that\'s a real streak, the same one solo tracks, just visible here too. Go ahead, click a card, that switches Tasks over to just their work, same as picking them above.',
         action: { event: 'click' },
         beforeShow: () => switchGroupView('team')
     },
@@ -5652,6 +6160,78 @@ function maybeShowGroupWelcome(user, resolvedName) {
     openGroupWelcomeModal(user, resolvedName);
 }
 
+function showJoinLinkBanner(message, kind) {
+    if (!joinLinkBanner || !joinLinkBannerText) {
+        return;
+    }
+    joinLinkBannerText.textContent = message;
+    joinLinkBanner.classList.remove('hidden', 'joinLinkBannerSuccess', 'joinLinkBannerError');
+    if (kind === 'success') {
+        joinLinkBanner.classList.add('joinLinkBannerSuccess');
+    } else if (kind === 'error') {
+        joinLinkBanner.classList.add('joinLinkBannerError');
+    }
+}
+
+function getJoinCodeFromUrl() {
+    const code = new URLSearchParams(location.search).get('join');
+    return code ? code.trim() : '';
+}
+
+// Clears the ?join= param once handled (success, failure, or already-
+// resolved) so a page refresh never re-attempts the same join, and the
+// code doesn't linger indefinitely in the visible URL bar. replaceState
+// keeps this off the back-button history rather than adding an extra step.
+function stripJoinParamFromUrl() {
+    const url = new URL(location.href);
+    url.searchParams.delete('join');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
+}
+
+// One-shot per page load, guarded separately from hasCheckedGroupWelcome
+// above since either can legitimately fire without the other. Hooked into
+// onSignedIn rather than a page-load check specifically so this works
+// whether the user was ALREADY signed in (fires immediately) or just
+// completed sign-in through the auth gate on this same page (fires right
+// after) - the ?join= param survives that whole flow untouched since
+// nothing strips or redirects it before this runs.
+let hasHandledJoinLink = false;
+
+async function maybeHandleJoinLink(user) {
+    if (hasHandledJoinLink) {
+        return;
+    }
+    const code = getJoinCodeFromUrl();
+    if (!code) {
+        return;
+    }
+    hasHandledJoinLink = true;
+
+    try {
+        // Same joinGroup() the manual-entry form calls - a link is exactly
+        // as safe as typing the code, since the same firestore.rules write
+        // decides whether it succeeds either way (see buildGroupJoinLink's
+        // comment above).
+        const { groupId, status } = await joinGroup(code, user);
+        if (status === 'requested') {
+            showJoinLinkBanner('Join request sent via invite link - you\'ll get in once the group\'s owner or an admin approves it.', 'info');
+        } else {
+            selectGroup(groupId);
+            showJoinLinkBanner('Joined the group via invite link!', 'success');
+        }
+    } catch (error) {
+        // Same combined message the manual form already shows for this
+        // exact error (invalid code, closed group, or already a member -
+        // the client genuinely can't tell which, see joinGroup's own
+        // comment) - an already-a-member visitor sees this instead of a
+        // silent no-op, which is an acceptable, pre-existing limitation
+        // shared with manual entry, not something new this link adds.
+        showJoinLinkBanner(error.message || 'Could not join - the invite link may be invalid or expired.', 'error');
+    } finally {
+        stripJoinParamFromUrl();
+    }
+}
+
 AuthGate.init({
     onSignedIn: (user) => {
         currentUser = user;
@@ -5659,6 +6239,7 @@ AuthGate.init({
         renderApp();
         loadGroupSettings();
         startGroupRealtimeUpdates();
+        maybeHandleJoinLink(user).catch((error) => console.error('Failed to handle join link:', error));
         // First time THIS app has ever been opened on this account - see
         // shouldAutoPlayGroupTour above. Fire-and-forget (not awaited) so
         // this one extra Firestore read never delays the group list itself
