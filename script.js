@@ -47,9 +47,7 @@ const deadlinePresetButtons = Array.from(document.querySelectorAll('.deadlinePre
 const schedulePresetButtons = Array.from(document.querySelectorAll('.schedulePresetBtn'));
 const scheduleInput = document.querySelector('.scheduleInput');
 const scheduleContainer = document.querySelector('.scheduleContainer');
-const pendingStepsList = document.querySelector('.pendingStepsList');
-const pendingStepInput = document.querySelector('.pendingStepInput');
-const pendingStepAddBtn = document.querySelector('.pendingStepAddBtn');
+const pendingStepsEditorMount = document.querySelector('.pendingStepsEditorMount');
 const taskViewButtons = Array.from(document.querySelectorAll('.taskViewBtn'));
 const overdueViewButton = document.querySelector('.taskViewBtn[data-view="overdue"]');
 const overdueCountBadge = overdueViewButton?.querySelector('.overdueCountBadge');
@@ -221,6 +219,12 @@ const TOUR_STEPS = [
         beforeShow: () => switchSoloView('tasks')
     },
     {
+        selector: '.detailsStepsGroup',
+        title: 'Steps',
+        text: 'If you already know how you\'ll break this one down, add steps right here, each one can even get its own deadline. Totally optional, skip it if you don\'t need it for this task.',
+        beforeShow: () => switchSoloView('tasks')
+    },
+    {
         selector: '.detailsToggleBtn',
         title: 'Let\'s open Prioritize',
         text: 'Now tap Prioritize, and I\'ll show you everything that helps me figure out what matters most for you.',
@@ -258,7 +262,7 @@ const TOUR_STEPS = [
     {
         selector: '.detailsMoreToggleBtn',
         title: 'More options',
-        text: 'Tap here for a few more things: a rough time estimate, a schedule for when you actually plan to sit down and do it, and steps if you already know how you\'ll break this one down.',
+        text: 'Tap here for a couple more things: a rough time estimate, and a schedule for when you actually plan to sit down and do it.',
         action: { event: 'click' },
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
@@ -743,82 +747,24 @@ function hideQuickAddHint() {
     quickAddHint?.classList.add('hidden');
 }
 
-// Steps added before a task even exists yet - text-only drafts (no id,
-// no completed state) since they aren't real subtasks until addTaskFromInputs
-// commits them. Kept as plain strings rather than reusing the real subtask
-// shape so there's no ambiguity about these being "live" data mid-draft.
-let pendingNewTaskSteps = [];
+// Steps added before a task even exists yet - uses the same
+// createSubtaskRowsEditor (task-shared.js) Dusty's review cards use, so a
+// drafted step can carry its own deadline instead of plain text only.
+// Rebuilt fresh (not just cleared) after each task add/on first load -
+// simpler than tracking a "reset" concept inside the editor itself, and
+// guarantees no leftover event listeners from a previous instance.
+let pendingStepsEditor = null;
 
-function renderPendingStepsList() {
-    if (!pendingStepsList) {
+function mountPendingStepsEditor() {
+    if (!pendingStepsEditorMount) {
         return;
     }
-    pendingStepsList.innerHTML = '';
-    pendingNewTaskSteps.forEach((stepText, index) => {
-        const item = document.createElement('div');
-        item.classList.add('subtaskItem', 'pendingStepItem');
-        item.setAttribute('role', 'listitem');
-
-        const row = document.createElement('div');
-        row.classList.add('subtaskRow');
-
-        const text = document.createElement('span');
-        text.classList.add('subtaskText');
-        text.textContent = stepText;
-
-        const deleteBtn = document.createElement('button');
-        deleteBtn.type = 'button';
-        deleteBtn.classList.add('subtaskDeleteBtn');
-        deleteBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
-        deleteBtn.setAttribute('aria-label', 'Remove step');
-        deleteBtn.addEventListener('click', () => {
-            playClickSound();
-            removePendingStep(index);
-        });
-
-        row.appendChild(text);
-        row.appendChild(deleteBtn);
-        item.appendChild(row);
-        pendingStepsList.appendChild(item);
-    });
+    pendingStepsEditorMount.innerHTML = '';
+    pendingStepsEditor = createSubtaskRowsEditor([]);
+    pendingStepsEditorMount.appendChild(pendingStepsEditor.element);
 }
 
-function addPendingStepFromInput() {
-    if (!pendingStepInput) {
-        return;
-    }
-    const trimmed = pendingStepInput.value.trim();
-    if (trimmed === '') {
-        return;
-    }
-    playClickSound();
-    pendingNewTaskSteps.push(trimmed.slice(0, 240));
-    pendingStepInput.value = '';
-    renderPendingStepsList();
-    pendingStepInput.focus();
-}
-
-function removePendingStep(index) {
-    pendingNewTaskSteps.splice(index, 1);
-    renderPendingStepsList();
-}
-
-function clearPendingSteps() {
-    pendingNewTaskSteps = [];
-    renderPendingStepsList();
-}
-
-if (pendingStepAddBtn) {
-    pendingStepAddBtn.addEventListener('click', addPendingStepFromInput);
-}
-if (pendingStepInput) {
-    pendingStepInput.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            addPendingStepFromInput();
-        }
-    });
-}
+mountPendingStepsEditor();
 
 function addTaskFromInputs() {
     playClickSound();
@@ -856,6 +802,8 @@ function addTaskFromInputs() {
         ? 1
         : Math.max(...tasks.map((task) => task.manualOrder || 0)) + 1;
 
+    const pendingSteps = pendingStepsEditor ? pendingStepsEditor.read() : [];
+
     const newTask = {
         id: generateTaskId(),
         text: taskText,
@@ -870,14 +818,14 @@ function addTaskFromInputs() {
         createdAt: timestamp,
         updatedAt: timestamp,
         manualOrder: nextManualOrder,
-        subtasks: pendingNewTaskSteps.map((stepText) => ({
+        subtasks: pendingSteps.map((entry) => ({
             id: generateSubtaskId(),
-            text: stepText,
+            text: entry.text,
             completed: false,
             createdAt: timestamp,
-            dueAt: null
+            dueAt: entry.dueAt
         })),
-        subtasksExpanded: pendingNewTaskSteps.length > 0
+        subtasksExpanded: pendingSteps.length > 0
     };
 
     tasks.push(newTask);
@@ -897,7 +845,7 @@ function addTaskFromInputs() {
     if (scheduleInput) {
         scheduleInput.value = '';
     }
-    clearPendingSteps();
+    mountPendingStepsEditor();
     hideDeadlinePresets();
     hideQuickAddHint();
     updateDurationInputVisibility();

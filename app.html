@@ -135,6 +135,21 @@
 
                 </div>
 
+                <!-- Steps at creation time - always visible right under the
+                     main input (not behind Prioritize), per direct request.
+                     pendingStepsEditorMount holds whatever
+                     createSubtaskRowsEditor's .element currently is (built
+                     once in script.js, its .stepDraftRows list stays empty
+                     until a step is added, so this costs no visible space
+                     for someone who never uses it - only the small "+ Add
+                     step" link renders by default). addTaskFromInputs reads
+                     each drafted step's text/dueAt from the editor's own
+                     .read(). -->
+                <div class="detailsStepsGroup">
+                    <p class="detailsFieldSubtitle">Steps (optional)</p>
+                    <div class="pendingStepsEditorMount"></div>
+                </div>
+
                 <p class="quickAddHint hidden" aria-live="polite"></p>
 
                 <div class="onboardingHint hidden" role="note" aria-live="polite">
@@ -207,7 +222,7 @@
                     </div>
 
                     <button type="button" class="detailsMoreToggleBtn" aria-expanded="false" aria-controls="detailsMoreOptions">
-                        <span>More options: estimate, schedule, steps</span>
+                        <span>More options: estimate, schedule</span>
                         <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
                     </button>
 
@@ -241,23 +256,6 @@
                             <button class="deadlinePresetBtn schedulePresetBtn" data-preset="evening">This evening</button>
                             <button class="deadlinePresetBtn schedulePresetBtn" data-preset="tomorrowMorning">Tomorrow morning</button>
                             <button class="deadlinePresetBtn schedulePresetBtn" data-preset="clear">No schedule</button>
-                        </div>
-
-                        <!-- Steps at creation time - previously only addable after a
-                             task existed (see .subtasksSection on a task row) or via
-                             Dusty. pendingStepsList holds text-only drafts until Add
-                             is pressed; addTaskFromInputs turns them into real
-                             subtasks on the new task. Reuses the .subtaskAddRow/
-                             .subtaskInput/.subtaskAddBtn classes from the per-task
-                             steps UI so it looks identical without new CSS for the
-                             input row itself. -->
-                        <div class="detailsFieldGroup detailsStepsGroup">
-                            <p class="detailsFieldSubtitle">Steps (optional)</p>
-                            <div class="pendingStepsList" role="list" aria-label="Steps to add"></div>
-                            <div class="subtaskAddRow pendingStepAddRow">
-                                <input type="text" class="subtaskInput pendingStepInput" placeholder="Add a step..." aria-label="Add a step" maxlength="240">
-                                <button type="button" class="subtaskAddBtn pendingStepAddBtn" aria-label="Add step"><i class="fa-solid fa-plus"></i></button>
-                            </div>
                         </div>
                     </div>
                 </div>

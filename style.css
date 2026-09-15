@@ -3623,11 +3623,17 @@ body > .viewTabs{
     width: 100%;
 }
 
-/* Steps at creation time (app.html/group/index.html's .detailsStepsGroup) -
-   reuses .subtaskItem/.subtaskAddRow/.subtaskInput/.subtaskAddBtn from the
-   per-task steps UI (see the block starting at .subtasksSection) so drafted
-   steps look identical to real ones with no separate color/theme rules
-   needed here, just the layout this group itself needs. */
+/* Steps at creation time (.detailsStepsGroup) - solo (app.html/script.js)
+   now builds this with the shared createSubtaskRowsEditor (task-shared.js,
+   .pendingStepsEditorMount hosts its .stepDraftRowsWrap element, which
+   supplies its own layout) and sits always-visible right under
+   .inputContainer, not inside .detailsMoreOptions anymore - margin-top
+   here still reads fine as the first thing after the input row. Group's
+   own .detailsStepsGroup (group/index.html) hasn't been migrated yet and
+   still uses the older plain-text .pendingStepsList/.pendingStepItem
+   markup below (reusing .subtaskItem/.subtaskAddRow/.subtaskInput/
+   .subtaskAddBtn from the per-task steps UI) inside its own
+   .detailsMoreOptions - remove those two rules once group's mirror lands. */
 .detailsStepsGroup{
     margin-top: var(--space-3);
 }
