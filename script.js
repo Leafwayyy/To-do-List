@@ -258,7 +258,7 @@ const TOUR_STEPS = [
     {
         selector: '.detailsMoreToggleBtn',
         title: 'More options',
-        text: 'Tap here for two more things, a rough time estimate, and a schedule for when you actually plan to sit down and do it.',
+        text: 'Tap here for a few more things: a rough time estimate, a schedule for when you actually plan to sit down and do it, and steps if you already know how you\'ll break this one down.',
         action: { event: 'click' },
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); }
     },
