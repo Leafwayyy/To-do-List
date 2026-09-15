@@ -191,6 +191,66 @@ async function acknowledgeSuggestionOutcome(groupId, suggestionId) {
     await updateDoc(doc(db(), 'groups', groupId, 'suggestions', suggestionId), { acknowledgedBySender: true });
 }
 
+// ---------------------------------------------------------------------
+// Task handoff (Feature 10) - reassigning a task's owner without losing its
+// subtasks/comments/history. Deliberately NOT a separate subcollection the
+// way suggestions are: the pending request lives as a single
+// `handoffRequest` field right on the task document itself, so accepting
+// it is one atomic document write (ownerId flips + the request clears,
+// together) rather than two separate non-transactional writes that could
+// race each other - see firestore.rules' tasks/{taskId} update rule, the
+// only place ownerId is allowed to change to someone other than its
+// current value. Mirrors the suggestion accept/reject trust model: the
+// recipient's own action is what commits the change, never the sender
+// directly setting the new owner.
+// ---------------------------------------------------------------------
+
+async function requestTaskHandoff(groupId, task, toUserId, toUserName, fromUser) {
+    const { doc, updateDoc } = fs();
+    await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), {
+        handoffRequest: {
+            toUserId,
+            toUserName,
+            fromUserId: fromUser.uid,
+            fromUserName: displayNameFor(fromUser),
+            requestedAt: new Date().toISOString()
+        }
+    });
+}
+
+// Used for both "owner cancels their own outgoing request" and "recipient
+// declines an incoming one" - the write itself is identical either way
+// (just null the field); firestore.rules is what tells the two apart by
+// checking who's asking.
+async function clearTaskHandoff(groupId, taskId) {
+    const { doc, updateDoc } = fs();
+    await updateDoc(doc(db(), 'groups', groupId, 'tasks', taskId), { handoffRequest: null });
+}
+
+async function acceptTaskHandoff(groupId, task, user) {
+    const { doc, writeBatch, serverTimestamp, increment } = fs();
+    const batch = writeBatch(db());
+    batch.update(doc(db(), 'groups', groupId, 'tasks', task.id), {
+        ownerId: user.uid,
+        handoffRequest: null,
+        commentCount: increment(1),
+        lastCommentAt: serverTimestamp()
+    });
+    // A visible record of the handoff, in the one place it's most useful -
+    // right on the task's own comment thread - rather than a whole new
+    // collection just to keep a history of who owned what when (see
+    // firestore.rules' note on the same tradeoff). Posted by the recipient
+    // (accurately - they're the one who just accepted), not the original
+    // owner.
+    batch.set(doc(db(), 'groups', groupId, 'tasks', task.id, 'comments', generateTaskId()), {
+        authorId: user.uid,
+        authorName: displayNameFor(user),
+        text: `Took over this task from ${task.handoffRequest?.fromUserName || 'a teammate'}.`,
+        createdAt: serverTimestamp()
+    });
+    await batch.commit();
+}
+
 async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, recurrence, scheduledAt, taskType, estimateMinutes, subtasks }) {
     const trimmedText = text.trim();
     if (!trimmedText) {
@@ -571,6 +631,7 @@ const groupHistoryList = document.querySelector('.groupHistoryList');
 const groupHistoryUnreadDot = document.querySelector('.historyUnreadDot');
 const suggestionsForYouPanel = document.querySelector('.suggestionsForYouPanel');
 const suggestionOutcomesPanel = document.querySelector('.suggestionOutcomesPanel');
+const handoffRequestsForYouPanel = document.querySelector('.handoffRequestsForYouPanel');
 const brainDumpToggleBtn = document.querySelector('.brainDumpToggleBtn');
 const groupAlertToggleBtn = document.querySelector('.groupAlertToggleBtn');
 const helpTourBtn = document.querySelector('.helpTourBtn');
@@ -922,6 +983,53 @@ function createGroupTaskItem(groupId, task, isOwner) {
                 toggleGroupSnoozeExpanded(task.id);
             });
             taskButtons.appendChild(snoozeBtn);
+        }
+
+        // Handoff (Feature 10): only worth offering with someone else in the
+        // group to hand off to, and not once the task's already done - a
+        // completed task has nothing left to hand off. Two mutually
+        // exclusive states, never both buttons at once: an outstanding
+        // request replaces the trigger button with a cancelable pending
+        // chip, same "state IS the control" pattern the roster's kick
+        // button uses elsewhere.
+        const groupForHandoff = getSelectedGroup();
+        const canHandoff = !task.completed && (groupForHandoff?.memberIds?.length || 0) > 1;
+        if (canHandoff) {
+            if (task.handoffRequest) {
+                const pendingBtn = document.createElement('button');
+                pendingBtn.type = 'button';
+                pendingBtn.classList.add('handoffPendingBtn');
+                const pendingIcon = document.createElement('i');
+                pendingIcon.className = 'fa-solid fa-right-left';
+                pendingIcon.setAttribute('aria-hidden', 'true');
+                pendingBtn.appendChild(pendingIcon);
+                const pendingLabel = document.createElement('span');
+                pendingLabel.classList.add('taskBtnLabel');
+                // task.handoffRequest.toUserName is another member's display
+                // name, user-controlled - textContent only, same reasoning
+                // as renderSuggestionsForYou/renderHandoffRequestsForYou.
+                pendingLabel.textContent = `Pending: ${task.handoffRequest.toUserName || 'teammate'}`;
+                pendingBtn.appendChild(pendingLabel);
+                pendingBtn.setAttribute('aria-label', `Cancel handoff request to ${task.handoffRequest.toUserName || 'teammate'}`);
+                pendingBtn.title = 'Click to cancel this handoff request';
+                pendingBtn.addEventListener('click', () => {
+                    playClickSound();
+                    clearTaskHandoff(groupId, task.id).catch((error) => console.error('Failed to cancel handoff request:', error));
+                });
+                taskButtons.appendChild(pendingBtn);
+            } else {
+                const handoffBtn = document.createElement('button');
+                handoffBtn.type = 'button';
+                handoffBtn.classList.add('handoffBtn');
+                handoffBtn.innerHTML = '<i class="fa-solid fa-right-left"></i><span class="taskBtnLabel">Handoff</span>';
+                handoffBtn.setAttribute('aria-label', 'Hand this task off to a teammate');
+                handoffBtn.title = 'Hand this task off to a teammate';
+                handoffBtn.addEventListener('click', () => {
+                    playClickSound();
+                    openHandoffPicker(groupId, task);
+                });
+                taskButtons.appendChild(handoffBtn);
+            }
         }
 
         const deleteBtn = document.createElement('button');
@@ -2575,6 +2683,165 @@ function renderSuggestionOutcomes(groupId) {
     });
 }
 
+// Handoff requests waiting on you - same "waiting on you" shape as
+// renderSuggestionsForYou right above (reuses its .suggestionRow/
+// .suggestionRowText/.suggestionRowFrom/.suggestionRowActions/
+// .suggestionAcceptBtn/.suggestionDismissBtn classes verbatim so it looks
+// identical with zero new row CSS, same precedent as the Steps builder
+// reusing .subtaskItem), but sourced from groupTasks itself rather than a
+// separate collection - see requestTaskHandoff's comment for why.
+function getPendingHandoffsForYou() {
+    if (!currentUser) {
+        return [];
+    }
+    return groupTasks.filter((task) => task.handoffRequest && task.handoffRequest.toUserId === currentUser.uid);
+}
+
+function renderHandoffRequestsForYou(groupId) {
+    if (!handoffRequestsForYouPanel || !currentUser) {
+        return;
+    }
+
+    const pendingForMe = getPendingHandoffsForYou();
+
+    handoffRequestsForYouPanel.innerHTML = '';
+    handoffRequestsForYouPanel.classList.toggle('hidden', pendingForMe.length === 0);
+
+    pendingForMe.forEach((task) => {
+        const row = document.createElement('div');
+        row.classList.add('suggestionRow');
+
+        // Same reasoning as renderSuggestionsForYou just above - fromUserName
+        // and the task's own text are both attacker-controllable strings,
+        // built via textContent/createElement, never innerHTML.
+        const text = document.createElement('p');
+        text.classList.add('suggestionRowText');
+        const fromSpan = document.createElement('span');
+        fromSpan.classList.add('suggestionRowFrom');
+        fromSpan.textContent = `${task.handoffRequest.fromUserName || 'A teammate'} wants to hand off:`;
+        text.appendChild(fromSpan);
+        text.appendChild(document.createTextNode(` ${task.text || ''}`));
+        row.appendChild(text);
+
+        const badges = document.createElement('div');
+        badges.classList.add('suggestionRowBadges');
+        const matrixValue = getValidMatrixValue(task.matrix);
+        const matrixBadge = document.createElement('span');
+        matrixBadge.classList.add('matrixBadge', MATRIX_CONFIG[matrixValue].className);
+        matrixBadge.textContent = MATRIX_CONFIG[matrixValue].label;
+        badges.appendChild(matrixBadge);
+        row.appendChild(badges);
+
+        const actions = document.createElement('div');
+        actions.classList.add('suggestionRowActions');
+
+        const acceptBtn = document.createElement('button');
+        acceptBtn.type = 'button';
+        acceptBtn.classList.add('suggestionAcceptBtn');
+        acceptBtn.textContent = 'Take it over';
+        acceptBtn.addEventListener('click', () => {
+            playClickSound();
+            acceptTaskHandoff(groupId, task, currentUser).catch((error) => console.error('Failed to accept handoff:', error));
+        });
+        actions.appendChild(acceptBtn);
+
+        const declineBtn = document.createElement('button');
+        declineBtn.type = 'button';
+        declineBtn.classList.add('suggestionDismissBtn');
+        declineBtn.textContent = 'Decline';
+        declineBtn.addEventListener('click', () => {
+            playClickSound();
+            clearTaskHandoff(groupId, task.id).catch((error) => console.error('Failed to decline handoff:', error));
+        });
+        actions.appendChild(declineBtn);
+
+        row.appendChild(actions);
+        handoffRequestsForYouPanel.appendChild(row);
+    });
+}
+
+// Handoff picker - who to hand a task off to. Reuses the same
+// .taskEditorOverlay/.taskEditorCard chrome as the suggest-task modal
+// below, but is built fresh each time it opens (rather than created once
+// and toggled) since the member list/task it's for changes every time.
+let handoffPickerOverlay = null;
+
+function openHandoffPicker(groupId, task) {
+    const group = getSelectedGroup();
+    if (!group || !currentUser) {
+        return;
+    }
+    const memberIds = group.memberIds || [];
+    const memberNames = group.memberNames || [];
+    const teammates = memberIds
+        .map((memberId, index) => ({ memberId, name: resolveMemberName(memberId, memberNames[index], groupTasks) }))
+        .filter((entry) => entry.memberId !== task.ownerId);
+
+    if (teammates.length === 0) {
+        return;
+    }
+
+    closeHandoffPicker();
+    handoffPickerOverlay = document.createElement('div');
+    handoffPickerOverlay.className = 'taskEditorOverlay handoffPickerOverlay open';
+    handoffPickerOverlay.innerHTML = `
+        <div class="taskEditorCard handoffPickerCard" role="dialog" aria-modal="true" aria-label="Hand off task">
+            <h2>Hand Off Task</h2>
+            <p class="handoffPickerHint"></p>
+            <div class="handoffPickerList"></div>
+            <div class="editorActions">
+                <button type="button" class="editorCancelBtn handoffPickerCancelBtn">Cancel</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(handoffPickerOverlay);
+
+    // task.text is user-controlled - textContent only, never the innerHTML
+    // template above (same reasoning as renderSuggestionsForYou).
+    handoffPickerOverlay.querySelector('.handoffPickerHint').textContent = `Who should take over "${task.text}"?`;
+
+    const list = handoffPickerOverlay.querySelector('.handoffPickerList');
+    teammates.forEach(({ memberId, name }) => {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.classList.add('handoffPickerRow');
+        const avatar = document.createElement('span');
+        avatar.classList.add('scopeTabAvatar');
+        avatar.setAttribute('aria-hidden', 'true');
+        avatar.textContent = (name || '?').trim().charAt(0).toUpperCase() || '?';
+        row.appendChild(avatar);
+        const label = document.createElement('span');
+        label.textContent = name;
+        row.appendChild(label);
+        row.addEventListener('click', () => {
+            playClickSound();
+            requestTaskHandoff(groupId, task, memberId, name, currentUser)
+                .catch((error) => console.error('Failed to request handoff:', error));
+            closeHandoffPicker();
+        });
+        list.appendChild(row);
+    });
+
+    const cancelBtn = handoffPickerOverlay.querySelector('.handoffPickerCancelBtn');
+    cancelBtn.addEventListener('click', () => {
+        playClickSound();
+        closeHandoffPicker();
+    });
+    handoffPickerOverlay.addEventListener('click', (event) => {
+        if (event.target === handoffPickerOverlay) {
+            closeHandoffPicker();
+        }
+    });
+}
+
+function closeHandoffPicker() {
+    if (!handoffPickerOverlay) {
+        return;
+    }
+    handoffPickerOverlay.remove();
+    handoffPickerOverlay = null;
+}
+
 // "Suggest a task" modal - reuses the exact .taskEditorOverlay/.taskEditorCard
 // styling from the task editor (see initializeGroupTaskEditor) so it looks
 // consistent, but is its own overlay since the fields and purpose differ
@@ -4042,6 +4309,7 @@ function renderApp() {
         renderSuggestForMemberBanner(group);
         renderSuggestionsForYou(group.id);
         renderSuggestionOutcomes(group.id);
+        renderHandoffRequestsForYou(group.id);
         renderGroupTasks();
         renderGroupCalendarView();
         // The 6-button deadline-filter row isn't worth much with barely any

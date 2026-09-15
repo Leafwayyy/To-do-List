@@ -1714,7 +1714,9 @@ body{
    circle-becomes-pill background once there's a label sitting beside it. */
 .editBtn,
 .deleteBtn,
-.snoozeBtn{
+.snoozeBtn,
+.handoffBtn,
+.handoffPendingBtn{
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1752,6 +1754,34 @@ body{
 
 .snoozeBtn .taskBtnLabel{
     display: inline;
+}
+
+/* Handoff keeps its label at every width too, same reasoning as Snooze
+   right above - "right-left arrows" isn't any more universally recognized
+   icon-only than a clock is. */
+.handoffBtn,
+.handoffPendingBtn{
+    width: auto;
+    padding: 0 var(--space-3);
+}
+
+.handoffBtn .taskBtnLabel,
+.handoffPendingBtn .taskBtnLabel{
+    display: inline;
+}
+
+/* Pending gets the same "already looks different at rest" treatment
+   .deleteBtn gets below for its own (opposite) meaning - reuses the
+   existing --color-warning token rather than inventing a new color, since
+   this is a "waiting on someone" state, not a destructive one. */
+.handoffPendingBtn{
+    background: var(--color-warning-soft);
+    border-color: var(--color-warning);
+}
+
+.handoffPendingBtn i,
+.handoffPendingBtn .taskBtnLabel{
+    color: var(--color-warning);
 }
 
 /* Delete gets --color-danger tinting at rest, not just on hover - Jakob's
@@ -1793,7 +1823,9 @@ body{
 
 .editBtn:hover,
 .deleteBtn:hover,
-.snoozeBtn:hover{
+.snoozeBtn:hover,
+.handoffBtn:hover,
+.handoffPendingBtn:hover{
     background: rgba(39, 39, 39, 0.8);
     transform: scale(1.05);
     transition: all 0.2s ease-in-out;
@@ -1801,6 +1833,14 @@ body{
 
 .deleteBtn:hover{
     background: var(--color-danger-soft, rgba(255, 107, 107, 0.28));
+}
+
+/* Keeps its amber "waiting" identity on hover instead of flattening to the
+   generic dark hover above - same override pattern .deleteBtn:hover uses
+   for its own semantic tint. */
+.handoffPendingBtn:hover{
+    background: var(--color-warning-soft);
+    filter: brightness(1.12);
 }
 
 .editBtn:active,
@@ -8524,7 +8564,8 @@ body.authGateActive .authOverlay{
     background: var(--color-danger-soft, rgba(255, 107, 107, 0.28));
 }
 
-.suggestionsForYouPanel{
+.suggestionsForYouPanel,
+.handoffRequestsForYouPanel{
     width: 100%;
     display: flex;
     flex-direction: column;
@@ -8532,7 +8573,8 @@ body.authGateActive .authOverlay{
     margin-bottom: 4px;
 }
 
-.suggestionsForYouPanel.hidden{
+.suggestionsForYouPanel.hidden,
+.handoffRequestsForYouPanel.hidden{
     display: none;
 }
 
@@ -8647,6 +8689,56 @@ body.authGateActive .authOverlay{
 
 .suggestionDismissBtn:hover{
     color: var(--violet-text);
+}
+
+/* Handoff picker (Feature 9): reuses .taskEditorOverlay/.taskEditorCard and
+   .editorActions/.editorCancelBtn from the suggest-task modal almost
+   entirely - only the member-picker list itself is genuinely new markup,
+   modeled after the member-scope tabs' avatar-chip button (.scopeTabAvatar,
+   reused as-is below) since that's the closest existing "avatar + name,
+   click to act" control already in the app. */
+.handoffPickerHint{
+    margin: 0 0 4px;
+    font-size: var(--text-sm);
+    color: var(--violet-muted);
+}
+
+.handoffPickerList{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.handoffPickerRow{
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--violet-border-soft);
+    background: rgba(181, 139, 255, 0.08);
+    color: var(--violet-text);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: left;
+}
+
+.handoffPickerRow:hover{
+    border-color: var(--violet-accent);
+    background: rgba(181, 139, 255, 0.16);
+}
+
+.handoffPickerRow .scopeTabAvatar{
+    width: 24px;
+    height: 24px;
+    font-size: 11px;
+    background: var(--violet-accent);
+    color: #1a1330;
+    flex-shrink: 0;
 }
 
 .memberCardName{

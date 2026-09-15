@@ -404,14 +404,43 @@ service cloud.firestore {
         // would need a server-authoritative counter (a Cloud Function),
         // out of scope here - this closes the actual reported gap (an
         // arbitrary value combined with a faked "just happened" timestamp).
+        //
+        // Feature 10 (task handoff): ownerId itself is now allowed to change,
+        // but ONLY via the accept/decline branches below - the recipient of
+        // a pending handoffRequest accepting it. This is the plan's single
+        // biggest data-integrity risk (see plan's C.2 risk notes): the owner
+        // branch explicitly pins ownerId to its current value so the
+        // current owner can never silently reassign their own task by
+        // editing it normally, and there is deliberately no separate
+        // handoffRequests collection - the pending request lives as one
+        // `handoffRequest` field right on this same document, so accepting
+        // it (ownerId flips + the field clears) is a single atomic write,
+        // not two racing ones. The accept branch's own commentCount/
+        // lastCommentAt ride-along (for the "took over this task" comment
+        // acceptTaskHandoff() posts in the same batch) reuses this same
+        // +1/request.time validation, not a separate unchecked allowance.
         allow update: if request.auth != null
           && (
             (
               request.auth.uid == resource.data.ownerId
+              && request.resource.data.ownerId == resource.data.ownerId
               && request.resource.data.text is string
               && request.resource.data.text.size() > 0
               && request.resource.data.text.size() <= 2000
               && (!('subtasks' in request.resource.data) || request.resource.data.subtasks.size() <= 200)
+              // The owner may set handoffRequest to null (no request / just
+              // cancelled one) or to a well-formed request naming a real
+              // teammate other than themself - never anyone else's field.
+              && (
+                !('handoffRequest' in request.resource.data)
+                || request.resource.data.handoffRequest == null
+                || (
+                  request.resource.data.handoffRequest.toUserId is string
+                  && request.resource.data.handoffRequest.toUserId != resource.data.ownerId
+                  && request.resource.data.handoffRequest.toUserId
+                    in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+                )
+              )
             )
             || (
               request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
@@ -442,6 +471,43 @@ service cloud.firestore {
                   )
                 )
               )
+            )
+            || (
+              // Accept: only the person a pending request actually names can
+              // take it, and only while they're still a real member of this
+              // group - leaving/being kicked between being named and
+              // responding must not leave a standing write path into a
+              // group they're no longer part of, same membership check
+              // every other group-scoped rule in this file already makes.
+              // The write may ONLY flip ownerId to themself and clear the
+              // request. acceptTaskHandoff() always posts its "took over
+              // this task" comment in the same batch, so commentCount/
+              // lastCommentAt ride along too, held to the exact same
+              // +1/request.time shape the comment-count branch above
+              // requires for a real add - never a bare unchecked allowance.
+              'handoffRequest' in resource.data
+              && resource.data.handoffRequest != null
+              && resource.data.handoffRequest.toUserId == request.auth.uid
+              && request.auth.uid != resource.data.ownerId
+              && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+              && request.resource.data.ownerId == request.auth.uid
+              && request.resource.data.handoffRequest == null
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['ownerId', 'handoffRequest', 'commentCount', 'lastCommentAt'])
+              && request.resource.data.commentCount == resource.data.commentCount + 1
+              && request.resource.data.lastCommentAt == request.time
+            )
+            || (
+              // Decline: the same named recipient (while still a member,
+              // same reasoning as accept above) may clear the request
+              // without taking the task - ownerId does not change.
+              'handoffRequest' in resource.data
+              && resource.data.handoffRequest != null
+              && resource.data.handoffRequest.toUserId == request.auth.uid
+              && request.auth.uid != resource.data.ownerId
+              && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+              && request.resource.data.handoffRequest == null
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['handoffRequest'])
             )
           );
         allow delete: if request.auth != null && request.auth.uid == resource.data.ownerId;
