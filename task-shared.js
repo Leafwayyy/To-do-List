@@ -1246,3 +1246,142 @@ function applyEditedSubtasks(existingSubtasks, newSubtasks) {
             };
         });
 }
+
+// Formats an ISO date string for a native <input type="datetime-local">
+// value ("YYYY-MM-DDTHH:mm", local time). Was duplicated per-file
+// (script.js/group.js each had their own copy); centralized here since
+// createSubtaskRowsEditor below needs it too and there's no reason for a
+// third copy. Invalid/missing input returns '' rather than throwing, same
+// as every caller already expected.
+function toDatetimeLocalValue(isoValue) {
+    if (!isoValue || !isValidDateValue(isoValue)) {
+        return '';
+    }
+
+    const date = new Date(isoValue);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+// A draft's subtasks can arrive as either shape: the new {text, dueAt}
+// objects the Worker sends, or a bare string (defensive - an older
+// in-flight response, or a manually-constructed draft elsewhere).
+// Normalizing once here means every reader downstream can assume the real
+// shape without re-checking it itself. Moved from brain-dump.js so
+// createSubtaskRowsEditor below (now used outside Brain Dump too) can use
+// it without a private copy.
+function normalizeDraftSubtasks(subtasks) {
+    return (Array.isArray(subtasks) ? subtasks : [])
+        .map((entry) => (typeof entry === 'string' ? { text: entry, dueAt: null } : { text: entry?.text || '', dueAt: entry?.dueAt || null }))
+        .filter((entry) => entry.text);
+}
+
+// A row-per-step editor for a set of draft subtasks - originally built only
+// for Dusty's review cards (brain-dump.js), moved here so manual task
+// creation's always-visible Steps field (see .detailsStepsGroup in
+// app.html/script.js, and group's mirror) can reuse the exact same
+// per-step deadline control instead of a separate plain-text-only
+// implementation. Returns { element, read() } - read() always reflects the
+// live rows, including any added/removed since the editor was built, since
+// it closes over the actual input elements rather than a snapshot.
+function createSubtaskRowsEditor(initialSubtasks) {
+    const wrap = document.createElement('div');
+    wrap.classList.add('stepDraftRowsWrap');
+
+    const list = document.createElement('div');
+    list.classList.add('stepDraftRows');
+    wrap.appendChild(list);
+
+    const rows = []; // { rowEl, textInput, deadlineInput }
+
+    function addRow(subtask) {
+        const row = document.createElement('div');
+        row.classList.add('stepDraftRow');
+
+        const textInput = document.createElement('input');
+        textInput.type = 'text';
+        textInput.classList.add('stepDraftRowText');
+        textInput.placeholder = 'Step...';
+        textInput.value = subtask?.text || '';
+
+        const deadlineBtn = document.createElement('button');
+        deadlineBtn.type = 'button';
+        deadlineBtn.classList.add('stepDraftRowDeadlineBtn');
+        deadlineBtn.innerHTML = '<i class="fa-solid fa-clock"></i>';
+
+        const deadlineInput = document.createElement('input');
+        deadlineInput.type = 'datetime-local';
+        deadlineInput.classList.add('stepDraftRowDeadlineInput', 'hidden');
+        deadlineInput.setAttribute('aria-label', 'Step deadline');
+        if (subtask?.dueAt) {
+            deadlineInput.value = toDatetimeLocalValue(subtask.dueAt);
+            if (deadlineInput.value) {
+                deadlineBtn.classList.add('hasDeadline');
+            }
+        }
+        deadlineBtn.setAttribute('aria-label', deadlineInput.value ? 'Change step deadline' : 'Set step deadline');
+
+        deadlineBtn.addEventListener('click', () => {
+            deadlineInput.classList.toggle('hidden');
+            if (!deadlineInput.classList.contains('hidden')) {
+                if (typeof deadlineInput.showPicker === 'function') {
+                    deadlineInput.showPicker();
+                } else {
+                    deadlineInput.focus();
+                }
+            }
+        });
+        deadlineInput.addEventListener('change', () => {
+            deadlineBtn.classList.toggle('hasDeadline', Boolean(deadlineInput.value));
+            deadlineBtn.setAttribute('aria-label', deadlineInput.value ? 'Change step deadline' : 'Set step deadline');
+        });
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.classList.add('stepDraftRowRemoveBtn');
+        removeBtn.setAttribute('aria-label', 'Remove step');
+        removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        removeBtn.addEventListener('click', () => {
+            row.remove();
+            const index = rows.findIndex((entry) => entry.rowEl === row);
+            if (index !== -1) {
+                rows.splice(index, 1);
+            }
+        });
+
+        row.appendChild(textInput);
+        row.appendChild(deadlineBtn);
+        row.appendChild(deadlineInput);
+        row.appendChild(removeBtn);
+        list.appendChild(row);
+        rows.push({ rowEl: row, textInput, deadlineInput });
+    }
+
+    normalizeDraftSubtasks(initialSubtasks).forEach(addRow);
+
+    const addRowBtn = document.createElement('button');
+    addRowBtn.type = 'button';
+    addRowBtn.classList.add('stepDraftAddRowBtn');
+    addRowBtn.textContent = '+ Add step';
+    addRowBtn.addEventListener('click', () => {
+        addRow(null);
+        rows[rows.length - 1]?.textInput.focus();
+    });
+    wrap.appendChild(addRowBtn);
+
+    function read() {
+        return rows
+            .map((entry) => ({
+                text: entry.textInput.value.trim(),
+                dueAt: entry.deadlineInput.value ? new Date(entry.deadlineInput.value).toISOString() : null
+            }))
+            .filter((entry) => entry.text);
+    }
+
+    return { element: wrap, read };
+}

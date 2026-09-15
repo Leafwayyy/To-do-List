@@ -7157,8 +7157,7 @@ body.authGateActive .authOverlay{
     padding: 2px 0;
 }
 
-.stepDraftAddRowBtn:hover,
-.brainDumpSubtaskAddRowBtn:hover{
+.stepDraftAddRowBtn:hover{
     text-decoration: underline;
 }
 

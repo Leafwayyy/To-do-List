@@ -1084,119 +1084,12 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         row.remove();
     }
 
-    // A draft's subtasks can arrive as either shape: the new {text, dueAt}
-    // objects the Worker now sends, or a bare string (defensive - an older
-    // in-flight response, or a manually-constructed draft elsewhere).
-    // Normalizing once here means every reader downstream can assume the
-    // real shape without re-checking it itself.
-    function normalizeDraftSubtasks(subtasks) {
-        return (Array.isArray(subtasks) ? subtasks : [])
-            .map((entry) => (typeof entry === 'string' ? { text: entry, dueAt: null } : { text: entry?.text || '', dueAt: entry?.dueAt || null }))
-            .filter((entry) => entry.text);
-    }
-
-    // A row-per-step editor for a review card's subtasks - shared by
-    // createTaskReviewCard (new tasks) and createTaskEditReviewCard (edits),
-    // so a Dusty-proposed step gets the exact same per-step deadline control
-    // the real task list already has (.subtaskDeadlineBtn in script.js),
-    // instead of the old plain one-line-per-step textarea, which had no way
-    // to carry a date at all. Returns { element, read() } like every other
-    // card piece here - read() always reflects the live rows, including any
-    // added/removed since the draft first rendered.
-    function createSubtaskRowsEditor(initialSubtasks) {
-        const wrap = document.createElement('div');
-        wrap.classList.add('brainDumpSubtaskRowsWrap');
-
-        const list = document.createElement('div');
-        list.classList.add('brainDumpSubtaskRows');
-        wrap.appendChild(list);
-
-        const rows = []; // { rowEl, textInput, deadlineInput }
-
-        function addRow(subtask) {
-            const row = document.createElement('div');
-            row.classList.add('brainDumpSubtaskRow');
-
-            const textInput = document.createElement('input');
-            textInput.type = 'text';
-            textInput.classList.add('brainDumpSubtaskRowText');
-            textInput.placeholder = 'Step...';
-            textInput.value = subtask?.text || '';
-
-            const deadlineBtn = document.createElement('button');
-            deadlineBtn.type = 'button';
-            deadlineBtn.classList.add('brainDumpSubtaskRowDeadlineBtn');
-            deadlineBtn.innerHTML = '<i class="fa-solid fa-clock"></i>';
-
-            const deadlineInput = document.createElement('input');
-            deadlineInput.type = 'datetime-local';
-            deadlineInput.classList.add('brainDumpSubtaskRowDeadlineInput', 'hidden');
-            deadlineInput.setAttribute('aria-label', 'Step deadline');
-            if (subtask?.dueAt && !Number.isNaN(new Date(subtask.dueAt).getTime())) {
-                deadlineInput.value = brainDumpToDatetimeLocalValue(new Date(subtask.dueAt));
-                deadlineBtn.classList.add('hasDeadline');
-            }
-            deadlineBtn.setAttribute('aria-label', deadlineInput.value ? 'Change step deadline' : 'Set step deadline');
-
-            deadlineBtn.addEventListener('click', () => {
-                deadlineInput.classList.toggle('hidden');
-                if (!deadlineInput.classList.contains('hidden')) {
-                    if (typeof deadlineInput.showPicker === 'function') {
-                        deadlineInput.showPicker();
-                    } else {
-                        deadlineInput.focus();
-                    }
-                }
-            });
-            deadlineInput.addEventListener('change', () => {
-                deadlineBtn.classList.toggle('hasDeadline', Boolean(deadlineInput.value));
-                deadlineBtn.setAttribute('aria-label', deadlineInput.value ? 'Change step deadline' : 'Set step deadline');
-            });
-
-            const removeBtn = document.createElement('button');
-            removeBtn.type = 'button';
-            removeBtn.classList.add('brainDumpSubtaskRowRemoveBtn');
-            removeBtn.setAttribute('aria-label', 'Remove step');
-            removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
-            removeBtn.addEventListener('click', () => {
-                row.remove();
-                const index = rows.findIndex((entry) => entry.rowEl === row);
-                if (index !== -1) {
-                    rows.splice(index, 1);
-                }
-            });
-
-            row.appendChild(textInput);
-            row.appendChild(deadlineBtn);
-            row.appendChild(deadlineInput);
-            row.appendChild(removeBtn);
-            list.appendChild(row);
-            rows.push({ rowEl: row, textInput, deadlineInput });
-        }
-
-        normalizeDraftSubtasks(initialSubtasks).forEach(addRow);
-
-        const addRowBtn = document.createElement('button');
-        addRowBtn.type = 'button';
-        addRowBtn.classList.add('brainDumpSubtaskAddRowBtn');
-        addRowBtn.textContent = '+ Add step';
-        addRowBtn.addEventListener('click', () => {
-            addRow(null);
-            rows[rows.length - 1]?.textInput.focus();
-        });
-        wrap.appendChild(addRowBtn);
-
-        function read() {
-            return rows
-                .map((entry) => ({
-                    text: entry.textInput.value.trim(),
-                    dueAt: entry.deadlineInput.value ? new Date(entry.deadlineInput.value).toISOString() : null
-                }))
-                .filter((entry) => entry.text);
-        }
-
-        return { element: wrap, read };
-    }
+    // normalizeDraftSubtasks and createSubtaskRowsEditor now live in
+    // task-shared.js (loaded before this file) - moved so manual task
+    // creation's always-visible Steps field can reuse the same per-step
+    // deadline editor instead of a separate implementation. Both call
+    // sites below (createTaskReviewCard, createTaskEditReviewCard) are
+    // unchanged - the names still resolve globally.
 
     // Returns { element, read() } rather than stashing state on the DOM
     // node - read() closes over the actual live input elements so it
