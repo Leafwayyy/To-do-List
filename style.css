@@ -8284,7 +8284,7 @@ body.authGateActive .authOverlay{
     line-height: 1.6;
     color: var(--violet-muted);
     /* Each fact (recent completion, current leader, overdue count) is its
-       own line - a joined \n\n from group.js's buildCatchUpSummaryLines,
+       own line - a joined \n from group.js's buildCatchUpSummaryLines,
        not one run-together sentence - so it reads as a short scannable
        list, not a paragraph to parse. */
     white-space: pre-line;
