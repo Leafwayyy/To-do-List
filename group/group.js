@@ -34,9 +34,14 @@ function subscribeToGroupTasks(groupId, callback, onError) {
 // tasks collection, so a completion still shows here after the task
 // itself gets deleted. See firestore.rules' groups/{groupId}/history for
 // why this is its own top-level subcollection rather than nested under
-// /tasks. Capped at 50 most recent (across the whole group, before any
-// per-member scope filtering in renderGroupHistory) so this doesn't grow
-// into an ever-larger download as a group racks up history over time.
+// /tasks. Capped (across the whole group, before any per-member scope
+// filtering in renderGroupHistory) so this doesn't grow into an ever-larger
+// download as a group racks up history over time. The leaderboard's "week"
+// range (see getMemberCompletedEntriesForRange below) relies on this same
+// capped list rather than its own query - 200 is a wide enough margin that
+// a real group's combined weekly completions shouldn't plausibly exceed it
+// (unlike the original 50, which a handful of active members could reach
+// in a week and silently undercount).
 // ---------------------------------------------------------------------
 
 function subscribeToGroupHistory(groupId, callback, onError) {
@@ -44,7 +49,7 @@ function subscribeToGroupHistory(groupId, callback, onError) {
     const historyRef = query(
         collection(db(), 'groups', groupId, 'history'),
         orderBy('completedAt', 'desc'),
-        limit(50)
+        limit(200)
     );
     return onSnapshot(historyRef, (snapshot) => {
         callback(snapshot.docs.map((entryDoc) => ({ id: entryDoc.id, ...entryDoc.data() })));
@@ -714,6 +719,10 @@ const SELECTED_GROUP_KEY = 'todolist-selected-group';
 
 let currentUser = null;
 let groups = undefined; // undefined = loading, [] = none yet
+// Set only when subscribeToMyGroups's onError fires - see renderApp's use
+// of it to avoid showing "create or join a group" when the real reason
+// groups.length is 0 is a failed load, not genuinely no groups.
+let groupsLoadError = null;
 let selectedGroupId = null;
 let groupTasks = [];
 // False until subscribeToGroupTasks's first callback fires for the
@@ -723,6 +732,10 @@ let groupTasks = [];
 // watchSelectedGroupTasks) since a different group needs its own fresh
 // loading state, not whatever the previous group's was.
 let hasLoadedGroupTasksOnce = false;
+// Set only when the tasks listener's onError fires - lets renderGroupTasks
+// tell "genuinely no tasks" apart from "failed to load" (most commonly
+// stale/unpublished firestore.rules), same pattern as groupHistoryLoadError.
+let groupTasksLoadError = null;
 // 'month' | 'week'; groupCalendarAnchorDate is whichever date the currently
 // visible month/week is anchored to - same state shape as solo's script.js,
 // kept in this file's own module scope (no shared state between the two
@@ -1012,7 +1025,10 @@ function createGroupTaskItem(groupId, task, isOwner) {
                 pendingBtn.title = 'Click to cancel this handoff request';
                 pendingBtn.addEventListener('click', () => {
                     playClickSound();
-                    clearTaskHandoff(groupId, task.id).catch((error) => console.error('Failed to cancel handoff request:', error));
+                    clearTaskHandoff(groupId, task.id).catch((error) => {
+                        console.error('Failed to cancel handoff request:', error);
+                        alert(describeGroupWriteError(error, 'Could not cancel the handoff request.'));
+                    });
                 });
                 taskButtons.appendChild(pendingBtn);
             } else {
@@ -1038,7 +1054,10 @@ function createGroupTaskItem(groupId, task, isOwner) {
         deleteBtn.title = 'Delete task';
         deleteBtn.addEventListener('click', () => {
             playClickSound();
-            deleteGroupTask(groupId, task.id).catch((error) => console.error('Failed to delete task:', error));
+            deleteGroupTask(groupId, task.id).catch((error) => {
+                console.error('Failed to delete task:', error);
+                alert(describeGroupWriteError(error, 'Could not delete the task.'));
+            });
         });
         taskButtons.appendChild(deleteBtn);
     }
@@ -1064,6 +1083,7 @@ function createGroupTaskItem(groupId, task, isOwner) {
         const completedAt = new Date().toISOString();
         setGroupTaskCompleted(groupId, task, willBeCompleted).catch((error) => {
             console.error('Failed to update task:', error);
+            alert(describeGroupWriteError(error, 'Could not update the task.'));
         });
         if (willBeCompleted) {
             playTaskCompleteSound();
@@ -1151,7 +1171,10 @@ function applyGroupSnoozeToTask(groupId, taskId, preset) {
         dueAt: presetDate.toISOString(),
         updatedAt: new Date().toISOString(),
         snoozeCount: increment(1)
-    }).catch((error) => console.error('Failed to snooze task:', error));
+    }).catch((error) => {
+        console.error('Failed to snooze task:', error);
+        alert(describeGroupWriteError(error, 'Could not snooze the task.'));
+    });
 }
 
 // ---------------------------------------------------------------------
@@ -1402,23 +1425,35 @@ function healCommentCountIfStale(groupId, task, actualCount) {
 function toggleGroupCommentsExpanded(groupId, task) {
     if (expandedCommentTaskIds.has(task.id)) {
         expandedCommentTaskIds.delete(task.id);
+        // Tear the listener down on collapse - leaving it running for the
+        // rest of the group session (until group switch/sign-out) was an
+        // unbounded listener leak for anyone who expands comments on many
+        // tasks over time.
+        if (commentUnsubscribes[task.id]) {
+            commentUnsubscribes[task.id]();
+            delete commentUnsubscribes[task.id];
+        }
     } else {
         expandedCommentTaskIds.add(task.id);
         setCommentsLastViewedAt(task.id, new Date().toISOString());
-        if (!commentUnsubscribes[task.id]) {
-            commentUnsubscribes[task.id] = subscribeToTaskComments(groupId, task.id, (comments) => {
-                taskCommentsById[task.id] = comments;
-                taskCommentsErrorById[task.id] = null;
-                healCommentCountIfStale(groupId, task, comments.length);
-                renderGroupTasks();
-            }, (error) => {
-                console.error('Failed to load comments:', error);
-                taskCommentsErrorById[task.id] = error?.code === 'permission-denied'
-                    ? 'Comments aren\'t turned on for this project yet (the security rules need to be published).'
-                    : 'Could not load comments.';
-                renderGroupTasks();
-            });
-        }
+        const taskId = task.id;
+        commentUnsubscribes[taskId] = subscribeToTaskComments(groupId, taskId, (comments) => {
+            taskCommentsById[taskId] = comments;
+            taskCommentsErrorById[taskId] = null;
+            // Look up the live task rather than trusting the `task` this
+            // subscription closed over - it's held for as long as the
+            // section stays expanded, so re-using it here would heal
+            // against an increasingly stale commentCount snapshot.
+            const liveTask = groupTasks.find((candidate) => candidate.id === taskId) || task;
+            healCommentCountIfStale(groupId, liveTask, comments.length);
+            renderGroupTasks();
+        }, (error) => {
+            console.error('Failed to load comments:', error);
+            taskCommentsErrorById[taskId] = error?.code === 'permission-denied'
+                ? 'Comments aren\'t turned on for this project yet (the security rules need to be published).'
+                : 'Could not load comments.';
+            renderGroupTasks();
+        });
     }
     renderGroupTasks();
 }
@@ -1529,7 +1564,10 @@ function createGroupCommentItem(groupId, task, comment) {
         deleteBtn.setAttribute('aria-label', 'Delete comment');
         deleteBtn.addEventListener('click', () => {
             playClickSound();
-            deleteComment(groupId, task.id, comment.id).catch((error) => console.error('Failed to delete comment:', error));
+            deleteComment(groupId, task.id, comment.id).catch((error) => {
+                console.error('Failed to delete comment:', error);
+                alert(describeGroupWriteError(error, 'Could not delete the comment.'));
+            });
         });
         item.appendChild(deleteBtn);
     }
@@ -1802,7 +1840,10 @@ function createGroupSubtaskItem(groupId, task, subtask, isOwner) {
             deadlineBtn.setAttribute('aria-label', iso ? 'Change step deadline' : 'Set step deadline');
             refreshDeadlineDisplay();
             inputWrap.classList.add('hidden');
-            setGroupSubtaskDueAt(groupId, task, subtask.id, iso).catch((error) => console.error('Failed to set step deadline:', error));
+            setGroupSubtaskDueAt(groupId, task, subtask.id, iso).catch((error) => {
+            console.error('Failed to set step deadline:', error);
+            alert(describeGroupWriteError(error, 'Could not set the step deadline.'));
+        });
         });
 
         clearBtn.addEventListener('click', () => {
@@ -1824,7 +1865,10 @@ function createGroupSubtaskItem(groupId, task, subtask, isOwner) {
         deleteBtn.setAttribute('aria-label', 'Delete step');
         deleteBtn.addEventListener('click', () => {
             playClickSound();
-            deleteGroupSubtask(groupId, task, subtask.id).catch((error) => console.error('Failed to delete step:', error));
+            deleteGroupSubtask(groupId, task, subtask.id).catch((error) => {
+                console.error('Failed to delete step:', error);
+                alert(describeGroupWriteError(error, 'Could not delete the step.'));
+            });
         });
         row.appendChild(deleteBtn);
     }
@@ -1834,7 +1878,10 @@ function createGroupSubtaskItem(groupId, task, subtask, isOwner) {
             return;
         }
         playClickSound();
-        toggleGroupSubtask(groupId, task, subtask.id).catch((error) => console.error('Failed to update step:', error));
+        toggleGroupSubtask(groupId, task, subtask.id).catch((error) => {
+            console.error('Failed to update step:', error);
+            alert(describeGroupWriteError(error, 'Could not update the step.'));
+        });
     });
 
     item.appendChild(row);
@@ -1867,7 +1914,10 @@ function createGroupSubtaskAddRow(groupId, task) {
         }
         playClickSound();
         expandedSubtaskTaskIds.add(task.id);
-        addGroupSubtask(groupId, task, addInput.value).catch((error) => console.error('Failed to add step:', error));
+        addGroupSubtask(groupId, task, addInput.value).catch((error) => {
+            console.error('Failed to add step:', error);
+            alert(describeGroupWriteError(error, 'Could not add the step.'));
+        });
         addInput.value = '';
     };
 
@@ -2166,9 +2216,12 @@ function saveGroupTaskEditorChanges() {
         recurrence: updatedDueAt && editorRecurrenceSelect ? getValidRecurrenceValue(editorRecurrenceSelect.value) : null,
         scheduledAt: editorScheduleInput && editorScheduleInput.value ? new Date(editorScheduleInput.value).toISOString() : null,
         updatedAt: new Date().toISOString()
-    }).catch((error) => console.error('Failed to save task edits:', error));
-
-    closeGroupTaskEditor();
+    }).then(() => {
+        closeGroupTaskEditor();
+    }).catch((error) => {
+        console.error('Failed to save task edits:', error);
+        alert(describeGroupWriteError(error, 'Could not save your changes.'));
+    });
 }
 
 // datetime-local inputs need "YYYY-MM-DDTHH:mm" in local time, not an ISO
@@ -2616,7 +2669,10 @@ function renderSuggestionsForYou(groupId) {
         acceptBtn.textContent = 'Add it';
         acceptBtn.addEventListener('click', () => {
             playClickSound();
-            acceptSuggestion(groupId, suggestion, currentUser).catch((error) => console.error('Failed to accept suggestion:', error));
+            acceptSuggestion(groupId, suggestion, currentUser).catch((error) => {
+                console.error('Failed to accept suggestion:', error);
+                alert(describeGroupWriteError(error, 'Could not accept the suggestion.'));
+            });
         });
         actions.appendChild(acceptBtn);
 
@@ -2626,7 +2682,10 @@ function renderSuggestionsForYou(groupId) {
         dismissBtn.textContent = 'Dismiss';
         dismissBtn.addEventListener('click', () => {
             playClickSound();
-            dismissSuggestion(groupId, suggestion.id).catch((error) => console.error('Failed to dismiss suggestion:', error));
+            dismissSuggestion(groupId, suggestion.id).catch((error) => {
+                console.error('Failed to dismiss suggestion:', error);
+                alert(describeGroupWriteError(error, 'Could not dismiss the suggestion.'));
+            });
         });
         actions.appendChild(dismissBtn);
 
@@ -2739,7 +2798,10 @@ function renderHandoffRequestsForYou(groupId) {
         acceptBtn.textContent = 'Take it over';
         acceptBtn.addEventListener('click', () => {
             playClickSound();
-            acceptTaskHandoff(groupId, task, currentUser).catch((error) => console.error('Failed to accept handoff:', error));
+            acceptTaskHandoff(groupId, task, currentUser).catch((error) => {
+                console.error('Failed to accept handoff:', error);
+                alert(describeGroupWriteError(error, 'Could not accept the handoff.'));
+            });
         });
         actions.appendChild(acceptBtn);
 
@@ -2749,7 +2811,10 @@ function renderHandoffRequestsForYou(groupId) {
         declineBtn.textContent = 'Decline';
         declineBtn.addEventListener('click', () => {
             playClickSound();
-            clearTaskHandoff(groupId, task.id).catch((error) => console.error('Failed to decline handoff:', error));
+            clearTaskHandoff(groupId, task.id).catch((error) => {
+                console.error('Failed to decline handoff:', error);
+                alert(describeGroupWriteError(error, 'Could not decline the handoff.'));
+            });
         });
         actions.appendChild(declineBtn);
 
@@ -2814,7 +2879,10 @@ function openHandoffPicker(groupId, task) {
         row.addEventListener('click', () => {
             playClickSound();
             requestTaskHandoff(groupId, task, memberId, name, currentUser)
-                .catch((error) => console.error('Failed to request handoff:', error));
+                .catch((error) => {
+                    console.error('Failed to request handoff:', error);
+                    alert(describeGroupWriteError(error, 'Could not request the handoff.'));
+                });
             closeHandoffPicker();
         });
         list.appendChild(row);
@@ -3621,7 +3689,9 @@ function renderGroupTasks() {
     if (!group || groupTasks.length === 0) {
         const emptyMsg = document.createElement('li');
         emptyMsg.classList.add('emptyTasksMsg');
-        emptyMsg.textContent = 'No tasks yet. Add one above to get the team started.';
+        emptyMsg.textContent = (group && groupTasksLoadError)
+            ? groupTasksLoadError
+            : 'No tasks yet. Add one above to get the team started.';
         groupTasksList.appendChild(emptyMsg);
         return;
     }
@@ -3646,18 +3716,6 @@ function renderGroupTasks() {
 // ---------------------------------------------------------------------
 // Member roster
 // ---------------------------------------------------------------------
-
-// A denied moderation write (promote/demote, kick) is almost always this
-// project's firestore.rules having the right logic locally but not yet
-// being *published* to the Firebase console - the same class of gap that
-// bit "Recently finished" and comments early on. Naming that directly
-// beats the raw Firestore "Missing or insufficient permissions." message,
-// which reads like the person just isn't allowed to do this at all.
-function describeGroupWriteError(error, fallback) {
-    return error?.code === 'permission-denied'
-        ? 'That action needs the latest security rules published to the Firebase console first.'
-        : (error.message || fallback);
-}
 
 // A small per-session cache of other members' streak/badge summaries (the
 // same users/{uid} fields solo writes - see script.js's
@@ -3928,11 +3986,11 @@ function renderMemberRoster(group, { isOwner = false, isAdmin = false } = {}) {
 // #4 on). Three ranges, from two different sources chosen so neither
 // silently under- or over-counts:
 //   - "This week"/"This month": counted from groupHistoryEntries (the
-//     permanent history log, capped at 50 most-recent across the whole
-//     group) for week, since 50 is plenty for a week's worth of completions
-//     in practice; "This month" instead counts from currently-completed
-//     groupTasks (like "All time" below) since a month's worth could
-//     realistically blow past that 50-entry cap and silently undercount.
+//     permanent history log, capped at 200 most-recent across the whole
+//     group) for week, since 200 is a wide margin for a week's worth of
+//     completions in practice; "This month" instead counts from currently-
+//     completed groupTasks (like "All time" below) since a month's worth
+//     could realistically blow past that cap and silently undercount.
 //   - "All time": counted from currently-completed groupTasks. Not capped,
 //     but only reflects tasks that still exist - one that's since been
 //     deleted no longer counts.
@@ -4243,6 +4301,19 @@ function renderApp() {
         return;
     }
 
+    // A load error with nothing already fetched: show the error instead of
+    // either an infinite "Loading..." or the "create or join a group" setup
+    // screen, which would risk the user creating a duplicate group thinking
+    // their real ones vanished.
+    if (groupsLoadError && groups.length === 0) {
+        if (groupStatusMsg) {
+            groupStatusMsg.textContent = groupsLoadError;
+            groupStatusMsg.classList.remove('hidden');
+        }
+        groupPageWrap?.classList.add('hidden');
+        return;
+    }
+
     groupStatusMsg?.classList.add('hidden');
     groupPageWrap?.classList.remove('hidden');
 
@@ -4375,12 +4446,17 @@ function computeAttentionSummary() {
     // suggestionsCount above (forUserId === you vs. fromUserId === you),
     // so total below never double-counts one suggestion.
     const suggestionOutcomesCount = getUnacknowledgedSuggestionOutcomes().length;
+    // Task handoff requests waiting on you - same "waiting on you" shape as
+    // suggestionsCount, never overlaps with it (a task's handoffRequest and
+    // a suggestion are different documents/fields entirely).
+    const handoffRequestsCount = getPendingHandoffsForYou().length;
     return {
         unreadCommentsCount,
         joinRequestsCount,
         suggestionsCount,
         suggestionOutcomesCount,
-        total: unreadCommentsCount + joinRequestsCount + suggestionsCount + suggestionOutcomesCount
+        handoffRequestsCount,
+        total: unreadCommentsCount + joinRequestsCount + suggestionsCount + suggestionOutcomesCount + handoffRequestsCount
     };
 }
 
@@ -4435,6 +4511,14 @@ function jumpToSuggestionsForYou() {
     setTimeout(() => {
         suggestionsForYouPanel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         flashAttentionTarget(suggestionsForYouPanel);
+    }, 30);
+}
+
+function jumpToHandoffRequests() {
+    switchGroupView('tasks');
+    setTimeout(() => {
+        handoffRequestsForYouPanel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        flashAttentionTarget(handoffRequestsForYouPanel);
     }, 30);
 }
 
@@ -4499,6 +4583,11 @@ function renderNavAttentionMenu(summary) {
             icon: 'fa-solid fa-circle-check',
             label: `${summary.suggestionOutcomesCount} suggestion outcome${summary.suggestionOutcomesCount === 1 ? '' : 's'}`,
             onClick: jumpToSuggestionOutcomes
+        },
+        summary.handoffRequestsCount > 0 && {
+            icon: 'fa-solid fa-right-left',
+            label: `${summary.handoffRequestsCount} handoff request${summary.handoffRequestsCount === 1 ? '' : 's'}`,
+            onClick: jumpToHandoffRequests
         }
     ].filter(Boolean);
 
@@ -4533,7 +4622,8 @@ function updateNavAttentionBadge(group) {
         summary.unreadCommentsCount && `${summary.unreadCommentsCount} unread comment${summary.unreadCommentsCount === 1 ? '' : 's'}`,
         summary.joinRequestsCount && `${summary.joinRequestsCount} pending join request${summary.joinRequestsCount === 1 ? '' : 's'}`,
         summary.suggestionsCount && `${summary.suggestionsCount} suggestion${summary.suggestionsCount === 1 ? '' : 's'} for you`,
-        summary.suggestionOutcomesCount && `${summary.suggestionOutcomesCount} suggestion outcome${summary.suggestionOutcomesCount === 1 ? '' : 's'}`
+        summary.suggestionOutcomesCount && `${summary.suggestionOutcomesCount} suggestion outcome${summary.suggestionOutcomesCount === 1 ? '' : 's'}`,
+        summary.handoffRequestsCount && `${summary.handoffRequestsCount} handoff request${summary.handoffRequestsCount === 1 ? '' : 's'}`
     ].filter(Boolean).join(', ');
     renderNavAttentionMenu(summary);
     if (summary.total === 0) {
@@ -5272,10 +5362,18 @@ if (groupCreateForm) {
         groupCreateError?.classList.add('hidden');
 
         playClickSound();
+        const trimmedGroupName = groupCreateNameInput.value.trim();
         try {
             const groupId = await createGroup(groupCreateNameInput.value, currentUser, groupCreatePrivacySelect?.value);
             groupCreateNameInput.value = '';
             selectGroup(groupId);
+            // Reuses the same banner the ?join= deep link already shows on a
+            // successful join (see showJoinLinkBanner below) - the group was
+            // silent about "did that actually work?" before this, and
+            // selectGroup() switching the setup screen for the real
+            // dashboard isn't obvious enough on its own to read as
+            // confirmation, especially the first time.
+            showJoinLinkBanner(`"${trimmedGroupName}" created - you're in!`, 'success');
         } catch (error) {
             if (groupCreateError) {
                 groupCreateError.textContent = error.message || 'Could not create the group.';
@@ -5303,6 +5401,8 @@ if (groupJoinForm) {
                 return;
             }
             selectGroup(groupId);
+            // Same reuse as the create-group handler above - see its comment.
+            showJoinLinkBanner('Joined the group - you\'re in!', 'success');
         } catch (error) {
             if (groupJoinError) {
                 groupJoinError.textContent = error.message || 'Could not join - check the invite code and try again.';
@@ -5410,7 +5510,7 @@ if (groupLeaveBtn) {
             renderApp();
         } catch (error) {
             console.error('Failed to leave group:', error);
-            alert(error.message || 'Could not leave the group.');
+            alert(describeGroupWriteError(error, 'Could not leave the group.'));
         }
     });
 }
@@ -5432,7 +5532,7 @@ if (groupDeleteBtn) {
             renderApp();
         } catch (error) {
             console.error('Failed to delete group:', error);
-            alert(error.message || 'Could not delete the group.');
+            alert(describeGroupWriteError(error, 'Could not delete the group.'));
         }
     });
 }
@@ -5647,6 +5747,10 @@ function addTaskFromInputs() {
     // Same "needs a deadline to repeat from" rule as solo.
     const recurrence = dueAt ? getValidRecurrenceValue(recurrenceSelect?.value) : null;
 
+    // Form only clears/resets once the write actually succeeds - clearing
+    // it unconditionally beforehand made a failed add (e.g. stale security
+    // rules) look identical to a successful one, with the typed task
+    // vanishing from the input and never appearing in the list either.
     addGroupTask(group.id, currentUser, {
         text: taskText,
         matrix: matrixSelect?.value,
@@ -5657,25 +5761,28 @@ function addTaskFromInputs() {
         taskType,
         estimateMinutes,
         subtasks: pendingStepsEditor ? pendingStepsEditor.read() : []
-    }).catch((error) => console.error('Failed to add task:', error));
+    }).then(() => {
+        if (recurrenceSelect) {
+            recurrenceSelect.value = '';
+        }
 
-    if (recurrenceSelect) {
-        recurrenceSelect.value = '';
-    }
-
-    taskInput.value = '';
-    updateAddBtnState();
-    if (deadlineInput) {
-        deadlineInput.value = '';
-    }
-    if (scheduleInput) {
-        scheduleInput.value = '';
-    }
-    mountPendingStepsEditor();
-    setTaskTypePillState('open');
-    updateDurationInputVisibility();
-    quickAddHint?.classList.add('hidden');
-    taskInput.focus();
+        taskInput.value = '';
+        updateAddBtnState();
+        if (deadlineInput) {
+            deadlineInput.value = '';
+        }
+        if (scheduleInput) {
+            scheduleInput.value = '';
+        }
+        mountPendingStepsEditor();
+        setTaskTypePillState('open');
+        updateDurationInputVisibility();
+        quickAddHint?.classList.add('hidden');
+        taskInput.focus();
+    }).catch((error) => {
+        console.error('Failed to add task:', error);
+        alert(describeGroupWriteError(error, 'Could not add the task.'));
+    });
 }
 
 // Brain Dump's commitTasks callback (see brain-dump.js). draftTasks come
@@ -6022,11 +6129,15 @@ function watchSelectedGroupTasks() {
 
     unsubscribeTasks = subscribeToGroupTasks(group.id, (tasks) => {
         groupTasks = tasks;
+        groupTasksLoadError = null;
         hasLoadedGroupTasksOnce = true;
         renderApp();
     }, (error) => {
         console.error('Failed to load group tasks:', error);
         groupTasks = [];
+        groupTasksLoadError = error?.code === 'permission-denied'
+            ? 'Tasks couldn\'t load (the security rules need to be published).'
+            : 'Could not load tasks.';
         hasLoadedGroupTasksOnce = true;
         renderApp();
     });
@@ -6081,6 +6192,7 @@ if (yourNameSaveBtn && yourNameInput) {
             }
         } catch (error) {
             console.error('Failed to save your name:', error);
+            alert(describeGroupWriteError(error, 'Could not save your name.'));
         }
     });
 }
@@ -6504,6 +6616,7 @@ if (groupWelcomeContinueBtn) {
                 }
             } catch (error) {
                 console.error('Failed to save your name:', error);
+                alert(describeGroupWriteError(error, 'Could not save your name - you can set it later in the dashboard.'));
             }
         }
         closeGroupWelcomeModal();
@@ -6541,6 +6654,10 @@ function maybeShowGroupWelcome(user, resolvedName) {
     openGroupWelcomeModal(user, resolvedName);
 }
 
+// Despite the name (kept as-is to avoid a churny rename of the .joinLinkBanner
+// element/CSS it drives), this is also now the shared success/error banner
+// for the plain create-group and join-by-code forms above - same element,
+// same visual language, one banner instead of three near-identical ones.
 function showJoinLinkBanner(message, kind) {
     if (!joinLinkBanner || !joinLinkBannerText) {
         return;
@@ -6614,7 +6731,7 @@ async function maybeHandleJoinLink(user) {
 }
 
 AuthGate.init({
-    onSignedIn: (user) => {
+    onSignedIn: (user, profileReady) => {
         currentUser = user;
         groups = undefined;
         renderApp();
@@ -6628,12 +6745,26 @@ AuthGate.init({
         // dashboard actually being visible, so calling it here is just a
         // safety net; the render calls elsewhere are what actually catch
         // it once a group's data has loaded.
-        window.ToDoAuth.checkAndMarkTourSeen(user, 'group').then(({ shouldAutoPlay, isLegacyAccount }) => {
-            shouldAutoPlayGroupTour = shouldAutoPlay;
-            isLegacyTourAccount = isLegacyAccount;
-            renderGroupOnboardingHint();
-            maybeAutoStartGroupTour();
-        });
+        //
+        // profileReady (see firebase-init.js's onAuthChange) is the
+        // users/{uid} profile-doc write settling - waited on here before
+        // checkAndMarkTourSeen reads that same doc's createdAt field, so
+        // this never mistakes a brand-new account (doc not written yet)
+        // for a legacy one and skips the tour. Without this wait, a
+        // Google sign-up - slower to reach this point than an
+        // email/password one, since the popup flow's extra cross-origin
+        // handshake delays Firestore getting a healthy authenticated
+        // connection - could run this read before ensureUserProfile's
+        // write landed.
+        profileReady
+            .then(() => window.ToDoAuth.checkAndMarkTourSeen(user, 'group'))
+            .then(({ shouldAutoPlay, isLegacyAccount }) => {
+                shouldAutoPlayGroupTour = shouldAutoPlay;
+                isLegacyTourAccount = isLegacyAccount;
+                renderGroupOnboardingHint();
+                maybeAutoStartGroupTour();
+            })
+            .catch((error) => console.error('Failed to check group tour auto-play eligibility:', error));
         loadProfileName(user, (name) => {
             if (yourNameInput) {
                 yourNameInput.value = name;
@@ -6643,6 +6774,7 @@ AuthGate.init({
 
         unsubscribeGroups = subscribeToMyGroups(user.uid, (nextGroups) => {
             groups = nextGroups;
+            groupsLoadError = null;
             if (!groups.some((group) => group.id === selectedGroupId)) {
                 selectedGroupId = groups[0]?.id || null;
             }
@@ -6650,7 +6782,15 @@ AuthGate.init({
             watchSelectedGroupTasks();
         }, (error) => {
             console.error('Failed to load your groups:', error);
-            groups = [];
+            // Never wipe an already-loaded groups list on a listener error -
+            // that would make real groups look like they vanished. Only
+            // default to [] if nothing had loaded yet.
+            if (groups === undefined) {
+                groups = [];
+            }
+            groupsLoadError = error?.code === 'permission-denied'
+                ? 'Your groups couldn\'t load (the security rules need to be published).'
+                : 'Could not load your groups.';
             renderApp();
         });
     },

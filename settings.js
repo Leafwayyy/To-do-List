@@ -47,6 +47,13 @@
     let memoryAddBtn = null;
     let memoryAddStatus = null;
     let currentMemoryTotal = 0;
+    // Captured lazily the first time refreshMemoryList's error path needs to
+    // overwrite memoryEmpty's text, so setMemoryCounts can restore the real
+    // empty-state copy afterward instead of leaving the error message stuck.
+    let memoryEmptyDefaultText = null;
+    // Same lazy-capture/restore pattern as memoryEmptyDefaultText, for the
+    // feedback panel's own empty-state text.
+    let feedbackEmptyDefaultText = null;
     let memoryImportToggleBtn = null;
     let memoryImportPanel = null;
     let memoryImportText = null;
@@ -547,7 +554,10 @@
         node.querySelector('.settingsCloseBtn').addEventListener('click', closeOverlay);
         node.querySelector('.settingsSaveNameBtn').addEventListener('click', saveDisplayName);
         node.querySelector('.settingsSignOutBtn').addEventListener('click', () => {
-            window.ToDoAuth?.signOutUser?.();
+            window.ToDoAuth?.signOutUser?.().catch((error) => {
+                console.error('Failed to sign out:', error);
+                alert('Could not sign out - check your connection and try again.');
+            });
             closeOverlay();
         });
         node.querySelector('.settingsExportBtn').addEventListener('click', exportTasks);
@@ -1119,10 +1129,20 @@
                 feedbackList.appendChild(buildFeedbackItem(entry));
             });
             if (feedbackEmpty) {
+                if (feedbackEmptyDefaultText !== null) {
+                    feedbackEmpty.textContent = feedbackEmptyDefaultText;
+                }
                 feedbackEmpty.classList.toggle('hidden', ownEntries.length > 0);
             }
         }).catch((error) => {
             console.error('Failed to load past feedback:', error);
+            if (feedbackEmpty) {
+                if (feedbackEmptyDefaultText === null) {
+                    feedbackEmptyDefaultText = feedbackEmpty.textContent;
+                }
+                feedbackEmpty.textContent = 'Could not load your past feedback. Try again.';
+                feedbackEmpty.classList.remove('hidden');
+            }
         });
     }
 
@@ -1175,6 +1195,11 @@
             nameInput.value = (data && data.displayName) || currentUser.displayName || '';
         }).catch((error) => {
             console.error('Failed to load profile name:', error);
+            // Fall back to the Auth profile's own name rather than leaving
+            // the field blank, which looked identical to "no name set" and
+            // risked the user re-saving over their real name with an empty
+            // or wrong value.
+            nameInput.value = currentUser.displayName || '';
         });
 
         refreshMemoryList();
@@ -1254,6 +1279,17 @@
             });
         }).catch((error) => {
             console.error('Failed to load saved memories:', error);
+            // Without this, a failed fetch left memoryEmpty showing its
+            // default "nothing saved yet" text - indistinguishable from a
+            // real empty list, and misleading since memories might well
+            // still exist and just failed to load.
+            if (memoryEmpty) {
+                if (memoryEmptyDefaultText === null) {
+                    memoryEmptyDefaultText = memoryEmpty.textContent;
+                }
+                memoryEmpty.textContent = 'Could not load your saved memories. Try again.';
+                memoryEmpty.classList.remove('hidden');
+            }
         });
     }
 
@@ -1269,6 +1305,13 @@
             memoryManageCount.textContent = total > 0 ? ` (${total})` : '';
         }
         if (memoryEmpty) {
+            // A successful fetch (this only runs from refreshMemoryList's
+            // .then) always means the load worked, so restore the real
+            // empty-state text in case a previous attempt overwrote it with
+            // an error message.
+            if (memoryEmptyDefaultText !== null) {
+                memoryEmpty.textContent = memoryEmptyDefaultText;
+            }
             memoryEmpty.classList.toggle('hidden', total > 0);
         }
         if (memoryCount) {
@@ -1392,19 +1435,27 @@
             for (const groupDoc of groupsSnapshot.docs) {
                 const group = groupDoc.data();
                 if (group.ownerId === uid) {
+                    // Only this account's own tasks - the security rules never
+                    // give an owner standing permission to delete a teammate's
+                    // task, not even here (mirrors deleteGroupCompletely in
+                    // group/groups-data.js). Teammates' task docs are left
+                    // behind, orphaned, same as a normal group deletion.
                     const tasksSnapshot = await getDocs(collection(db, 'groups', groupDoc.id, 'tasks'));
-                    await Promise.all(tasksSnapshot.docs.map((taskDoc) => deleteDoc(taskDoc.ref)));
+                    const ownTaskDocs = tasksSnapshot.docs.filter((taskDoc) => taskDoc.data().ownerId === uid);
+                    await Promise.all(ownTaskDocs.map((taskDoc) => deleteDoc(taskDoc.ref)));
                     const historySnapshot = await getDocs(collection(db, 'groups', groupDoc.id, 'history'));
                     await Promise.all(historySnapshot.docs.map((entryDoc) => deleteDoc(entryDoc.ref)));
                     await deleteDoc(groupDoc.ref);
                 } else {
                     const memberIds = group.memberIds || [];
                     const memberNames = group.memberNames || [];
+                    const adminIds = group.adminIds || [];
                     const myIndex = memberIds.indexOf(uid);
                     if (myIndex !== -1) {
                         await updateDoc(groupDoc.ref, {
                             memberIds: memberIds.filter((_, index) => index !== myIndex),
-                            memberNames: memberNames.filter((_, index) => index !== myIndex)
+                            memberNames: memberNames.filter((_, index) => index !== myIndex),
+                            adminIds: adminIds.filter((adminId) => adminId !== uid)
                         });
                     }
                     // Own history entries in a group left behind - the rule

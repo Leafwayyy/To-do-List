@@ -1658,7 +1658,14 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
                 console.error('Failed to commit brain-dump review section:', error);
                 bulkBtn.disabled = false;
                 bulkBtn.textContent = addBtnLabel;
-                status.textContent = 'Something went wrong - try again.';
+                // A denied write is almost always stale/unpublished
+                // firestore.rules (same class of gap group.js's
+                // describeGroupWriteError names directly) rather than a
+                // generic failure - this page is shared with solo mode
+                // though, which doesn't load that helper, so it's inlined.
+                status.textContent = error?.code === 'permission-denied'
+                    ? 'That needs the latest security rules published to the Firebase console first.'
+                    : (error.message || 'Something went wrong - try again.');
             }
         });
         actions.appendChild(bulkBtn);
@@ -1955,9 +1962,32 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             written = await commitMemories(memoryProposals);
         } catch (error) {
             console.error('Failed to auto-save memory:', error);
+            // The "safe to auto-save without confirming first" design relies
+            // entirely on the user always seeing whether something was
+            // remembered (see the comment above) - silently returning here
+            // broke that invariant the moment a save actually failed.
+            appendMemorySaveFailedNotice();
             return;
         }
         written.forEach(({ id, text }) => appendMemorySavedNotice(id, text));
+    }
+
+    function appendMemorySaveFailedNotice() {
+        const row = document.createElement('div');
+        row.classList.add('brainDumpMemorySaved', 'failed');
+
+        const icon = document.createElement('span');
+        icon.classList.add('brainDumpMemorySavedIcon');
+        icon.textContent = '⚠️';
+        row.appendChild(icon);
+
+        const label = document.createElement('span');
+        label.classList.add('brainDumpMemorySavedText');
+        label.textContent = 'Could not remember that - try again in a moment.';
+        row.appendChild(label);
+
+        messagesEl.appendChild(row);
+        scrollToBottom();
     }
 
     function appendMemorySavedNotice(memoryId, text) {

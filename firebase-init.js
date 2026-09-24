@@ -174,18 +174,42 @@ window.ToDoAuth = {
     // catch that and prompt a fresh sign-in before retrying.
     deleteAccountAuth: () => deleteUser(auth.currentUser),
     checkAndMarkTourSeen,
-    // callback(user, isFirstTimeEver) - the second argument is only ever
-    // true the one time a brand-new account's profile doc gets created.
-    onAuthChange: (callback) => onAuthStateChanged(auth, async (user) => {
-        let isFirstTime = false;
-        if (user) {
-            try {
-                isFirstTime = await ensureUserProfile(user);
-            } catch (error) {
-                console.error('Failed to write user profile:', error);
-            }
-        }
-        callback(user, isFirstTime);
+    // callback(user, profileReady) - profileReady is a Promise<boolean> that
+    // resolves to whether this was the very first time we've ever seen this
+    // uid, once the users/{uid} profile doc write (ensureUserProfile above)
+    // has actually settled. Deliberately NOT awaited before calling
+    // callback - hiding the sign-in gate and starting the app have no real
+    // dependency on that Firestore round trip finishing, and awaiting it
+    // here used to be exactly what left a brand-new sign-up stuck on the
+    // sign-in screen (needing a manual refresh) whenever that write was
+    // slow, which happens more often right after a Google popup sign-in
+    // than an email/password one - the popup flow's extra cross-origin
+    // handshake (the authDomain iframe Firebase uses to relay the popup
+    // result back) takes longer to leave Firestore's connection with a
+    // healthy, authenticated token than a same-origin password sign-in
+    // does. Callers that actually need the doc to exist first (see
+    // checkAndMarkTourSeen's callers in script.js/group.js, for the tour
+    // auto-play decision) await profileReady themselves before reading it,
+    // so that check still never races the doc's creation.
+    onAuthChange: (callback) => onAuthStateChanged(auth, (user) => {
+        const profileReady = user
+            ? ensureUserProfile(user).catch((error) => {
+                console.error('Failed to write user profile, retrying once:', error);
+                // A transient failure here (network blip, brief auth-token
+                // lag right after sign-up) would otherwise be silently
+                // indistinguishable from "not a new user," with no retry -
+                // one retry after a short delay covers the common transient
+                // case without adding real latency to the common (already
+                // succeeded) path.
+                return new Promise((resolve) => setTimeout(resolve, 1500))
+                    .then(() => ensureUserProfile(user))
+                    .catch((retryError) => {
+                        console.error('Failed to write user profile on retry:', retryError);
+                        return false;
+                    });
+            })
+            : Promise.resolve(false);
+        callback(user, profileReady);
     })
 };
 

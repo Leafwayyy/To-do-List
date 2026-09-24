@@ -278,12 +278,15 @@
 
     if (userSignOutBtn) {
         userSignOutBtn.addEventListener('click', () => {
-            window.ToDoAuth.signOutUser();
+            window.ToDoAuth.signOutUser().catch((error) => {
+                console.error('Failed to sign out:', error);
+                alert('Could not sign out - check your connection and try again.');
+            });
         });
     }
 
     function registerAuthStateHandler(handlers) {
-        window.ToDoAuth.onAuthChange((user, isFirstTime) => {
+        window.ToDoAuth.onAuthChange((user, profileReady) => {
             // Only relevant the very first time this fires - clears the
             // neutral "checking" screen once we actually know whether
             // you're signed in, so we never flash the full sign-in form
@@ -291,9 +294,16 @@
             document.body.classList.remove('authChecking');
 
             if (user) {
+                // Reveal the signed-in state right away - profileReady (see
+                // firebase-init.js's onAuthChange) is the users/{uid}
+                // profile-doc write settling, which has nothing to do with
+                // whether the sign-in itself succeeded, so it must never
+                // gate this. onSignedIn handlers await profileReady
+                // themselves for the one thing that does need the doc to
+                // exist first (the tour auto-play check).
                 updateAuthUserDisplay(user);
                 hideAuthGate();
-                handlers.onSignedIn?.(user, isFirstTime);
+                handlers.onSignedIn?.(user, profileReady);
             } else {
                 showAuthGate();
                 handlers.onSignedOut?.();

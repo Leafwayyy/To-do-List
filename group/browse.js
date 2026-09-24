@@ -10,6 +10,7 @@ const groupBrowseGrid = document.querySelector('.groupBrowseGrid');
 
 let currentUser = null;
 let groups = undefined;
+let groupsLoadError = null;
 let groupTasksByGroupId = {};
 let unsubscribeGroups = null;
 const taskUnsubscribes = {};
@@ -28,6 +29,18 @@ function renderGrid() {
     if (groups === undefined) {
         if (groupStatusMsg) {
             groupStatusMsg.textContent = 'Loading your groups...';
+            groupStatusMsg.classList.remove('hidden');
+        }
+        groupBrowseGrid.classList.add('hidden');
+        return;
+    }
+
+    // A load error with nothing already fetched: show the error instead of
+    // silently rendering just the "create or join" card, which would look
+    // identical to genuinely having zero groups.
+    if (groupsLoadError && groups.length === 0) {
+        if (groupStatusMsg) {
+            groupStatusMsg.textContent = groupsLoadError;
             groupStatusMsg.classList.remove('hidden');
         }
         groupBrowseGrid.classList.add('hidden');
@@ -102,7 +115,7 @@ function createGroupBrowseCard(group) {
                 await deleteGroupCompletely(group.id, currentUser);
             } catch (error) {
                 console.error('Failed to delete group:', error);
-                alert(error.message || 'Could not delete the group.');
+                alert(describeGroupWriteError(error, 'Could not delete the group.'));
             }
         });
         actions.appendChild(deleteBtn);
@@ -128,7 +141,7 @@ function createGroupBrowseCard(group) {
                 await leaveGroup(group.id, currentUser);
             } catch (error) {
                 console.error('Failed to leave group:', error);
-                alert(error.message || 'Could not leave the group.');
+                alert(describeGroupWriteError(error, 'Could not leave the group.'));
             }
         });
         actions.appendChild(leaveBtn);
@@ -190,11 +203,19 @@ AuthGate.init({
 
         unsubscribeGroups = subscribeToMyGroups(user.uid, (nextGroups) => {
             groups = nextGroups;
+            groupsLoadError = null;
             nextGroups.forEach((group) => watchGroupTasks(group.id));
             renderGrid();
         }, (error) => {
             console.error('Failed to load your groups:', error);
-            groups = [];
+            // Never wipe an already-loaded groups list on a listener error -
+            // that would make real groups look like they vanished.
+            if (groups === undefined) {
+                groups = [];
+            }
+            groupsLoadError = error?.code === 'permission-denied'
+                ? 'Your groups couldn\'t load (the security rules need to be published).'
+                : 'Could not load your groups.';
             renderGrid();
         });
     },

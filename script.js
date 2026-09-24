@@ -651,19 +651,34 @@ function startApp() {
 // password, error mapping, the .userBadge/.authGateActive plumbing) now
 // lives in auth-gate.js, shared with the group app - see AuthGate.init below.
 AuthGate.init({
-    onSignedIn: async (user) => {
+    onSignedIn: async (user, profileReady) => {
         startApp();
-        // First time THIS app has ever been opened on this account (not
-        // just "brand-new account overall" - see checkAndMarkTourSeen) -
-        // launch the tour unprompted rather than leaving it to a passive
-        // hint card someone might not notice. Account-level, so it never
-        // replays again after this, on any device, whether finished or
-        // abandoned.
-        const { shouldAutoPlay, isLegacyAccount } = await window.ToDoAuth.checkAndMarkTourSeen(user, 'solo');
-        isLegacyTourAccount = isLegacyAccount;
-        renderOnboardingHint();
-        if (shouldAutoPlay) {
-            setTimeout(() => tourController.start(), 400);
+        try {
+            // profileReady (see firebase-init.js's onAuthChange) is the
+            // users/{uid} profile-doc write settling - wait for it before
+            // asking checkAndMarkTourSeen anything, since that function
+            // reads this same doc's createdAt field. Reading it before the
+            // doc exists would look exactly like a legacy (pre-tour-
+            // tracking) account and skip the tour outright instead of
+            // waiting for it, which used to be exactly why a brand-new
+            // Google sign-up (slower to reach this point than an
+            // email/password one - see profileReady's own comment) never
+            // got the tour.
+            await profileReady;
+            // First time THIS app has ever been opened on this account (not
+            // just "brand-new account overall" - see checkAndMarkTourSeen) -
+            // launch the tour unprompted rather than leaving it to a passive
+            // hint card someone might not notice. Account-level, so it never
+            // replays again after this, on any device, whether finished or
+            // abandoned.
+            const { shouldAutoPlay, isLegacyAccount } = await window.ToDoAuth.checkAndMarkTourSeen(user, 'solo');
+            isLegacyTourAccount = isLegacyAccount;
+            renderOnboardingHint();
+            if (shouldAutoPlay) {
+                setTimeout(() => tourController.start(), 400);
+            }
+        } catch (error) {
+            console.error('Failed to check tour auto-play eligibility:', error);
         }
     },
     onSignedOut: () => {
@@ -2848,6 +2863,13 @@ function editTask(taskId) {
 }
 
 function initializeTaskEditor() {
+    // A sign-out/sign-in cycle in the same tab re-runs app startup without a
+    // page reload (appStarted resets to false), which would otherwise create
+    // a second overlay + a second full set of listeners every cycle, same
+    // class of guard as ensureActivityTooltip below.
+    if (taskEditorOverlay) {
+        return;
+    }
     taskEditorOverlay = document.createElement('div');
     taskEditorOverlay.className = 'taskEditorOverlay';
     taskEditorOverlay.innerHTML = `
@@ -3186,8 +3208,11 @@ function compareByPriority(taskA, taskB) {
         return scoreB - scoreA;
     }
 
-    const statusA = getDeadlineStatus(taskA.dueAt);
-    const statusB = getDeadlineStatus(taskB.dueAt);
+    // Subtask-aware, same as getTaskUrgencyStatus/getPriorityReasons (see
+    // commit f0c6430) - a task due in a month with a step due tomorrow
+    // should still tiebreak ahead of one with no near-term pressure at all.
+    const statusA = getDeadlineStatus(getEffectiveDueAt(taskA).dueAt);
+    const statusB = getDeadlineStatus(getEffectiveDueAt(taskB).dueAt);
     if (statusA.deadlineTimestamp !== statusB.deadlineTimestamp) {
         return statusA.deadlineTimestamp - statusB.deadlineTimestamp;
     }
@@ -4767,6 +4792,8 @@ function normalizeTask(task, fallbackManualOrder) {
         estimateMinutes: parseDurationMinutes(task.estimateMinutes),
         dueAt,
         scheduledAt,
+        recurrence: dueAt ? getValidRecurrenceValue(task.recurrence) : null,
+        snoozeCount: Number(task.snoozeCount) || 0,
         createdAt,
         updatedAt: isValidDateValue(task.updatedAt) ? new Date(task.updatedAt).toISOString() : createdAt,
         manualOrder: Number.isFinite(task.manualOrder) ? Number(task.manualOrder) : fallbackManualOrder,

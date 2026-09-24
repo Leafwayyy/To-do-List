@@ -1235,6 +1235,11 @@ function applyEditedSubtasks(existingSubtasks, newSubtasks) {
                 : (entry.dueAt && isValidDateValue(entry.dueAt) ? new Date(entry.dueAt).toISOString() : null);
 
             if (existing) {
+                // Consume this match so a second draft row with the same
+                // text (duplicate steps are a reachable input, not just a
+                // hypothetical) gets its own fresh id below instead of both
+                // rows silently sharing this one's id.
+                existingByText.delete(truncated);
                 return { ...existing, dueAt: resolvedDueAt };
             }
             return {

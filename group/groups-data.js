@@ -10,6 +10,20 @@
 const db = () => window.ToDoAuth.db;
 const fs = () => window.ToDoAuth.firestore;
 
+// A denied group write is almost always this project's firestore.rules
+// having the right logic locally but not yet being *published* to the
+// Firebase console - the same class of gap that bit "Recently finished"
+// and comments early on. Naming that directly beats the raw Firestore
+// "Missing or insufficient permissions." message, which reads like the
+// person just isn't allowed to do this at all. Shared by group.js and
+// browse.js so every group write path (leave, delete, kick, promote/demote)
+// surfaces the same clear message instead of the raw one.
+function describeGroupWriteError(error, fallback) {
+    return error?.code === 'permission-denied'
+        ? 'That action needs the latest security rules published to the Firebase console first.'
+        : (error.message || fallback);
+}
+
 // No ambiguous characters (0/O, 1/I) since people read these codes aloud or
 // type them from a screenshot.
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
