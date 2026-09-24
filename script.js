@@ -5121,11 +5121,18 @@ function startRealtimeUpdates() {
         lastRealtimeBucket = currentBucket;
 
         if (isAutoPrioritize) {
+            // Re-sorting for display only - compareByPriority never mutates
+            // any task's stored fields (manualOrder included), so there was
+            // never anything here that actually needed writing to Firestore.
+            // The removed saveTasks() call was rewriting every task in the
+            // list, unconditionally, every 30 seconds, for as long as a tab
+            // stayed open with this setting on - a real, silent Firestore
+            // write-quota drain found via a genuine quota exhaustion
+            // incident, not a hypothetical.
             applyOrdering();
             renderTasks();
             updateTaskSummary();
             updateUrgencyAlert();
-            saveTasks();
             return;
         }
 
