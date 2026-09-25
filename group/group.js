@@ -332,17 +332,33 @@ function getRecurrenceAdvanceFields(task) {
     };
 }
 
+// Runs inside a transaction, reading the task fresh, because the recurrence
+// path below reads task.subtasks - using the possibly-stale `task` this was
+// called with (whatever the last onSnapshot delivered to this client) could
+// silently revert a teammate's concurrent edit to a different subtask on
+// the same task, the same class of race found and fixed in
+// applySubtaskDrivenUpdate below. completed itself still comes from the
+// caller (real user intent, not derived from potentially-stale data), only
+// the recurrence-advance fields need a fresh read.
 async function setGroupTaskCompleted(groupId, task, completed) {
-    const { doc, updateDoc } = fs();
-    const update = {
-        completed,
-        completedAt: completed ? new Date().toISOString() : null,
-        updatedAt: new Date().toISOString()
-    };
-    if (!task.completed && completed) {
-        Object.assign(update, getRecurrenceAdvanceFields(task) || {});
-    }
-    await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), update);
+    const { doc, runTransaction } = fs();
+    const taskRef = doc(db(), 'groups', groupId, 'tasks', task.id);
+    await runTransaction(db(), async (transaction) => {
+        const snapshot = await transaction.get(taskRef);
+        if (!snapshot.exists()) {
+            return;
+        }
+        const freshTask = { id: snapshot.id, ...snapshot.data() };
+        const update = {
+            completed,
+            completedAt: completed ? new Date().toISOString() : null,
+            updatedAt: new Date().toISOString()
+        };
+        if (!freshTask.completed && completed) {
+            Object.assign(update, getRecurrenceAdvanceFields(freshTask) || {});
+        }
+        transaction.update(taskRef, update);
+    });
 }
 
 async function deleteGroupTask(groupId, taskId) {
@@ -385,14 +401,45 @@ function subtaskDrivenTaskUpdate(task, subtasks) {
     return { ...update, justCompleted, historyCompletedAt };
 }
 
-// Writes the subtask-driven update, then logs a history entry if that
-// update is what just auto-completed the task (checking the last subtask)
-// - shared by all three subtask mutators below so "log on the completed
-// transition" isn't repeated three times.
-async function applySubtaskDrivenUpdate(groupId, task, subtasks) {
-    const { justCompleted, historyCompletedAt, ...update } = subtaskDrivenTaskUpdate(task, subtasks);
-    const { doc, updateDoc } = fs();
-    await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), update);
+// Writes a subtask-driven update, then logs a history entry if that update
+// is what just auto-completed the task (checking the last subtask) - shared
+// by every subtask mutator below so "log on the completed transition" isn't
+// repeated five times.
+//
+// Takes a mutateSubtasks(currentSubtasks) function rather than a
+// pre-computed array, and runs inside a transaction that reads the task
+// fresh before applying it. Real bug found and fixed here: the old version
+// took a subtasks array the caller had already computed from whatever
+// `task` object it happened to be holding - which, on any client, is only
+// as fresh as the last onSnapshot delivery. If a teammate had just changed
+// a DIFFERENT subtask on the same task and that update hadn't propagated
+// here yet, this client's next subtask edit would overwrite the whole
+// subtasks field from its stale copy, silently reverting the teammate's
+// change. Reading fresh inside a transaction (which Firestore automatically
+// retries if the doc changes between read and write) closes that race
+// without needing every call site to worry about staleness itself.
+async function applySubtaskDrivenUpdate(groupId, taskId, mutateSubtasks) {
+    const { doc, runTransaction } = fs();
+    const taskRef = doc(db(), 'groups', groupId, 'tasks', taskId);
+
+    let justCompleted = false;
+    let historyCompletedAt = null;
+    let freshTaskForHistory = null;
+
+    await runTransaction(db(), async (transaction) => {
+        const snapshot = await transaction.get(taskRef);
+        if (!snapshot.exists()) {
+            return;
+        }
+        const freshTask = { id: snapshot.id, ...snapshot.data() };
+        const subtasks = mutateSubtasks(freshTask.subtasks || []);
+        const result = subtaskDrivenTaskUpdate(freshTask, subtasks);
+        justCompleted = result.justCompleted;
+        historyCompletedAt = result.historyCompletedAt;
+        freshTaskForHistory = freshTask;
+        const { justCompleted: _jc, historyCompletedAt: _hca, ...update } = result;
+        transaction.update(taskRef, update);
+    });
 
     // Real bug found while wiring in recurrence: a recurring task advanced
     // via this path flips `completed` straight back to false in the SAME
@@ -408,8 +455,8 @@ async function applySubtaskDrivenUpdate(groupId, task, subtasks) {
         // checkGroupMilestone() calls (see the .checkBtn handler above),
         // only its history log.
         playTaskCompleteSound();
-        checkGroupMilestone(groupId, task.id);
-        logGroupTaskCompletion(groupId, task, historyCompletedAt).catch((error) => {
+        checkGroupMilestone(groupId, taskId);
+        logGroupTaskCompletion(groupId, freshTaskForHistory, historyCompletedAt).catch((error) => {
             console.error('Failed to log completion history:', error);
         });
     }
@@ -421,37 +468,29 @@ async function addGroupSubtask(groupId, task, text) {
         return;
     }
 
-    const subtasks = [
-        ...(task.subtasks || []),
+    await applySubtaskDrivenUpdate(groupId, task.id, (currentSubtasks) => [
+        ...currentSubtasks,
         { id: generateSubtaskId(), text: trimmedText, completed: false, createdAt: new Date().toISOString(), dueAt: null }
-    ];
-
-    await applySubtaskDrivenUpdate(groupId, task, subtasks);
+    ]);
 }
 
 async function toggleGroupSubtask(groupId, task, subtaskId) {
-    const subtasks = (task.subtasks || []).map((subtask) => (
+    await applySubtaskDrivenUpdate(groupId, task.id, (currentSubtasks) => currentSubtasks.map((subtask) => (
         subtask.id === subtaskId ? { ...subtask, completed: !subtask.completed } : subtask
-    ));
-
-    await applySubtaskDrivenUpdate(groupId, task, subtasks);
+    )));
 }
 
 async function deleteGroupSubtask(groupId, task, subtaskId) {
-    const subtasks = (task.subtasks || []).filter((subtask) => subtask.id !== subtaskId);
-
-    await applySubtaskDrivenUpdate(groupId, task, subtasks);
+    await applySubtaskDrivenUpdate(groupId, task.id, (currentSubtasks) => currentSubtasks.filter((subtask) => subtask.id !== subtaskId));
 }
 
 // A step's own deadline - reuses the same generic "write this subtasks
 // array, recompute completion" pipeline every other subtask mutator does,
 // even though this particular change can never itself flip completion.
 async function setGroupSubtaskDueAt(groupId, task, subtaskId, dueAtIsoOrNull) {
-    const subtasks = (task.subtasks || []).map((subtask) => (
+    await applySubtaskDrivenUpdate(groupId, task.id, (currentSubtasks) => currentSubtasks.map((subtask) => (
         subtask.id === subtaskId ? { ...subtask, dueAt: dueAtIsoOrNull } : subtask
-    ));
-
-    await applySubtaskDrivenUpdate(groupId, task, subtasks);
+    )));
 }
 
 // A step's own text (see createGroupSubtaskItem's click-to-rename handler)
@@ -464,11 +503,9 @@ async function renameGroupSubtask(groupId, task, subtaskId, newText) {
         return false;
     }
 
-    const subtasks = (task.subtasks || []).map((subtask) => (
+    await applySubtaskDrivenUpdate(groupId, task.id, (currentSubtasks) => currentSubtasks.map((subtask) => (
         subtask.id === subtaskId ? { ...subtask, text: trimmedText } : subtask
-    ));
-
-    await applySubtaskDrivenUpdate(groupId, task, subtasks);
+    )));
     return true;
 }
 

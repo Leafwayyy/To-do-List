@@ -179,6 +179,12 @@ let sessionCompletionCount = 0;
 let unsubscribeCloudTasks = null;
 let knownCloudTaskIds = new Set();
 let hasLoadedCloudTasksOnce = false;
+// taskId -> JSON.stringify(normalizeTask(...)) as of the last time this
+// device either received that task from the server or successfully wrote
+// it there. syncTasksToCloud diffs against this so it only writes tasks
+// that actually changed, instead of the whole list on every save - see its
+// own comment for why that mattered for both write volume and correctness.
+let lastSyncedTaskJson = new Map();
 
 const REMINDER_COOLDOWN_MS = {
     soon: 45 * 60 * 1000,
@@ -688,6 +694,7 @@ AuthGate.init({
             unsubscribeCloudTasks = null;
         }
         knownCloudTaskIds = new Set();
+        lastSyncedTaskJson = new Map();
         hasLoadedCloudTasksOnce = false;
         tasks = [];
         isLegacyTourAccount = false;
@@ -1148,9 +1155,16 @@ function onGlobalKeyDown(event) {
 
 function applyRankNowOrder() {
     tasks.sort(compareByPriority);
+    // Only stamp manualOrder/updatedAt on tasks whose position actually
+    // moved - stamping every task unconditionally meant one click here
+    // always wrote the whole list, even for tasks the reorder left exactly
+    // where they already were.
     tasks.forEach((task, index) => {
-        task.manualOrder = index + 1;
-        task.updatedAt = new Date().toISOString();
+        const newOrder = index + 1;
+        if (task.manualOrder !== newOrder) {
+            task.manualOrder = newOrder;
+            task.updatedAt = new Date().toISOString();
+        }
     });
 }
 
@@ -2742,7 +2756,13 @@ function deleteTask(taskId) {
     const [deletedTask] = tasks.splice(deleteIndex, 1);
     showUndoDeleteToast(deletedTask, deleteIndex);
 
-    normalizeManualOrder();
+    // Deliberately NOT normalizeManualOrder() here - manualOrder is only
+    // ever used for relative sort comparison, so gaps left by a delete are
+    // harmless (1,2,4,5 sorts identically to 1,2,3,4). Renumbering the
+    // whole list to a clean 1..N sequence made every task after the
+    // deleted one register as "changed" the moment syncTasksToCloud
+    // started diffing before writing, turning one delete into N-1 writes -
+    // exactly the write-volume multiplier that caused the quota incident.
     applyOrdering();
     renderTasks();
     updateTaskSummary();
@@ -2777,7 +2797,8 @@ function undoLastDelete() {
 
     const insertIndex = Math.max(0, Math.min(tasks.length, pendingDeletedTask.deletedIndex));
     tasks.splice(insertIndex, 0, pendingDeletedTask.task);
-    normalizeManualOrder();
+    // Same reasoning as deleteTask - no renumbering, restoring the task
+    // with its original manualOrder is enough for correct relative sort.
     applyOrdering();
     renderTasks();
     updateTaskSummary();
@@ -3447,9 +3468,23 @@ function saveTasks() {
     syncTasksToCloud();
 }
 
-// Upserts every current task and deletes any task Firestore still has that
-// isn't in the local array anymore (covers deleteTask() and undo-restore
-// generically, without a separate cloud-delete call at each site).
+// Upserts only the tasks that actually changed since the last successful
+// sync (diffed against lastSyncedTaskJson) and deletes any task Firestore
+// still has that isn't in the local array anymore (covers deleteTask() and
+// undo-restore generically, without a separate cloud-delete call at each
+// site). This used to unconditionally batch.set every task in the list on
+// every single call, regardless of whether it had changed - two real
+// problems came from that, found together while debugging live incidents:
+// (1) it multiplied write volume by the full task count on every edit,
+// the direct cause of a 24h Firestore write-quota exhaustion; (2) it made
+// cross-device sync actively lose data, not just lag - if this device's
+// in-memory copy of some OTHER task was even briefly stale (the remote
+// onSnapshot update for it hadn't arrived yet when this save fired), that
+// stale copy got re-written right over whatever the other device had just
+// set, silently reverting it. Only writing tasks whose content actually
+// differs from what this device last saw as synced closes both at once:
+// an untouched task is never re-written, so it can never stomp a change
+// this device doesn't know about yet.
 async function syncTasksToCloud() {
     if (!window.ToDoAuth?.auth?.currentUser) {
         return;
@@ -3462,9 +3497,23 @@ async function syncTasksToCloud() {
     const currentIds = new Set(tasks.map((task) => task.id));
     const idsToDelete = Array.from(knownCloudTaskIds).filter((id) => !currentIds.has(id));
 
+    const changedTasks = [];
+    const changedJsonById = new Map();
+    tasks.forEach((task) => {
+        const json = JSON.stringify(task);
+        if (lastSyncedTaskJson.get(task.id) !== json) {
+            changedTasks.push(task);
+            changedJsonById.set(task.id, json);
+        }
+    });
+
+    if (changedTasks.length === 0 && idsToDelete.length === 0) {
+        return;
+    }
+
     try {
         const batch = writeBatch(db);
-        tasks.forEach((task) => {
+        changedTasks.forEach((task) => {
             batch.set(doc(db, 'users', uid, 'tasks', task.id), task);
         });
         idsToDelete.forEach((id) => {
@@ -3472,8 +3521,12 @@ async function syncTasksToCloud() {
         });
         await batch.commit();
 
-        idsToDelete.forEach((id) => knownCloudTaskIds.delete(id));
+        idsToDelete.forEach((id) => {
+            knownCloudTaskIds.delete(id);
+            lastSyncedTaskJson.delete(id);
+        });
         currentIds.forEach((id) => knownCloudTaskIds.add(id));
+        changedJsonById.forEach((json, id) => lastSyncedTaskJson.set(id, json));
     } catch (error) {
         console.error('Failed to save tasks to the cloud:', error);
     }
@@ -3498,6 +3551,12 @@ function subscribeToCloudTasks() {
         knownCloudTaskIds = new Set(rawTasks.map((task) => task.id));
         tasks = rawTasks.map((task, index) => normalizeTask(task, index + 1));
         normalizeManualOrder();
+        // Whatever the server just confirmed (this device's own write
+        // echoing back, or a change from another device) is by definition
+        // in sync now - record it so syncTasksToCloud's diff never mistakes
+        // an untouched, just-received task for something that needs
+        // re-writing.
+        lastSyncedTaskJson = new Map(tasks.map((task) => [task.id, JSON.stringify(task)]));
 
         if (!hasLoadedCloudTasksOnce) {
             hasLoadedCloudTasksOnce = true;
