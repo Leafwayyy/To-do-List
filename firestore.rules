@@ -169,16 +169,36 @@ service cloud.firestore {
             (resource.data.privacy == 'open' || !('privacy' in resource.data))
             // memberJoinedAt is allowed here too (a dot-path write from the
             // client only ever touches your own key in it - see joinGroup
-            // in groups-data.js) but not deeply validated key-by-key, same
-            // trust level memberNames' actual string contents already get
-            // below; it's informational (drives a friendly one-time UI
-            // card), not access-gating, so that's an intentional choice,
-            // not an oversight.
+            // in groups-data.js), validated below to gain only your own key.
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames', 'memberJoinedAt'])
             && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
             && request.resource.data.memberNames.size() == request.resource.data.memberIds.size()
             && request.auth.uid in request.resource.data.memberIds
             && !(request.auth.uid in resource.data.memberIds)
+            // Security review fix: without these, a joiner could write ANY
+            // list of the right length containing themself, evicting every
+            // existing member (owner included) and adding arbitrary uids.
+            // Now the existing members and names must survive as an exact,
+            // in-order prefix, the joiner must be the appended last entry
+            // (arrayUnion appends), their name is capped like every other
+            // name in this file, the group is capped at 50 members, and
+            // memberJoinedAt may only gain the joiner's own key (same
+            // map-diff technique as catchUpDismissed).
+            && request.resource.data.memberIds.size() <= 50
+            // Exact prefix, not hasAll: hasAll ignores order, and memberNames
+            // is a parallel array, so a reordered list could relabel members.
+            && request.resource.data.memberIds[0:resource.data.memberIds.size()] == resource.data.memberIds
+            && request.resource.data.memberNames[0:resource.data.memberNames.size()] == resource.data.memberNames
+            && request.resource.data.memberIds[request.resource.data.memberIds.size() - 1] == request.auth.uid
+            && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1] is string
+            && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1].size() > 0
+            && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1].size() <= 80
+            && (
+              !('memberJoinedAt' in request.resource.data)
+              || request.resource.data.memberJoinedAt
+                  .diff(('memberJoinedAt' in resource.data) ? resource.data.memberJoinedAt : {})
+                  .affectedKeys().hasOnly([request.auth.uid])
+            )
           )
           || (
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames', 'adminIds'])
@@ -280,6 +300,23 @@ service cloud.firestore {
             && request.resource.data.memberIds.hasAll(resource.data.memberIds)
             && !(newlyAddedMemberId(request.resource.data.memberIds) in resource.data.memberIds)
             && isPendingJoinRequest(database, groupId, newlyAddedMemberId(request.resource.data.memberIds))
+            // Same tightening as the direct-join branch above: 50-member cap,
+            // every existing name survives, the appended name is capped, and
+            // memberJoinedAt may only gain the approved member's own key.
+            && request.resource.data.memberIds.size() <= 50
+            // Exact prefix (see the direct-join branch above for why hasAll
+            // alone isn't enough for these parallel arrays).
+            && request.resource.data.memberIds[0:resource.data.memberIds.size()] == resource.data.memberIds
+            && request.resource.data.memberNames[0:resource.data.memberNames.size()] == resource.data.memberNames
+            && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1] is string
+            && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1].size() > 0
+            && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1].size() <= 80
+            && (
+              !('memberJoinedAt' in request.resource.data)
+              || request.resource.data.memberJoinedAt
+                  .diff(('memberJoinedAt' in resource.data) ? resource.data.memberJoinedAt : {})
+                  .affectedKeys().hasOnly([newlyAddedMemberId(request.resource.data.memberIds)])
+            )
           )
           // Kicking: the owner may remove anyone but themselves; an admin
           // may only remove a plain member (never another admin, never the
@@ -423,7 +460,8 @@ service cloud.firestore {
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 2000
-          && (!('subtasks' in request.resource.data) || request.resource.data.subtasks.size() <= 200);
+          && (!('subtasks' in request.resource.data) || (request.resource.data.subtasks is list && request.resource.data.subtasks.size() <= 200))
+          && (!('commentCount' in request.resource.data) || request.resource.data.commentCount is int);
         // The task's own owner can change anything about it (subject to the
         // same size caps). Any other group member may ONLY bump the two
         // denormalized comment-count fields (see addComment/deleteComment) -
@@ -470,11 +508,19 @@ service cloud.firestore {
           && (
             (
               request.auth.uid == resource.data.ownerId
+              // Security review fix: a kicked/departed owner used to keep
+              // editing their old tasks here (no membership check), which
+              // also kept a stored-markup path into a group they'd left.
+              && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
               && request.resource.data.ownerId == resource.data.ownerId
               && request.resource.data.text is string
               && request.resource.data.text.size() > 0
               && request.resource.data.text.size() <= 2000
-              && (!('subtasks' in request.resource.data) || request.resource.data.subtasks.size() <= 200)
+              && (!('subtasks' in request.resource.data) || (request.resource.data.subtasks is list && request.resource.data.subtasks.size() <= 200))
+              // Security review fix: this branch used to leave commentCount
+              // untyped, and group.js rendered it as HTML (stored XSS). The
+              // other-member branches below already require an int.
+              && (!('commentCount' in request.resource.data) || request.resource.data.commentCount is int)
               // The owner may set handoffRequest to null (no request / just
               // cancelled one) or to a well-formed request naming a real
               // teammate other than themself - never anyone else's field.
@@ -509,8 +555,13 @@ service cloud.firestore {
                   request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount', 'lastCommentAt'])
                   && request.resource.data.commentCount is int
                   && (
-                    request.resource.data.commentCount == resource.data.commentCount + 1
-                    || request.resource.data.commentCount == resource.data.commentCount - 1
+                    // Missing counts as 0. Real production bug, found live:
+                    // createGroupTask never writes commentCount, so reading
+                    // resource.data.commentCount on a never-commented task
+                    // errored, and an error denies the rule - every
+                    // teammate's FIRST comment on a fresh task failed.
+                    request.resource.data.commentCount == ('commentCount' in resource.data ? resource.data.commentCount : 0) + 1
+                    || request.resource.data.commentCount == ('commentCount' in resource.data ? resource.data.commentCount : 0) - 1
                   )
                   && (
                     !('lastCommentAt' in request.resource.data.diff(resource.data).affectedKeys())
@@ -541,7 +592,9 @@ service cloud.firestore {
               && request.resource.data.handoffRequest == null
               && request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['ownerId', 'handoffRequest', 'commentCount', 'lastCommentAt'])
-              && request.resource.data.commentCount == resource.data.commentCount + 1
+              // Missing counts as 0, same fix as the comment-count branch
+              // above (a handoff on a never-commented task hit it too).
+              && request.resource.data.commentCount == ('commentCount' in resource.data ? resource.data.commentCount : 0) + 1
               && request.resource.data.lastCommentAt == request.time
             )
             || (
@@ -557,7 +610,14 @@ service cloud.firestore {
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['handoffRequest'])
             )
           );
-        allow delete: if request.auth != null && request.auth.uid == resource.data.ownerId;
+        // Membership required too (security review fix), same reasoning as
+        // the owner-update branch above. Every client delete of a group
+        // task happens while still a member: group.js's own delete button,
+        // deleteGroupCompletely (before the group doc goes), and settings.js
+        // account deletion (owned groups only, before the group doc goes).
+        allow delete: if request.auth != null
+          && request.auth.uid == resource.data.ownerId
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
 
         // Feature 7: a discussion thread under each task. Any member can
         // read/post; only the comment's own author can delete it. No
@@ -572,7 +632,12 @@ service cloud.firestore {
             && request.resource.data.text is string
             && request.resource.data.text.size() > 0
             && request.resource.data.text.size() <= 500;
-          allow delete: if request.auth != null && request.auth.uid == resource.data.authorId;
+          // Membership required (security review fix). No client flow
+          // deletes a comment after leaving: only the in-group delete button
+          // and deleteComment's batch, both while a member.
+          allow delete: if request.auth != null
+            && request.auth.uid == resource.data.authorId
+            && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
         }
       }
 
@@ -614,9 +679,17 @@ service cloud.firestore {
           && request.resource.data.acknowledgedBySender == true;
         // Either side of a still-pending suggestion can retract/clear it;
         // once acted on, it stays as a record.
+        // The group's owner may also delete any suggestion, pending or
+        // resolved, so deleteGroupCompletely can clean them up (resolved
+        // ones were otherwise undeletable by anyone and left orphaned).
         allow delete: if request.auth != null
-          && resource.data.status == 'pending'
-          && (request.auth.uid == resource.data.fromUserId || request.auth.uid == resource.data.forUserId);
+          && (
+            (
+              resource.data.status == 'pending'
+              && (request.auth.uid == resource.data.fromUserId || request.auth.uid == resource.data.forUserId)
+            )
+            || request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId
+          );
       }
 
       // Feature 8: a permanent completion log for the "Recently finished"

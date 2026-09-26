@@ -11016,6 +11016,45 @@ body.authGateActive .authOverlay{
     display: none;
 }
 
+/* Your own grid failed to load after its automatic retries
+   (fetchMyAvailability in group.js). */
+.availabilityLoadError{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--violet-muted);
+}
+
+.availabilityLoadError.hidden{
+    display: none;
+}
+
+.availabilityLoadError p{
+    margin: 0;
+}
+
+.availabilityLoadRetryBtn{
+    border: 1px solid var(--violet-border);
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.045);
+    color: #fdfcff;
+    font-weight: 700;
+    padding: 5px 14px;
+    cursor: pointer;
+}
+
+.availabilityLoadRetryBtn:hover{
+    border-color: var(--violet-accent);
+}
+
+.availabilityLoadRetryBtn:focus-visible{
+    outline: 2px solid var(--violet-accent);
+    outline-offset: 2px;
+}
+
 .availabilityDayToggle{
     display: inline-flex;
     gap: 4px;

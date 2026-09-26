@@ -21,11 +21,15 @@
 // createGroup/joinGroup/leaveGroup/deleteGroupCompletely, and subscribeToMyGroups
 // now live in groups-data.js, shared with group/browse.js - not redefined here.
 
+// Bounded + shape-normalized - see groupTasksQuery/normalizeGroupTaskDoc in
+// groups-data.js. The second callback argument says whether the cap was hit.
 function subscribeToGroupTasks(groupId, callback, onError) {
-    const { collection, onSnapshot } = fs();
-    const tasksRef = collection(db(), 'groups', groupId, 'tasks');
-    return onSnapshot(tasksRef, (snapshot) => {
-        callback(snapshot.docs.map((taskDoc) => ({ id: taskDoc.id, ...taskDoc.data() })));
+    const { onSnapshot } = fs();
+    return onSnapshot(groupTasksQuery(groupId), (snapshot) => {
+        callback(
+            snapshot.docs.map((taskDoc) => normalizeGroupTaskDoc(taskDoc.id, taskDoc.data())),
+            snapshot.size >= GROUP_TASKS_QUERY_LIMIT
+        );
     }, onError);
 }
 
@@ -52,7 +56,7 @@ function subscribeToGroupHistory(groupId, callback, onError) {
         limit(200)
     );
     return onSnapshot(historyRef, (snapshot) => {
-        callback(snapshot.docs.map((entryDoc) => ({ id: entryDoc.id, ...entryDoc.data() })));
+        callback(snapshot.docs.map((entryDoc) => normalizeGroupTextDoc(entryDoc.id, entryDoc.data(), 'taskText')));
     }, onError);
 }
 
@@ -78,11 +82,20 @@ async function logGroupTaskCompletion(groupId, task, completedAt) {
 // not one big always-on listener per task in the list.
 // ---------------------------------------------------------------------
 
+// Newest 200 per task (the thread is re-sorted oldest-first where it's
+// rendered), so one member can't make every viewer of a task download an
+// unbounded thread. healCommentCountIfStale knows about this cap.
+const TASK_COMMENTS_QUERY_LIMIT = 200;
+
 function subscribeToTaskComments(groupId, taskId, callback, onError) {
-    const { collection, onSnapshot } = fs();
-    const commentsRef = collection(db(), 'groups', groupId, 'tasks', taskId, 'comments');
+    const { collection, query, orderBy, limit, onSnapshot } = fs();
+    const commentsRef = query(
+        collection(db(), 'groups', groupId, 'tasks', taskId, 'comments'),
+        orderBy('createdAt', 'desc'),
+        limit(TASK_COMMENTS_QUERY_LIMIT)
+    );
     return onSnapshot(commentsRef, (snapshot) => {
-        callback(snapshot.docs.map((commentDoc) => ({ id: commentDoc.id, ...commentDoc.data() })));
+        callback(snapshot.docs.map((commentDoc) => normalizeGroupTextDoc(commentDoc.id, commentDoc.data(), 'text')));
     }, onError);
 }
 
@@ -154,11 +167,26 @@ async function suggestTaskForMember(groupId, fromUser, forUserId, { text, matrix
 // Every pending suggestion in the group, not just the current user's - the
 // dashboard filters client-side (forUserId === you = "for you", otherwise
 // "you suggested"), since a group this small doesn't need two queries.
+//
+// Newest 300 by createdAt, NOT status == 'pending': resolved suggestions are
+// still needed (the sender's accepted/dismissed outcome notifications, see
+// getUnacknowledgedSuggestionOutcomes / acknowledgedBySender). Resolved ones
+// are never deleted, so without a cap this listener grew forever even with
+// honest use. Tradeoff: a still-pending suggestion or an unacknowledged
+// outcome older than the group's 300 newest suggestions would drop out of
+// view - both are normally days old at most, not hundreds of suggestions
+// back.
+const GROUP_SUGGESTIONS_QUERY_LIMIT = 300;
+
 function subscribeToGroupSuggestions(groupId, callback, onError) {
-    const { collection, onSnapshot } = fs();
-    const suggestionsRef = collection(db(), 'groups', groupId, 'suggestions');
+    const { collection, query, orderBy, limit, onSnapshot } = fs();
+    const suggestionsRef = query(
+        collection(db(), 'groups', groupId, 'suggestions'),
+        orderBy('createdAt', 'desc'),
+        limit(GROUP_SUGGESTIONS_QUERY_LIMIT)
+    );
     return onSnapshot(suggestionsRef, (snapshot) => {
-        callback(snapshot.docs.map((suggestionDoc) => ({ id: suggestionDoc.id, ...suggestionDoc.data() })));
+        callback(snapshot.docs.map((suggestionDoc) => normalizeGroupTextDoc(suggestionDoc.id, suggestionDoc.data(), 'text')));
     }, onError);
 }
 
@@ -296,6 +324,10 @@ async function addGroupTask(groupId, user, { text, matrix, difficulty, dueAt, re
         taskType: validTaskType,
         estimateMinutes: validTaskType === 'timeboxed' ? (estimateMinutes || null) : null,
         subtasks: initialSubtasks,
+        // Explicit 0 so the first comment's +1 rule check always has a
+        // number to compare against (a missing field was a rules eval
+        // error that denied the first comment on a brand-new task).
+        commentCount: 0,
         createdAt: timestamp,
         updatedAt: timestamp
     });
@@ -717,6 +749,7 @@ function renderGroupAvailabilityView(group) {
         availabilityWeekdaySlots = null;
         availabilityHasBeenPainted = false;
         availabilityTimezone = null;
+        availabilityFetchFailedForGroupId = null;
         fetchMyAvailability(group);
     }
 
@@ -728,6 +761,7 @@ function renderGroupAvailabilityView(group) {
     // brief window before the fetch resolves.
     const hasGrid = Boolean(availabilityWeekdaySlots);
     availabilityGridWrap?.classList.toggle('hidden', !hasGrid);
+    availabilityLoadError?.classList.toggle('hidden', hasGrid || availabilityFetchFailedForGroupId !== group.id);
 
     // Independent of your own grid having loaded - it's built from every
     // member's live data (see renderAvailabilityHeatmap). Only rendered while
@@ -820,6 +854,13 @@ setInterval(() => {
 // same race as the join-requests listener), and without a retry the paint
 // grid never rendered until a full reload.
 const AVAILABILITY_FETCH_RETRY_DELAYS_MS = [1500, 4000, 15000];
+// Set once every automatic retry has failed, for the group it failed for -
+// shows the inline "Couldn't load your availability. Try again" line
+// instead of a grid that just never appears. Cleared by a successful load,
+// a manual retry, and a group switch.
+let availabilityFetchFailedForGroupId = null;
+const availabilityLoadError = document.querySelector('.availabilityLoadError');
+const availabilityLoadRetryBtn = document.querySelector('.availabilityLoadRetryBtn');
 
 async function fetchMyAvailability(group, attempt = 0) {
     const { doc, getDoc } = fs();
@@ -828,6 +869,7 @@ async function fetchMyAvailability(group, attempt = 0) {
         if (getSelectedGroup()?.id !== group.id) {
             return; // switched groups again before this resolved - discard, a newer fetch already owns the state
         }
+        availabilityFetchFailedForGroupId = null;
         if (snapshot.exists()) {
             const data = snapshot.data();
             availabilityWeekdaySlots = data.weekdaySlots;
@@ -857,10 +899,26 @@ async function fetchMyAvailability(group, attempt = 0) {
                     fetchMyAvailability(group, attempt + 1);
                 }
             }, AVAILABILITY_FETCH_RETRY_DELAYS_MS[attempt]);
+        } else {
+            availabilityFetchFailedForGroupId = group.id;
         }
     }
     renderGroupAvailabilityView(group);
 }
+
+// One read per click, no automatic retry chain behind it (attempt is past
+// the last retry), so hammering the button can't multiply reads. Never
+// writes - saves stay impossible while availabilityWeekdaySlots is null.
+availabilityLoadRetryBtn?.addEventListener('click', () => {
+    playClickSound();
+    const group = getSelectedGroup();
+    if (!group || !currentUser || availabilityWeekdaySlots || availabilityLoadedForGroupId !== group.id) {
+        return;
+    }
+    availabilityFetchFailedForGroupId = null;
+    renderGroupAvailabilityView(group);
+    fetchMyAvailability(group, AVAILABILITY_FETCH_RETRY_DELAYS_MS.length);
+});
 
 // Everyone's availability, live - used by the Phase 4 heatmap and Phase 5
 // recommendation panel. Open to every member (unlike joinRequests, which
@@ -2708,6 +2766,7 @@ let hasLoadedGroupTasksOnce = false;
 // tell "genuinely no tasks" apart from "failed to load" (most commonly
 // stale/unpublished firestore.rules), same pattern as groupHistoryLoadError.
 let groupTasksLoadError = null;
+let groupTasksTruncated = false; // the capped task listener hit its limit (see GROUP_TASKS_QUERY_LIMIT)
 // 'month' | 'week'; groupCalendarAnchorDate is whichever date the currently
 // visible month/week is anchored to - same state shape as solo's script.js,
 // kept in this file's own module scope (no shared state between the two
@@ -3385,6 +3444,14 @@ function hasUnreadComments(task) {
 // to match - any group member is allowed to (see the task update rule),
 // and it means this only ever needs fixing once per task.
 function healCommentCountIfStale(groupId, task, actualCount) {
+    // Only the task's owner heals it: otherwise every member with the thread
+    // open wrote a correction whenever someone set a wrong commentCount (the
+    // rules allow any integer there), turning one hostile write into N.
+    // Also skipped once the thread hits the listener's cap, since the loaded
+    // count is no longer the real total.
+    if (task.ownerId !== currentUser?.uid || actualCount >= TASK_COMMENTS_QUERY_LIMIT) {
+        return;
+    }
     const storedCount = task.commentCount || 0;
     if (storedCount === actualCount) {
         return;
@@ -3453,12 +3520,22 @@ function createGroupCommentsSection(groupId, task) {
     // created before commentCount existed never bumped it, so the stored
     // number can undercount) - only fall back to the stored estimate while
     // still collapsed and nothing's been fetched yet.
-    const knownCount = taskCommentsById[task.id] ? comments.length : (task.commentCount || 0);
+    // Security review fix: commentCount is written by the task's owner, so
+    // it's untrusted. It used to go straight into innerHTML, which let a
+    // member store markup in it that ran in every teammate's browser. Now
+    // coerced to a plain non-negative integer and rendered as text only.
+    const storedCount = Number(task.commentCount);
+    const knownCount = taskCommentsById[task.id]
+        ? comments.length
+        : (Number.isFinite(storedCount) ? Math.max(0, Math.trunc(storedCount)) : 0);
     const toggleLabel = document.createElement('span');
     toggleLabel.classList.add('commentsToggleLabel');
-    toggleLabel.innerHTML = '<i class="fa-regular fa-comment"></i> ' + (
-        knownCount === 0 ? 'Comments' : `${knownCount} comment${knownCount === 1 ? '' : 's'}`
-    );
+    const commentIcon = document.createElement('i');
+    commentIcon.classList.add('fa-regular', 'fa-comment');
+    toggleLabel.appendChild(commentIcon);
+    toggleLabel.appendChild(document.createTextNode(
+        ' ' + (knownCount === 0 ? 'Comments' : `${knownCount} comment${knownCount === 1 ? '' : 's'}`)
+    ));
     toggleBtn.appendChild(toggleLabel);
 
     if (!expanded && hasUnreadComments(task)) {
@@ -5225,9 +5302,16 @@ function renderPendingJoinRequests(requests) {
         approveBtn.textContent = 'Approve';
         approveBtn.addEventListener('click', () => {
             playClickSound();
+            // Mirrors the rules' 50-member cap so the owner gets a clear
+            // reason instead of a generic failure.
+            const settingsGroup = (groups || []).find((item) => item.id === groupSettingsGroupId);
+            if ((settingsGroup?.memberIds || []).length >= 50) {
+                alert('This group is full (50 members max). Remove someone before approving another request.');
+                return;
+            }
             approveJoinRequest(groupSettingsGroupId, request.uid, request.name || 'Teammate').catch((error) => {
                 console.error('Failed to approve join request:', error);
-                alert('Could not approve that request.');
+                alert(describeGroupWriteError(error, 'Could not approve that request.'));
             });
         });
         actions.appendChild(approveBtn);
@@ -5797,6 +5881,15 @@ function renderGroupTasks() {
         return;
     }
 
+    // The task listener is capped (see GROUP_TASKS_QUERY_LIMIT) - say so
+    // rather than silently hiding the oldest tasks past it.
+    if (groupTasksTruncated) {
+        const truncatedMsg = document.createElement('li');
+        truncatedMsg.classList.add('emptyTasksMsg');
+        truncatedMsg.textContent = `Showing this group's newest ${GROUP_TASKS_QUERY_LIMIT} tasks. Older ones are hidden.`;
+        groupTasksList.appendChild(truncatedMsg);
+    }
+
     const visible = getVisibleGroupTasks();
     if (visible.length === 0) {
         const emptyMsg = document.createElement('li');
@@ -6349,6 +6442,16 @@ leaderboardMemberOverlay?.addEventListener('click', (event) => {
 // a role change - e.g. just got promoted - doesn't necessarily come with a
 // group switch) is a cheap no-op once already subscribed to the right
 // group.
+// Bounded retry, same shape as ensureGroupAvailabilitySubscription's: the
+// old "clear the key and let the next renderApp() re-subscribe" recovery
+// ran at network round-trip speed forever under any PERSISTENT denial
+// (rules not yet republished, or client and server disagreeing about your
+// admin status) - an unbounded re-subscribe/renderApp loop.
+const JOIN_REQUESTS_RETRY_DELAYS_MS = [2000, 5000, 30000];
+let joinRequestsRetryCount = 0;
+let joinRequestsRetryTimer = null;
+let joinRequestsRetryKey = null;
+
 function ensureJoinRequestsSubscription(group, canSeeJoinRequests) {
     const desiredKey = (group && canSeeJoinRequests) ? group.id : null;
     if (desiredKey === joinRequestsSubscriptionKey) {
@@ -6358,12 +6461,22 @@ function ensureJoinRequestsSubscription(group, canSeeJoinRequests) {
         unsubscribeJoinRequests();
         unsubscribeJoinRequests = null;
     }
+    // A different group (or losing/gaining the role) gets a fresh set of
+    // attempts; the retry timer's own re-subscribe reuses the same key, so
+    // it keeps the count and can't loop forever.
+    if (desiredKey !== joinRequestsRetryKey) {
+        clearTimeout(joinRequestsRetryTimer);
+        joinRequestsRetryTimer = null;
+        joinRequestsRetryCount = 0;
+        joinRequestsRetryKey = desiredKey;
+    }
     groupJoinRequests = [];
     joinRequestsSubscriptionKey = desiredKey;
     if (!desiredKey) {
         return;
     }
     unsubscribeJoinRequests = subscribeToJoinRequests(group.id, (requests) => {
+        joinRequestsRetryCount = 0;
         groupJoinRequests = requests;
         renderApp();
     }, (error) => {
@@ -6376,12 +6489,27 @@ function ensureJoinRequestsSubscription(group, canSeeJoinRequests) {
         // leaving joinRequestsSubscriptionKey set would mean this never
         // retries on its own - only a reload or group switch would recover
         // it, silently hiding the join-request badge/list for a brand-new
-        // group's owner until then. Clearing it here lets the very next
-        // renderApp() (which fires again momentarily once the server
-        // catches up) re-subscribe and succeed normally.
+        // group's owner until then. (That create race is now also prevented
+        // at the source - see subscribeToMyGroups in groups-data.js.)
+        //
+        // The key stays SET here on purpose, so renderApp() is a no-op
+        // instead of instantly re-subscribing; only the timer clears it,
+        // a bounded number of times, then it stops until the group or your
+        // role changes.
         console.error('Failed to load join requests:', error);
         groupJoinRequests = [];
-        joinRequestsSubscriptionKey = null;
+        if (joinRequestsRetryCount < JOIN_REQUESTS_RETRY_DELAYS_MS.length) {
+            const delay = JOIN_REQUESTS_RETRY_DELAYS_MS[joinRequestsRetryCount];
+            joinRequestsRetryCount += 1;
+            clearTimeout(joinRequestsRetryTimer);
+            joinRequestsRetryTimer = setTimeout(() => {
+                joinRequestsRetryTimer = null;
+                if (joinRequestsSubscriptionKey === desiredKey) {
+                    joinRequestsSubscriptionKey = null;
+                    renderApp();
+                }
+            }, delay);
+        }
         renderApp();
     });
 }
@@ -7102,16 +7230,23 @@ async function maybeShowGroupTeamPulse(group) {
     // lookups - just counting this-week entries by whoever completed them.
     const thisWeekCountsByOwner = new Map();
     try {
-        const { collection, query, where, getDocs } = fs();
+        const { collection, query, where, limit, getDocs } = fs();
         // One bounded 14-day range query, split into this-week/last-week
         // client-side - mirrors solo's maybeShowWeeklyRecap exactly, rather
         // than relying on the already-subscribed groupHistoryEntries (that
         // one's capped at 50 most recent across the WHOLE group and isn't
         // date-bounded, so an active group could blow past a week's worth
         // within that cap and undercount).
+        // Bounded on both ends and capped: completedAt is client-written, so
+        // without the upper bound a far-future entry stayed "this week"
+        // forever, and without the limit one member could make every
+        // viewer's pulse read an unbounded number of entries. 500 in two
+        // weeks is far past any real group's pace.
         const historyQuery = query(
             collection(db(), 'groups', group.id, 'history'),
-            where('completedAt', '>=', lastWeekStart.toISOString())
+            where('completedAt', '>=', lastWeekStart.toISOString()),
+            where('completedAt', '<=', new Date().toISOString()),
+            limit(500)
         );
         const snapshot = await getDocs(historyQuery);
         const currentWeekStartIso = currentWeekStart.toISOString();
@@ -8192,6 +8327,10 @@ function resetGroupState() {
     }
     groupJoinRequests = [];
     joinRequestsSubscriptionKey = null;
+    clearTimeout(joinRequestsRetryTimer);
+    joinRequestsRetryTimer = null;
+    joinRequestsRetryCount = 0;
+    joinRequestsRetryKey = null;
     navAttentionBadge?.classList.remove('visible');
     closeGroupSettingsModal();
     // So a different account signing in during the same page load doesn't
@@ -8247,15 +8386,22 @@ function stopWatchingSelectedGroup() {
 // group AND still have it in your list keeps that expected noise out of the
 // console and the UI, without hiding a genuine error for a group you still
 // belong to (unpublished rules, etc. - those still show, ~1.5s later).
+//
+// isStillDead: true while this listener's slot is still empty. Real bug
+// caught in review: a transient denial nulls the slot, the next groups
+// snapshot re-opens the listener and it loads fine - and then the old
+// 1.5s timer used to fire anyway, wiping the live list with a false
+// "rules need to be published" error. A refilled slot means a newer
+// listener owns that data now, so the stale error is dropped.
 const GROUP_LISTENER_ERROR_GRACE_MS = 1500;
-function handleSelectedGroupListenerError(groupId, error, surface) {
+function handleSelectedGroupListenerError(groupId, error, isStillDead, surface) {
     if (error?.code !== 'permission-denied') {
         surface();
         return;
     }
     setTimeout(() => {
         const stillRelevant = watchedGroupId === groupId && (groups || []).some((group) => group.id === groupId);
-        if (stillRelevant) {
+        if (stillRelevant && isStillDead()) {
             surface();
         }
     }, GROUP_LISTENER_ERROR_GRACE_MS);
@@ -8291,6 +8437,7 @@ function watchSelectedGroupTasks() {
         stopWatchingSelectedGroup();
         watchedGroupId = groupId;
         hasLoadedGroupTasksOnce = false;
+        groupTasksTruncated = false;
     }
     if (!group) {
         groupTasks = [];
@@ -8302,8 +8449,9 @@ function watchSelectedGroupTasks() {
     }
 
     if (!unsubscribeTasks) {
-        const tasksUnsubscribe = subscribeToGroupTasks(groupId, (tasks) => {
+        const tasksUnsubscribe = subscribeToGroupTasks(groupId, (tasks, isTruncated) => {
             groupTasks = tasks;
+            groupTasksTruncated = isTruncated;
             groupTasksLoadError = null;
             hasLoadedGroupTasksOnce = true;
             renderApp();
@@ -8312,7 +8460,7 @@ function watchSelectedGroupTasks() {
                 return; // already torn down (group switch / sign-out)
             }
             unsubscribeTasks = null; // Firestore ended it; re-openable on the next call
-            handleSelectedGroupListenerError(groupId, error, () => {
+            handleSelectedGroupListenerError(groupId, error, () => !unsubscribeTasks, () => {
                 console.error('Failed to load group tasks:', error);
                 groupTasks = [];
                 groupTasksLoadError = error?.code === 'permission-denied'
@@ -8334,7 +8482,7 @@ function watchSelectedGroupTasks() {
                 return;
             }
             unsubscribeSuggestions = null;
-            handleSelectedGroupListenerError(groupId, error, () => {
+            handleSelectedGroupListenerError(groupId, error, () => !unsubscribeSuggestions, () => {
                 console.error('Failed to load suggestions:', error);
                 groupSuggestions = [];
                 renderApp();
@@ -8353,7 +8501,7 @@ function watchSelectedGroupTasks() {
                 return;
             }
             unsubscribeHistory = null;
-            handleSelectedGroupListenerError(groupId, error, () => {
+            handleSelectedGroupListenerError(groupId, error, () => !unsubscribeHistory, () => {
                 console.error('Failed to load group history:', error);
                 groupHistoryEntries = [];
                 // Same permission-denied message as comments (see toggleGroupCommentsExpanded)

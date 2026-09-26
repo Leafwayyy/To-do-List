@@ -207,11 +207,12 @@ function stopWatchingRemovedGroups(currentGroups) {
 // subscribeToGroupTasks lives in group.js normally, but this page doesn't
 // load group.js (it doesn't need the dashboard) - a small local copy here
 // since it's a single, generic query wrapper with no dashboard-specific state.
+// Same bounded query and shape normalization as the dashboard's (both live
+// in groups-data.js), so one hostile task doc can't break this page either.
 function subscribeToGroupTasks(groupId, callback, onError) {
-    const { collection, onSnapshot } = fs();
-    const tasksRef = collection(db(), 'groups', groupId, 'tasks');
-    return onSnapshot(tasksRef, (snapshot) => {
-        callback(snapshot.docs.map((taskDoc) => ({ id: taskDoc.id, ...taskDoc.data() })));
+    const { onSnapshot } = fs();
+    return onSnapshot(groupTasksQuery(groupId), (snapshot) => {
+        callback(snapshot.docs.map((taskDoc) => normalizeGroupTaskDoc(taskDoc.id, taskDoc.data())));
     }, onError);
 }
 

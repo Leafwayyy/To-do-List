@@ -1460,6 +1460,16 @@
                     } catch (error) {
                         console.warn('Could not delete availability grids for an owned group (continuing account deletion):', error);
                     }
+                    // Suggestions too (mirrors deleteGroupCompletely) - resolved
+                    // ones can otherwise never be deleted by anyone once the
+                    // group is gone. Best-effort: only the newer rules let the
+                    // owner delete them, so this must never block deletion.
+                    try {
+                        const suggestionsSnapshot = await getDocs(collection(db, 'groups', groupDoc.id, 'suggestions'));
+                        await Promise.all(suggestionsSnapshot.docs.map((suggestionDoc) => deleteDoc(suggestionDoc.ref)));
+                    } catch (error) {
+                        console.warn('Could not delete suggestions for an owned group (continuing account deletion):', error);
+                    }
                     await deleteDoc(groupDoc.ref);
                 } else {
                     // Own availability grid (and the timezone copied onto it)

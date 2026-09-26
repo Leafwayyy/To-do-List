@@ -198,6 +198,14 @@ async function createGroup(name, user, privacy = 'open') {
     throw lastError || new Error('Could not create a group. Please try again.');
 }
 
+// "Alex" -> "Alex (k3f9)": used when a name already exists in a group's
+// memberNames, since arrayUnion would silently drop the duplicate. Kept
+// within the rules' 80-char cap on member names.
+function disambiguateMemberName(name, uid) {
+    const suffix = ` (${String(uid).slice(0, 4)})`;
+    return `${String(name || 'Teammate').slice(0, 80 - suffix.length)}${suffix}`;
+}
+
 // A non-member can't read a group's doc (see firestore.rules' groups/{groupId}
 // read rule) so there's no way to check its privacy before writing. Instead
 // this tries the direct-join write first (only ever allowed by the rules
@@ -213,23 +221,39 @@ async function joinGroup(code, user) {
     }
 
     const { doc, updateDoc, arrayUnion, serverTimestamp } = fs();
+    const directJoin = (memberName) => updateDoc(doc(db(), 'groups', normalizedCode), {
+        memberIds: arrayUnion(user.uid),
+        memberNames: arrayUnion(memberName),
+        // Dot-path so this only ever adds/overwrites your own entry in
+        // the map, never touching anyone else's - see the new-member
+        // catch-up card's gating in group.js for why this needs to be
+        // real, per-member, server-side data rather than a client flag.
+        [`memberJoinedAt.${user.uid}`]: serverTimestamp()
+    });
     try {
-        await updateDoc(doc(db(), 'groups', normalizedCode), {
-            memberIds: arrayUnion(user.uid),
-            memberNames: arrayUnion(displayNameFor(user)),
-            // Dot-path so this only ever adds/overwrites your own entry in
-            // the map, never touching anyone else's - see the new-member
-            // catch-up card's gating in group.js for why this needs to be
-            // real, per-member, server-side data rather than a client flag.
-            [`memberJoinedAt.${user.uid}`]: serverTimestamp()
-        });
+        await directJoin(displayNameFor(user).slice(0, 80));
         return { groupId: normalizedCode, status: 'joined' };
     } catch (directJoinError) {
+        // arrayUnion drops a name that's already in memberNames (two
+        // "Alex"es, or the same email fallback), which leaves the parallel
+        // arrays different lengths and the rule denies the join. We can't
+        // read the group first to check (non-members have no read access),
+        // so retry exactly once with a uid-suffixed name. A genuinely
+        // closed, full or invite-only group denies this retry too and falls
+        // through to the same request/error path as before.
+        if (directJoinError?.code === 'permission-denied') {
+            try {
+                await directJoin(disambiguateMemberName(displayNameFor(user), user.uid));
+                return { groupId: normalizedCode, status: 'joined' };
+            } catch {
+                // Fall through to the join-request path below.
+            }
+        }
         try {
             await requestToJoinGroup(normalizedCode, user);
             return { groupId: normalizedCode, status: 'requested' };
         } catch (requestError) {
-            throw new Error("Could not join - the group may be closed, the code may be wrong, or you're already a member.");
+            throw new Error("Could not join - the group may be closed or full (50 members max), the code may be wrong, or you're already a member.");
         }
     }
 }
@@ -243,7 +267,7 @@ async function requestToJoinGroup(code, user) {
     const { doc, setDoc, serverTimestamp } = fs();
     await setDoc(doc(db(), 'groups', normalizedCode, 'joinRequests', user.uid), {
         uid: user.uid,
-        name: displayNameFor(user),
+        name: displayNameFor(user).slice(0, 80),
         status: 'pending',
         requestedAt: serverTimestamp(),
         respondedAt: null
@@ -255,11 +279,20 @@ async function requestToJoinGroup(code, user) {
 // member and clears their request in one batch, so a partial failure can't
 // leave them "approved" without membership or "pending" without a request.
 async function approveJoinRequest(groupId, requesterUid, requesterName) {
-    const { doc, writeBatch, arrayUnion, serverTimestamp } = fs();
+    const { doc, getDoc, writeBatch, arrayUnion, serverTimestamp } = fs();
+    // The approver CAN read the group, so check for a name collision up
+    // front instead of retrying: arrayUnion would silently drop a duplicate
+    // name and the rule would deny the whole approval.
+    const groupSnapshot = await getDoc(doc(db(), 'groups', groupId));
+    const existingNames = groupSnapshot.exists() ? (groupSnapshot.data().memberNames || []) : [];
+    const baseName = String(requesterName || 'Teammate').slice(0, 80);
+    const memberName = existingNames.includes(baseName)
+        ? disambiguateMemberName(baseName, requesterUid)
+        : baseName;
     const batch = writeBatch(db());
     batch.update(doc(db(), 'groups', groupId), {
         memberIds: arrayUnion(requesterUid),
-        memberNames: arrayUnion(requesterName),
+        memberNames: arrayUnion(memberName),
         // Same reasoning as joinGroup's direct-join path - the requester is
         // becoming a real member right now, in this write, so this is the
         // correct moment to record it, not whenever they first happen to
@@ -515,6 +548,16 @@ async function deleteGroupCompletely(groupId, user) {
         console.warn('Could not delete availability grids (continuing group deletion):', error);
     }
 
+    // Every suggestion, pending or resolved - the rules let the group owner
+    // delete any of them (resolved ones were otherwise orphaned forever).
+    // Best-effort for the same deploy-order reason as availability above.
+    try {
+        const suggestionsSnapshot = await getDocs(collection(db(), 'groups', groupId, 'suggestions'));
+        await Promise.all(suggestionsSnapshot.docs.map((suggestionDoc) => deleteDoc(suggestionDoc.ref)));
+    } catch (error) {
+        console.warn('Could not delete suggestions (continuing group deletion):', error);
+    }
+
     await deleteDoc(groupRef);
 }
 
@@ -574,4 +617,75 @@ function subscribeToMyGroups(uid, callback, onError) {
         lastVisibleIdsKey = visibleIdsKey;
         callback(visibleDocs.map((groupDoc) => ({ id: groupDoc.id, ...groupDoc.data() })));
     }, onError);
+}
+
+// Newest-first cap on every group task listener (dashboard and browse page).
+// An abuse bound, not a feature limit: without it one member stuffing a
+// group with thousands of tasks made every member's client read (and
+// render) all of them on every load. Ordered by createdAt (set on every
+// group task since the feature began) so a group that ever does pass the
+// cap keeps its NEWEST tasks, not its oldest.
+const GROUP_TASKS_QUERY_LIMIT = 500;
+
+function groupTasksQuery(groupId) {
+    const { collection, query, orderBy, limit } = fs();
+    return query(
+        collection(db(), 'groups', groupId, 'tasks'),
+        orderBy('createdAt', 'desc'),
+        limit(GROUP_TASKS_QUERY_LIMIT)
+    );
+}
+
+// Group task docs are written by OTHER members' clients, and the rules only
+// type-check text and cap subtasks' size - not what's inside subtasks, or
+// the date fields. One doc with e.g. `subtasks: [null]` or a numeric
+// createdAt used to throw inside renderApp (subtask.completed on null,
+// createdAt.localeCompare on a number) and break the task list for every
+// member of the group. Everything is shaped here, once, at the point the
+// data enters the app, so the render code can keep trusting it. The doc id
+// is applied LAST so a stored `id` field can't masquerade as another task.
+function normalizeGroupDateField(value) {
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (value && typeof value.toDate === 'function') {
+        try {
+            return value.toDate().toISOString();
+        } catch {
+            return null;
+        }
+    }
+    return null;
+}
+
+function isPlainDataObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeGroupTaskDoc(id, data) {
+    const task = { ...(isPlainDataObject(data) ? data : {}) };
+    task.text = typeof task.text === 'string' ? task.text : String(task.text ?? '');
+    task.createdAt = normalizeGroupDateField(task.createdAt);
+    task.dueAt = normalizeGroupDateField(task.dueAt);
+    task.scheduledAt = normalizeGroupDateField(task.scheduledAt);
+    task.subtasks = Array.isArray(task.subtasks)
+        ? task.subtasks.filter(isPlainDataObject).map((subtask) => ({
+            ...subtask,
+            text: typeof subtask.text === 'string' ? subtask.text : String(subtask.text ?? ''),
+            dueAt: normalizeGroupDateField(subtask.dueAt)
+        }))
+        : [];
+    if (task.handoffRequest !== undefined && task.handoffRequest !== null && !isPlainDataObject(task.handoffRequest)) {
+        task.handoffRequest = null;
+    }
+    task.id = id;
+    return task;
+}
+
+// Same idea for the other member-written collections the dashboard renders.
+function normalizeGroupTextDoc(id, data, textField) {
+    const doc = { ...(isPlainDataObject(data) ? data : {}) };
+    doc[textField] = typeof doc[textField] === 'string' ? doc[textField] : String(doc[textField] ?? '');
+    doc.id = id;
+    return doc;
 }
