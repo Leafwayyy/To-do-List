@@ -282,9 +282,47 @@ function computeGroupPlanningSignals(rawTasks) {
 // computeGroupPlanningSignals, and its pending suggestions) - same "only
 // the open group" scoping teammateSuggestions/teammateComments already
 // use, so this doesn't add a read per group the user happens to be in.
+// Bounded reads for the per-message context below. Before this, every Dusty
+// message did a getDocs of EVERY task in EVERY group the user is in (and
+// every suggestion ever made in the open group), so one member stuffing a
+// group, or someone in many groups, multiplied reads per message. Now:
+// at most BRAIN_DUMP_MAX_CONTEXT_GROUPS groups (the Worker keeps only its
+// first 20 anyway - see buildTaskContextBlock), the open group always
+// included; each group's tasks via the same newest-first capped query and
+// shape normalization the dashboard uses (groups-data.js - only loaded on
+// the group pages, hence the inline fallback for solo pages); and only
+// PENDING suggestions, capped, since that's all this ever used. A normal
+// group (under 150 open tasks) gives Dusty exactly the same view as before.
+// Not cached: this runs once per message (isSending blocks overlap), and a
+// cache would hand Dusty stale context right after his own edits.
+const BRAIN_DUMP_MAX_CONTEXT_GROUPS = 20;
+const BRAIN_DUMP_GROUP_TASKS_READ_LIMIT = 500;
+
+function brainDumpGroupTasksQuery(groupId) {
+    if (typeof groupTasksQuery === 'function') {
+        return groupTasksQuery(groupId);
+    }
+    const { db, firestore } = window.ToDoAuth;
+    const { collection, query, orderBy, limit } = firestore;
+    return query(collection(db, 'groups', groupId, 'tasks'), orderBy('createdAt', 'desc'), limit(BRAIN_DUMP_GROUP_TASKS_READ_LIMIT));
+}
+
+function brainDumpNormalizeGroupTask(id, data) {
+    if (typeof normalizeGroupTaskDoc === 'function') {
+        return normalizeGroupTaskDoc(id, data);
+    }
+    const task = { ...(data && typeof data === 'object' ? data : {}) };
+    task.text = typeof task.text === 'string' ? task.text : String(task.text ?? '');
+    task.subtasks = Array.isArray(task.subtasks)
+        ? task.subtasks.filter((subtask) => subtask && typeof subtask === 'object' && !Array.isArray(subtask))
+        : [];
+    task.id = id;
+    return task;
+}
+
 async function gatherTaskContext(user, currentGroupId) {
     const { db, firestore } = window.ToDoAuth;
-    const { collection, getDocs, query, where } = firestore;
+    const { collection, getDocs, query, where, limit } = firestore;
 
     let soloTasks = [];
     let soloSignals = null;
@@ -308,18 +346,22 @@ async function gatherTaskContext(user, currentGroupId) {
         // memberNames (parallel to memberIds) is already a field on the group
         // doc - free to include, and needed so Dusty knows a teammate's name
         // even if they have zero active tasks right now.
-        const groups = groupsSnapshot.docs.map((groupDoc) => ({
-            id: groupDoc.id,
-            name: groupDoc.data().name,
-            memberIds: groupDoc.data().memberIds || [],
-            memberNames: groupDoc.data().memberNames || []
-        }));
+        const groups = groupsSnapshot.docs
+            .map((groupDoc) => ({
+                id: groupDoc.id,
+                name: groupDoc.data().name,
+                memberIds: groupDoc.data().memberIds || [],
+                memberNames: groupDoc.data().memberNames || []
+            }))
+            // Open group first, so the cap below can never drop it.
+            .sort((a, b) => (b.id === currentGroupId) - (a.id === currentGroupId))
+            .slice(0, BRAIN_DUMP_MAX_CONTEXT_GROUPS);
 
         groupsContext = await Promise.all(groups.map(async (group) => {
             try {
-                const tasksSnapshot = await getDocs(collection(db, 'groups', group.id, 'tasks'));
+                const tasksSnapshot = await getDocs(brainDumpGroupTasksQuery(group.id));
                 const rawGroupTasks = tasksSnapshot.docs
-                    .map((taskDoc) => ({ id: taskDoc.id, ...taskDoc.data() }))
+                    .map((taskDoc) => brainDumpNormalizeGroupTask(taskDoc.id, taskDoc.data()))
                     .filter((task) => !task.completed)
                     .slice(0, BRAIN_DUMP_MAX_CONTEXT_TASKS);
                 if (currentGroupId && group.id === currentGroupId) {
@@ -343,7 +385,11 @@ async function gatherTaskContext(user, currentGroupId) {
                     const idx = currentGroup ? currentGroup.memberIds.indexOf(id) : -1;
                     return idx !== -1 ? currentGroup.memberNames[idx] : 'a teammate';
                 };
-                const suggestionsSnapshot = await getDocs(collection(db, 'groups', currentGroupId, 'suggestions'));
+                const suggestionsSnapshot = await getDocs(query(
+                    collection(db, 'groups', currentGroupId, 'suggestions'),
+                    where('status', '==', 'pending'),
+                    limit(30)
+                ));
                 groupSignals.pendingSuggestions = suggestionsSnapshot.docs
                     .map((suggestionDoc) => suggestionDoc.data())
                     .filter((suggestion) => suggestion.status === 'pending')

@@ -212,14 +212,45 @@ const RATE_LIMIT_WINDOW_MS = 5 * 60 * 60 * 1000; // 5 hours
 // messages per session).
 const RATE_LIMIT_TOKEN_BUDGET_PER_WINDOW = 120000;
 
+// Charged against the user's window BEFORE Gemini is called, then corrected
+// to the real cost afterward (see reserveTokens/recordTokenUsage). KV has no
+// atomic increment, so this can't make the check airtight, but it closes most
+// of the read-then-write gap: a burst of parallel requests now sees each
+// other's reservations instead of all reading the same pre-call total.
+const RESERVED_TOKENS_PER_REQUEST = 15000;
+
+// Security review fix: a whole-app daily cap, so many throwaway accounts
+// (sign-up is open) can't each spend a full per-user budget. Both caps are
+// overridable from wrangler.toml [vars]. The request cap also keeps KV
+// writes (at most 3 per message, failed calls included) inside the free
+// tier's ~1,000 writes/day - which is why the day is the UTC day: that's
+// when Cloudflare resets the KV write quota. A Pacific-day window would
+// straddle two UTC days and could let ~2x the cap's writes land in one.
+// (Gemini's own quota still resets on Pacific midnight; its 429 keeps using
+// getNextQuotaResetIso.)
+const DEFAULT_GLOBAL_DAILY_TOKEN_BUDGET = 3000000;
+const DEFAULT_GLOBAL_DAILY_REQUEST_CAP = 300;
+
+// Thrown whenever the limiter itself can't be consulted or updated. The
+// fetch handler turns it into a 503 and does NOT call Gemini: failing closed,
+// since an unenforceable budget is exactly the situation the caps exist for.
+class LimiterUnavailableError extends Error {}
+
+function utcDayKey(now = new Date()) {
+    return now.toISOString().slice(0, 10);
+}
+
+function nextUtcMidnightIso(now = new Date()) {
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).toISOString();
+}
+
 // Reads the user's current window, starting a fresh one if none exists or
 // the last one has expired - doesn't write anything itself (see
-// recordTokenUsage, called separately once the actual cost of THIS call is
-// known). Returns null only if KV itself is unreachable, which every
-// caller treats as "fail open."
+// reserveTokens/recordTokenUsage). Throws LimiterUnavailableError if KV is
+// missing or unreachable (fail closed).
 async function getRateLimitState(uid, env) {
     if (!env.RATE_LIMIT_KV) {
-        return null;
+        throw new LimiterUnavailableError('RATE_LIMIT_KV binding missing');
     }
     try {
         const raw = await env.RATE_LIMIT_KV.get(`ratelimit:${uid}`);
@@ -231,7 +262,118 @@ async function getRateLimitState(uid, env) {
         return record;
     } catch (error) {
         console.error(`Failed to read rate limit state for ${uid}:`, error);
-        return null;
+        throw new LimiterUnavailableError('rate limit read failed');
+    }
+}
+
+// Writes the pre-call reservation. Fail closed: if this can't be recorded,
+// the call isn't made.
+async function reserveTokens(uid, env, state) {
+    const reserved = { windowStartedAt: state.windowStartedAt, tokensUsed: state.tokensUsed + RESERVED_TOKENS_PER_REQUEST };
+    try {
+        await env.RATE_LIMIT_KV.put(`ratelimit:${uid}`, JSON.stringify(reserved), {
+            expirationTtl: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000) + 3600
+        });
+    } catch (error) {
+        console.error(`Failed to reserve tokens for ${uid}:`, error);
+        throw new LimiterUnavailableError('rate limit reservation failed');
+    }
+    return reserved;
+}
+
+async function getGlobalUsage(env) {
+    if (!env.RATE_LIMIT_KV) {
+        throw new LimiterUnavailableError('RATE_LIMIT_KV binding missing');
+    }
+    const key = `global:${utcDayKey()}`;
+    try {
+        const raw = await env.RATE_LIMIT_KV.get(key);
+        const record = raw ? JSON.parse(raw) : null;
+        return { key, tokensUsed: record?.tokensUsed || 0, requests: record?.requests || 0 };
+    } catch (error) {
+        console.error('Failed to read global usage:', error);
+        throw new LimiterUnavailableError('global usage read failed');
+    }
+}
+
+function isOverGlobalCap(usage, env) {
+    const tokenBudget = Number(env.GLOBAL_DAILY_TOKEN_BUDGET) || DEFAULT_GLOBAL_DAILY_TOKEN_BUDGET;
+    const requestCap = Number(env.GLOBAL_DAILY_REQUEST_CAP) || DEFAULT_GLOBAL_DAILY_REQUEST_CAP;
+    return usage.tokensUsed >= tokenBudget || usage.requests >= requestCap;
+}
+
+// After the call, for successes AND failures (a failed call still counts as
+// a request, so a Gemini outage can't drive unlimited retries - and their
+// KV writes - past the daily request cap). Re-reads the key right before
+// writing, same as recordTokenUsage, so overlapping requests don't erase
+// each other's counts with the snapshot taken at request start (KV still has
+// no atomic increment, so this narrows the window rather than closing it).
+// A failure here is logged, not surfaced: the next request's read will fail
+// closed if KV is really down.
+async function recordGlobalUsage(env, usage, tokensUsedThisCall) {
+    try {
+        let current = usage;
+        try {
+            const raw = await env.RATE_LIMIT_KV.get(usage.key);
+            const record = raw ? JSON.parse(raw) : null;
+            if (record) {
+                current = { tokensUsed: record.tokensUsed || 0, requests: record.requests || 0 };
+            }
+        } catch (error) {
+            console.error('Failed to re-read global usage (using request-start snapshot):', error);
+        }
+        await env.RATE_LIMIT_KV.put(usage.key, JSON.stringify({
+            tokensUsed: current.tokensUsed + Math.max(0, tokensUsedThisCall),
+            requests: current.requests + 1
+        }), { expirationTtl: 2 * 24 * 3600 });
+    } catch (error) {
+        console.error('Failed to record global usage:', error);
+    }
+}
+
+// Friendly, client-renderable reason (brain-dump.js shows data.reply for any
+// non-429 error).
+function limiterUnavailableResponse(origin, env) {
+    return jsonResponse(
+        { error: 'unavailable', reply: "Dusty is resting right now. Try again in a little while." },
+        503,
+        origin,
+        env
+    );
+}
+
+// Reads the body with a hard byte cap. Content-Length alone isn't enough: a
+// chunked request has no Content-Length, so this counts what actually
+// arrives and stops reading the moment the cap is passed.
+async function readJsonWithCap(request, maxBytes) {
+    if (!request.body) {
+        return { ok: false, status: 400 };
+    }
+    const reader = request.body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+            break;
+        }
+        total += value.byteLength;
+        if (total > maxBytes) {
+            await reader.cancel().catch(() => {});
+            return { ok: false, status: 413 };
+        }
+        chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    try {
+        return { ok: true, body: JSON.parse(new TextDecoder().decode(bytes)) };
+    } catch {
+        return { ok: false, status: 400 };
     }
 }
 
@@ -261,19 +403,40 @@ function rateLimitSnapshot(state) {
 // it pushes the window over budget; the NEXT request is what actually
 // gets blocked. Standard, acceptable behavior for this kind of limiter -
 // it bounds cumulative exposure, not any one individual request.
-async function recordTokenUsage(uid, env, state, tokensUsedThisCall) {
-    if (!env.RATE_LIMIT_KV || !state) {
-        return;
+// Reconciles the reservation made by reserveTokens: re-reads the CURRENT
+// record (a parallel request may have reserved in the meantime, so writing
+// back our own pre-call snapshot would erase its reservation), then swaps
+// our reservation for the real cost. Also used with 0 to release the
+// reservation when the Gemini call fails. Returns the updated record, or
+// null if nothing could be written (logged, not surfaced).
+async function recordTokenUsage(uid, env, reservedState, tokensUsedThisCall) {
+    if (!env.RATE_LIMIT_KV || !reservedState) {
+        return null;
     }
-    const updated = { windowStartedAt: state.windowStartedAt, tokensUsed: state.tokensUsed + Math.max(0, tokensUsedThisCall) };
+    let current = reservedState;
+    try {
+        const raw = await env.RATE_LIMIT_KV.get(`ratelimit:${uid}`);
+        const record = raw ? JSON.parse(raw) : null;
+        if (record && record.windowStartedAt === reservedState.windowStartedAt) {
+            current = record;
+        }
+    } catch (error) {
+        console.error(`Failed to re-read rate limit state for ${uid}:`, error);
+    }
+    const updated = {
+        windowStartedAt: reservedState.windowStartedAt,
+        tokensUsed: Math.max(0, current.tokensUsed - RESERVED_TOKENS_PER_REQUEST + Math.max(0, tokensUsedThisCall))
+    };
     try {
         // TTL a bit beyond the window so a stale record cleans itself up
         // even if this uid never sends another message.
         await env.RATE_LIMIT_KV.put(`ratelimit:${uid}`, JSON.stringify(updated), {
             expirationTtl: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000) + 3600
         });
+        return updated;
     } catch (error) {
         console.error(`Failed to record token usage for ${uid}:`, error);
+        return null;
     }
 }
 
@@ -821,9 +984,12 @@ export default {
             return jsonResponse({ error: 'method not allowed' }, 405, origin, env);
         }
 
+        const tooLargeBody = { error: 'request too large', reply: 'That message and its attachments are too large to send. Try fewer or smaller files.' };
+        // Cheap early reject when the header is honest; readJsonWithCap
+        // below is the real enforcement (chunked bodies have no header).
         const contentLength = Number(request.headers.get('Content-Length') || 0);
         if (contentLength > MAX_BODY_BYTES) {
-            return jsonResponse({ error: 'request too large' }, 413, origin, env);
+            return jsonResponse(tooLargeBody, 413, origin, env);
         }
 
         let uid;
@@ -838,9 +1004,35 @@ export default {
         // Checked right after identity, before spending any effort parsing
         // the body or calling Gemini - see getRateLimitState's own comment
         // for why this exists independent of Gemini's own quota.
-        const rateLimitState = await getRateLimitState(uid, env);
+        let rateLimitState;
+        let globalUsage;
+        try {
+            rateLimitState = await getRateLimitState(uid, env);
+            globalUsage = await getGlobalUsage(env);
+        } catch (error) {
+            if (error instanceof LimiterUnavailableError) {
+                return limiterUnavailableResponse(origin, env);
+            }
+            throw error;
+        }
         const tRateRead = Date.now();
-        if (rateLimitState && rateLimitState.tokensUsed >= RATE_LIMIT_TOKEN_BUDGET_PER_WINDOW) {
+        if (isOverGlobalCap(globalUsage, env)) {
+            // Same shape as Gemini's own shared-quota 429 below, so the
+            // client's existing "back around <time>" message applies.
+            return jsonResponse(
+                {
+                    error: 'busy',
+                    reply: "Dusty's hit his shared daily message limit - try again later.",
+                    // The app's own cap resets on the UTC day (see utcDayKey).
+                    resetsAt: nextUtcMidnightIso(),
+                    rateLimit: rateLimitSnapshot(rateLimitState)
+                },
+                429,
+                origin,
+                env
+            );
+        }
+        if (rateLimitState.tokensUsed >= RATE_LIMIT_TOKEN_BUDGET_PER_WINDOW) {
             return jsonResponse(
                 {
                     error: 'rate_limited',
@@ -854,29 +1046,54 @@ export default {
             );
         }
 
-        let body;
+        const parsedBody = await readJsonWithCap(request, MAX_BODY_BYTES);
+        if (!parsedBody.ok) {
+            return parsedBody.status === 413
+                ? jsonResponse(tooLargeBody, 413, origin, env)
+                : jsonResponse({ error: 'invalid json body' }, 400, origin, env);
+        }
+        const body = parsedBody.body;
+
+        // Reserve before spending anything (fail closed if it can't be
+        // recorded), reconcile to the real cost after.
+        let reservedState;
         try {
-            body = await request.json();
-        } catch {
-            return jsonResponse({ error: 'invalid json body' }, 400, origin, env);
+            reservedState = await reserveTokens(uid, env, rateLimitState);
+        } catch (error) {
+            if (error instanceof LimiterUnavailableError) {
+                return limiterUnavailableResponse(origin, env);
+            }
+            throw error;
         }
 
         try {
             const { tokensUsed, ...result } = await callGemini(body, env);
             const tGemini = Date.now();
-            await recordTokenUsage(uid, env, rateLimitState, tokensUsed);
+            const reconciledState = await recordTokenUsage(uid, env, reservedState, tokensUsed);
+            await recordGlobalUsage(env, globalUsage, tokensUsed);
             const tKvWrite = Date.now();
             console.log(
                 `Brain dump timing for ${uid}: auth=${tAuth - t0}ms kvRead=${tRateRead - tAuth}ms `
                 + `gemini=${tGemini - tRateRead}ms kvWrite=${tKvWrite - tGemini}ms total=${tKvWrite - t0}ms `
                 + `tokensUsed=${tokensUsed}`
             );
-            const updatedState = rateLimitState
-                ? { ...rateLimitState, tokensUsed: rateLimitState.tokensUsed + Math.max(0, tokensUsed) }
-                : null;
+            const updatedState = reconciledState
+                || { ...rateLimitState, tokensUsed: rateLimitState.tokensUsed + Math.max(0, tokensUsed) };
             return jsonResponse({ ...result, rateLimit: rateLimitSnapshot(updatedState) }, 200, origin, env);
         } catch (error) {
             console.error(`Brain dump request failed for ${uid}:`, error);
+            // Failed calls count toward the daily request cap too (tokens 0),
+            // so an outage can't turn into unbounded retries and KV writes.
+            await recordGlobalUsage(env, globalUsage, 0);
+            // Give the reservation back for a one-off failure, so the user
+            // isn't charged for it. NOT for Gemini's 429 (shared quota gone
+            // until its reset): keeping the reservation there throttles a
+            // retry streak per user and saves a KV write per retry. It is
+            // only a charge against this user's 5-hour window, and it
+            // expires with it.
+            if (error.status !== 429) {
+                await recordTokenUsage(uid, env, reservedState, 0);
+            }
             if (error.status === 429) {
                 // Almost always the shared free-tier DAILY quota, not a
                 // brief per-minute throttle (one Gemini API key/quota pool

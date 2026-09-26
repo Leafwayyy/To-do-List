@@ -59,8 +59,11 @@ function generateInviteCode(length = 8) {
 // prefer that. Loaded once at sign-in (see loadProfileName below).
 let profileDisplayName = null;
 
+// Clamped to 80 chars, the rules' cap on every name field the client writes
+// (memberNames, ownerName, authorName, fromUserName, ...), so a long profile
+// name can never make one of those writes fail.
 function displayNameFor(user) {
-    return profileDisplayName || user.displayName || user.email || 'Unnamed';
+    return String(profileDisplayName || user.displayName || user.email || 'Unnamed').slice(0, 80);
 }
 
 async function loadProfileName(user, onLoaded) {

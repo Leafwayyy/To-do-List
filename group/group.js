@@ -71,7 +71,9 @@ async function logGroupTaskCompletion(groupId, task, completedAt) {
         taskId: task.id,
         taskText: task.text,
         ownerId: task.ownerId,
-        ownerName: task.ownerName || 'Teammate',
+        // Sliced to the rules' 80-char name cap (an older task can carry a
+        // longer name from before the cap existed).
+        ownerName: String(task.ownerName || 'Teammate').slice(0, 80),
         completedAt
     });
 }
@@ -243,7 +245,8 @@ async function requestTaskHandoff(groupId, task, toUserId, toUserName, fromUser)
     await updateDoc(doc(db(), 'groups', groupId, 'tasks', task.id), {
         handoffRequest: {
             toUserId,
-            toUserName,
+            // Roster names from before the 80-char cap can be longer.
+            toUserName: String(toUserName || 'Teammate').slice(0, 80),
             fromUserId: fromUser.uid,
             fromUserName: displayNameFor(fromUser),
             requestedAt: new Date().toISOString()
@@ -2872,6 +2875,18 @@ function getSelectedGroup() {
     return groups.find((group) => group.id === selectedGroupId) || groups[0];
 }
 
+// Security review fix (name spoofing): comment/history/suggestion/handoff
+// docs carry a name the WRITER typed, so a member could label a comment or
+// a handoff with someone else's name. For anyone still in the selected
+// group, show their roster name (memberNames at their uid's index) instead;
+// fall back to the stored name only for people no longer in the roster.
+function rosterNameFor(uid, storedName) {
+    const group = getSelectedGroup();
+    const index = uid ? (group?.memberIds || []).indexOf(uid) : -1;
+    const rosterName = index === -1 ? null : (group.memberNames || [])[index];
+    return (typeof rosterName === 'string' && rosterName) ? rosterName : storedName;
+}
+
 // ---------------------------------------------------------------------
 // Task rendering - mirrors createTaskItem()/createSubtasksSection()/
 // createSubtaskItem() in script.js as closely as this feature set allows.
@@ -3050,9 +3065,10 @@ function createGroupTaskItem(groupId, task, isOwner) {
                 // task.handoffRequest.toUserName is another member's display
                 // name, user-controlled - textContent only, same reasoning
                 // as renderSuggestionsForYou/renderHandoffRequestsForYou.
-                pendingLabel.textContent = `Pending: ${task.handoffRequest.toUserName || 'teammate'}`;
+                const handoffToName = rosterNameFor(task.handoffRequest.toUserId, task.handoffRequest.toUserName) || 'teammate';
+                pendingLabel.textContent = `Pending: ${handoffToName}`;
                 pendingBtn.appendChild(pendingLabel);
-                pendingBtn.setAttribute('aria-label', `Cancel handoff request to ${task.handoffRequest.toUserName || 'teammate'}`);
+                pendingBtn.setAttribute('aria-label', `Cancel handoff request to ${handoffToName}`);
                 pendingBtn.title = 'Click to cancel this handoff request';
                 pendingBtn.addEventListener('click', () => {
                     playClickSound();
@@ -3593,7 +3609,7 @@ function createGroupCommentItem(groupId, task, comment) {
 
     const meta = document.createElement('p');
     meta.classList.add('commentItemMeta');
-    const authorLabel = comment.authorId === currentUser?.uid ? 'You' : (comment.authorName || 'Teammate');
+    const authorLabel = comment.authorId === currentUser?.uid ? 'You' : (rosterNameFor(comment.authorId, comment.authorName) || 'Teammate');
     const timeLabel = comment.createdAt?.seconds
         ? formatFriendlyDateTime(new Date(comment.createdAt.seconds * 1000))
         : 'just now';
@@ -4604,7 +4620,7 @@ function renderGroupHistory(group) {
         text.textContent = entry.taskText;
         item.appendChild(text);
 
-        const ownerName = entry.ownerId === currentUser?.uid ? 'You' : (entry.ownerName || 'Teammate');
+        const ownerName = entry.ownerId === currentUser?.uid ? 'You' : (rosterNameFor(entry.ownerId, entry.ownerName) || 'Teammate');
 
         const meta = document.createElement('p');
         meta.classList.add('groupHistoryItemMeta');
@@ -4680,7 +4696,7 @@ function renderSuggestionsForYou(groupId) {
         text.classList.add('suggestionRowText');
         const fromSpan = document.createElement('span');
         fromSpan.classList.add('suggestionRowFrom');
-        fromSpan.textContent = `${suggestion.fromUserName || 'A teammate'} suggests:`;
+        fromSpan.textContent = `${rosterNameFor(suggestion.fromUserId, suggestion.fromUserName) || 'A teammate'} suggests:`;
         text.appendChild(fromSpan);
         text.appendChild(document.createTextNode(` ${suggestion.text || ''}`));
         row.appendChild(text);
@@ -4824,7 +4840,7 @@ function renderHandoffRequestsForYou(groupId) {
         text.classList.add('suggestionRowText');
         const fromSpan = document.createElement('span');
         fromSpan.classList.add('suggestionRowFrom');
-        fromSpan.textContent = `${task.handoffRequest.fromUserName || 'A teammate'} wants to hand off:`;
+        fromSpan.textContent = `${rosterNameFor(task.handoffRequest.fromUserId, task.handoffRequest.fromUserName) || 'A teammate'} wants to hand off:`;
         text.appendChild(fromSpan);
         text.appendChild(document.createTextNode(` ${task.text || ''}`));
         row.appendChild(text);
@@ -6978,7 +6994,7 @@ function buildCatchUpSummaryLines(group) {
 
     if (groupHistoryEntries.length > 0) {
         const latest = groupHistoryEntries[0];
-        const who = latest.ownerId === currentUser?.uid ? 'You' : (latest.ownerName || 'A teammate');
+        const who = latest.ownerId === currentUser?.uid ? 'You' : (rosterNameFor(latest.ownerId, latest.ownerName) || 'A teammate');
         lines.push(`${who} last finished "${latest.taskText}" ${formatFriendlyDateTime(new Date(latest.completedAt))}.`);
     }
 
