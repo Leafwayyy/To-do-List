@@ -8178,14 +8178,11 @@ function resetGroupState() {
         unsubscribeGroups();
         unsubscribeGroups = null;
     }
-    if (unsubscribeTasks) {
-        unsubscribeTasks();
-        unsubscribeTasks = null;
-    }
-    if (unsubscribeSuggestions) {
-        unsubscribeSuggestions();
-        unsubscribeSuggestions = null;
-    }
+    // Tasks, suggestions AND history (history used to be missed here, so it
+    // stayed attached to the previous account's group after sign-out).
+    stopWatchingSelectedGroup();
+    watchedGroupId = null;
+    groupHistoryEntries = [];
     // renderApp() below bails out at its very first check once currentUser
     // is null, so it never reaches the else-branch cleanup that would
     // normally tear this down - has to happen explicitly here instead.
@@ -8227,13 +8224,61 @@ function resetGroupState() {
     renderApp();
 }
 
-function watchSelectedGroupTasks() {
+function stopWatchingSelectedGroup() {
     if (unsubscribeTasks) {
         unsubscribeTasks();
         unsubscribeTasks = null;
     }
+    if (unsubscribeSuggestions) {
+        unsubscribeSuggestions();
+        unsubscribeSuggestions = null;
+    }
+    if (unsubscribeHistory) {
+        unsubscribeHistory();
+        unsubscribeHistory = null;
+    }
+}
 
+// Leaving, being removed, or the group being deleted all make the server
+// revoke these listeners, and that revocation arrives as permission-denied -
+// often a moment BEFORE the groups snapshot that drops the group does (for
+// the other members of a deleted group, it's a straight race). Waiting
+// briefly and then only surfacing the error if you're still watching that
+// group AND still have it in your list keeps that expected noise out of the
+// console and the UI, without hiding a genuine error for a group you still
+// belong to (unpublished rules, etc. - those still show, ~1.5s later).
+const GROUP_LISTENER_ERROR_GRACE_MS = 1500;
+function handleSelectedGroupListenerError(groupId, error, surface) {
+    if (error?.code !== 'permission-denied') {
+        surface();
+        return;
+    }
+    setTimeout(() => {
+        const stillRelevant = watchedGroupId === groupId && (groups || []).some((group) => group.id === groupId);
+        if (stillRelevant) {
+            surface();
+        }
+    }, GROUP_LISTENER_ERROR_GRACE_MS);
+}
+
+// Called on every groups-list snapshot and on selectGroup(). Real read-quota
+// bug (measured live): this used to tear down and re-open tasks, suggestions
+// and history on EVERY call, so each rename, privacy change, member join or
+// approval re-opened all three queries for every member (twice for the
+// owner on an approve: local, then server snapshot). Now:
+// - an actual switch (another group, or none) tears all three down and
+//   resets the loaded flag - including suggestions/history, which the old
+//   early "no group" return used to leave attached to a group you'd just
+//   left or deleted, until the server revoked them;
+// - the same group again only (re)opens a listener that isn't live - e.g.
+//   one that errored, which marks itself dead below so it's re-openable on
+//   the next call instead of staying dead until a reload.
+// Group-doc fields the UI derives from (memberIds, names, roles) don't need
+// a re-query - the groups snapshot already updated `groups` and called
+// renderApp().
+function watchSelectedGroupTasks() {
     const group = getSelectedGroup();
+    const groupId = group?.id || null;
     // Real bug found in review: this function doesn't only run when the
     // user switches groups - subscribeToMyGroups's own onSnapshot callback
     // calls it too, on any change to the groups list (a rename, a member
@@ -8241,68 +8286,89 @@ function watchSelectedGroupTasks() {
     // resetting the flag there discarded the real, already-loaded task
     // list and flashed the skeleton rows for no reason. Only an actual
     // switch to a different group (or to no group) should reset it.
-    const isActualGroupSwitch = (group?.id || null) !== watchedGroupId;
-    watchedGroupId = group?.id || null;
+    const isActualGroupSwitch = groupId !== watchedGroupId;
     if (isActualGroupSwitch) {
+        stopWatchingSelectedGroup();
+        watchedGroupId = groupId;
         hasLoadedGroupTasksOnce = false;
     }
     if (!group) {
         groupTasks = [];
+        groupSuggestions = [];
         groupHistoryEntries = [];
         groupHistoryLoadError = null;
         renderApp();
         return;
     }
 
-    unsubscribeTasks = subscribeToGroupTasks(group.id, (tasks) => {
-        groupTasks = tasks;
-        groupTasksLoadError = null;
-        hasLoadedGroupTasksOnce = true;
-        renderApp();
-    }, (error) => {
-        console.error('Failed to load group tasks:', error);
-        groupTasks = [];
-        groupTasksLoadError = error?.code === 'permission-denied'
-            ? 'Tasks couldn\'t load (the security rules need to be published).'
-            : 'Could not load tasks.';
-        hasLoadedGroupTasksOnce = true;
-        renderApp();
-    });
-
-    if (unsubscribeSuggestions) {
-        unsubscribeSuggestions();
-        unsubscribeSuggestions = null;
+    if (!unsubscribeTasks) {
+        const tasksUnsubscribe = subscribeToGroupTasks(groupId, (tasks) => {
+            groupTasks = tasks;
+            groupTasksLoadError = null;
+            hasLoadedGroupTasksOnce = true;
+            renderApp();
+        }, (error) => {
+            if (unsubscribeTasks !== tasksUnsubscribe) {
+                return; // already torn down (group switch / sign-out)
+            }
+            unsubscribeTasks = null; // Firestore ended it; re-openable on the next call
+            handleSelectedGroupListenerError(groupId, error, () => {
+                console.error('Failed to load group tasks:', error);
+                groupTasks = [];
+                groupTasksLoadError = error?.code === 'permission-denied'
+                    ? 'Tasks couldn\'t load (the security rules need to be published).'
+                    : 'Could not load tasks.';
+                hasLoadedGroupTasksOnce = true;
+                renderApp();
+            });
+        });
+        unsubscribeTasks = tasksUnsubscribe;
     }
-    unsubscribeSuggestions = subscribeToGroupSuggestions(group.id, (suggestions) => {
-        groupSuggestions = suggestions;
-        renderApp();
-    }, (error) => {
-        console.error('Failed to load suggestions:', error);
-        groupSuggestions = [];
-        renderApp();
-    });
 
-    if (unsubscribeHistory) {
-        unsubscribeHistory();
-        unsubscribeHistory = null;
+    if (!unsubscribeSuggestions) {
+        const suggestionsUnsubscribe = subscribeToGroupSuggestions(groupId, (suggestions) => {
+            groupSuggestions = suggestions;
+            renderApp();
+        }, (error) => {
+            if (unsubscribeSuggestions !== suggestionsUnsubscribe) {
+                return;
+            }
+            unsubscribeSuggestions = null;
+            handleSelectedGroupListenerError(groupId, error, () => {
+                console.error('Failed to load suggestions:', error);
+                groupSuggestions = [];
+                renderApp();
+            });
+        });
+        unsubscribeSuggestions = suggestionsUnsubscribe;
     }
-    unsubscribeHistory = subscribeToGroupHistory(group.id, (entries) => {
-        groupHistoryEntries = entries;
-        groupHistoryLoadError = null;
-        renderApp();
-    }, (error) => {
-        console.error('Failed to load group history:', error);
-        groupHistoryEntries = [];
-        // Same permission-denied message as comments (see toggleGroupCommentsExpanded)
-        // - the most common cause is the firestore.rules history/{entryId}
-        // rules existing locally but not yet published to the Firebase
-        // console, which otherwise fails silently and just looks like an
-        // empty "Nothing finished here yet." forever.
-        groupHistoryLoadError = error?.code === 'permission-denied'
-            ? 'Recently finished isn\'t turned on for this project yet (the security rules need to be published).'
-            : 'Could not load recently finished tasks.';
-        renderApp();
-    });
+
+    if (!unsubscribeHistory) {
+        const historyUnsubscribe = subscribeToGroupHistory(groupId, (entries) => {
+            groupHistoryEntries = entries;
+            groupHistoryLoadError = null;
+            renderApp();
+        }, (error) => {
+            if (unsubscribeHistory !== historyUnsubscribe) {
+                return;
+            }
+            unsubscribeHistory = null;
+            handleSelectedGroupListenerError(groupId, error, () => {
+                console.error('Failed to load group history:', error);
+                groupHistoryEntries = [];
+                // Same permission-denied message as comments (see toggleGroupCommentsExpanded)
+                // - the most common cause is the firestore.rules history/{entryId}
+                // rules existing locally but not yet published to the Firebase
+                // console, which otherwise fails silently and just looks like an
+                // empty "Nothing finished here yet." forever.
+                groupHistoryLoadError = error?.code === 'permission-denied'
+                    ? 'Recently finished isn\'t turned on for this project yet (the security rules need to be published).'
+                    : 'Could not load recently finished tasks.';
+                renderApp();
+            });
+        });
+        unsubscribeHistory = historyUnsubscribe;
+    }
 }
 
 if (yourNameSaveBtn && yourNameInput) {
@@ -8546,8 +8612,8 @@ const GROUP_TOUR_STEPS = [
     },
     {
         selector: '.viewTabs',
-        title: 'Four places, one job each',
-        text: 'Tasks is where you\'ve been working. Go ahead, tap through Team, Leaderboard, and Activity, everyone\'s roles, rankings, and finished work all live there whenever you want them.',
+        title: 'One place for each job',
+        text: 'Tasks is where you\'ve been working. Go ahead, tap through the others: Team, Calendar, Leaderboard, Availability, and Activity. Everyone\'s roles, schedule, rankings, meeting times, and finished work all live there whenever you want them.',
         action: { event: 'click' },
         beforeShow: () => switchGroupView('tasks')
     },
@@ -8585,7 +8651,7 @@ const GROUP_TOUR_STEPS = [
         // group-wide listener on its own.
         selector: '.availabilitySubTabs',
         title: 'Availability',
-        text: 'Find a time the whole team can meet. Under My availability everything starts out free, so just paint the times you\'re busy (or If needed). Then check Team overlap to see when everyone\'s around, and Best times for the slots that work for the most people.',
+        text: 'Find a time the whole team can meet. Under My availability everything starts out free, so just paint the times you\'re busy (or If needed). Then check Team overlap to see when everyone\'s around, and Best times for the slots that work for the most people. Times show in your own timezone (tap Change if it\'s wrong), Week or Day switches the layout, and teammates only ever see free, busy, or if needed, never why.',
         beforeShow: () => switchGroupView('availability')
     },
     {
@@ -8607,9 +8673,22 @@ const GROUP_TOUR_STEPS = [
         beforeShow: () => switchGroupView('tasks')
     },
     {
+        // Open to every member since Leave moved in here (see
+        // openGroupSettingsModal), so no role guard is needed.
+        selector: '.groupSettingsBtn',
+        title: 'Group settings',
+        text: 'Anyone can open Group settings. It\'s where you leave this group, and where the owner can delete it. Owners and admins also handle who can join and pending join requests there, and the owner sets the group\'s usual hours for Availability.',
+        beforeShow: () => switchGroupView('tasks')
+    },
+    {
         selector: '.navAttentionBadge',
         title: 'Notifications',
-        text: 'This bell is your one-stop notification center: unread comments, join requests if you own or admin the group, tasks suggested to you, and when a suggestion you sent gets accepted or dismissed. Tap it any time to jump straight to whatever needs you.',
+        text: 'This bell shows up whenever something needs you: unread comments, join requests if you own or admin the group, tasks suggested to you, and when a suggestion you sent gets accepted or dismissed. Tap it to jump straight to whatever needs you.',
+        // The bell is display:none while nothing is pending (see
+        // .navAttentionBadge in style.css), and there's no other always-
+        // visible bell to point at, so skip the step rather than highlight
+        // an invisible element. Checked via getClientRects, not offsetParent.
+        isRelevant: () => Boolean(navAttentionBadge) && navAttentionBadge.getClientRects().length > 0,
         beforeShow: () => switchGroupView('tasks')
     },
     {

@@ -163,11 +163,44 @@ function watchGroupTasks(groupId) {
     if (taskUnsubscribes[groupId]) {
         return;
     }
-    taskUnsubscribes[groupId] = subscribeToGroupTasks(groupId, (tasks) => {
+    const unsubscribe = subscribeToGroupTasks(groupId, (tasks) => {
         groupTasksByGroupId[groupId] = tasks;
         renderGrid();
     }, (error) => {
-        console.error(`Failed to load tasks for group ${groupId}:`, error);
+        if (taskUnsubscribes[groupId] !== unsubscribe) {
+            return; // already torn down
+        }
+        // Firestore ended it - forget it so the next groups snapshot can
+        // re-open it if the group is still yours.
+        delete taskUnsubscribes[groupId];
+        // Leaving / deleting a group (here or on another page) makes the
+        // server revoke this listener as permission-denied, sometimes just
+        // before the groups snapshot that drops the group arrives. Only a
+        // group still in your list after a short grace is a real error.
+        const report = () => console.error(`Failed to load tasks for group ${groupId}:`, error);
+        if (error?.code !== 'permission-denied') {
+            report();
+            return;
+        }
+        setTimeout(() => {
+            if ((groups || []).some((group) => group.id === groupId)) {
+                report();
+            }
+        }, 1500);
+    });
+    taskUnsubscribes[groupId] = unsubscribe;
+}
+
+// Groups you left, were removed from, or deleted - stop their listeners
+// right away instead of leaving them attached until the server revokes them.
+function stopWatchingRemovedGroups(currentGroups) {
+    const currentIds = new Set(currentGroups.map((group) => group.id));
+    Object.keys(taskUnsubscribes).forEach((groupId) => {
+        if (!currentIds.has(groupId)) {
+            taskUnsubscribes[groupId]();
+            delete taskUnsubscribes[groupId];
+            delete groupTasksByGroupId[groupId];
+        }
     });
 }
 
@@ -204,6 +237,7 @@ AuthGate.init({
         unsubscribeGroups = subscribeToMyGroups(user.uid, (nextGroups) => {
             groups = nextGroups;
             groupsLoadError = null;
+            stopWatchingRemovedGroups(nextGroups);
             nextGroups.forEach((group) => watchGroupTasks(group.id));
             renderGrid();
         }, (error) => {
