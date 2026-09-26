@@ -91,6 +91,46 @@ async function saveProfileName(user, name) {
     profileDisplayName = trimmed;
 }
 
+// IANA timezone (e.g. "America/Edmonton") for the Availability feature - a
+// personal, global attribute, not scoped to any one group (see
+// availability-plan.md's Data Model). Same load/save shape as
+// loadProfileName/saveProfileName above.
+let profileTimezone = null;
+
+// Auto-detect only - never silently guessed wrong for someone whose saved
+// zone differs from wherever they happen to be opening the browser right
+// now (travel, a VPN, a shared device). Only used as the one-time default
+// before anything has ever been saved.
+function detectBrowserTimezone() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch {
+        return 'UTC';
+    }
+}
+
+async function loadProfileTimezone(user) {
+    const { doc, getDoc } = fs();
+    try {
+        const snapshot = await getDoc(doc(db(), 'users', user.uid));
+        const data = snapshot.exists() ? snapshot.data() : null;
+        profileTimezone = (data && data.timezone) ? data.timezone : detectBrowserTimezone();
+    } catch (error) {
+        console.error('Failed to load your timezone:', error);
+        profileTimezone = detectBrowserTimezone();
+    }
+    return profileTimezone;
+}
+
+async function saveProfileTimezone(user, timezone) {
+    if (!timezone) {
+        return;
+    }
+    const { doc, setDoc } = fs();
+    await setDoc(doc(db(), 'users', user.uid), { timezone }, { merge: true });
+    profileTimezone = timezone;
+}
+
 // A group's memberNames array is only as fresh as whenever each person last
 // created or joined - it's never rewritten after that. Every task a person
 // owns is re-stamped with their current name on every write though, so the
@@ -314,6 +354,21 @@ async function setGroupPrivacy(groupId, privacy) {
     await updateDoc(doc(db(), 'groups', groupId), { privacy });
 }
 
+// Owner-only (enforced by the security rule). The availability VIEW window
+// only - members' stored availability is always the full 24h, so this never
+// rewrites anyone's data. The payload must be exactly this one field with
+// exactly startHour/endHour, or the rule's hasOnly() checks reject it.
+async function setGroupAvailabilityHourRange(groupId, startHour, endHour) {
+    if (!Number.isInteger(startHour) || !Number.isInteger(endHour)
+        || startHour < 0 || endHour > 24 || startHour >= endHour) {
+        throw new Error('The start hour has to be before the end hour.');
+    }
+    const { doc, updateDoc } = fs();
+    await updateDoc(doc(db(), 'groups', groupId), {
+        availabilityHourRange: { startHour, endHour }
+    });
+}
+
 // Any member dismissing their own new-member catch-up card (group.js) -
 // dot-path so the write can only ever touch your own entry in the map,
 // never anyone else's (enforced again, for real, by the security rule -
@@ -340,7 +395,7 @@ async function dismissNewMemberCatchUp(groupId, uid) {
 // and nobody else is left, there's nobody to hand off to - deleteGroupCompletely
 // is the only way out of that one.
 async function leaveGroup(groupId, user) {
-    const { doc, getDoc, updateDoc } = fs();
+    const { doc, getDoc, updateDoc, deleteDoc } = fs();
     const groupRef = doc(db(), 'groups', groupId);
     const snapshot = await getDoc(groupRef);
     if (!snapshot.exists()) {
@@ -382,6 +437,23 @@ async function leaveGroup(groupId, user) {
         // security rule requires this (an admin who leaves without it would
         // keep a stale, still-privileged entry in adminIds forever).
         payload.adminIds = adminIds.filter((uid) => uid !== user.uid);
+    }
+
+    // Own availability grid (and the timezone copied onto it) - a leaver
+    // CAN delete their own doc (unlike a kick, where only the group owner
+    // could), and a weekly schedule is personal enough that it shouldn't
+    // keep being readable by the group after voluntarily leaving. The
+    // self-delete rule has no membership check, so this works whether it
+    // runs before or after the membership update below.
+    //
+    // Best-effort, never blocking: if this client ships before the
+    // availability rules are republished, there is no matching rule and
+    // the delete is denied - letting that throw would make EVERY leave
+    // fail, even for people who never touched Availability.
+    try {
+        await deleteDoc(doc(db(), 'groups', groupId, 'availability', user.uid));
+    } catch (error) {
+        console.warn('Could not delete your availability grid while leaving (continuing with leave):', error);
     }
 
     await updateDoc(groupRef, payload);
@@ -427,13 +499,79 @@ async function deleteGroupCompletely(groupId, user) {
     const joinRequestsSnapshot = await getDocs(collection(db(), 'groups', groupId, 'joinRequests'));
     await Promise.all(joinRequestsSnapshot.docs.map((requestDoc) => deleteDoc(requestDoc.ref)));
 
+    // Unlike tasks, every member's availability doc is deleted here, not
+    // just the owner's own - there's no "don't give the owner power over a
+    // teammate's content" concern for a plain free/busy grid (see
+    // availability-plan.md's Data Model), and the security rule already
+    // grants the group owner delete on any member's availability doc for
+    // exactly this cleanup.
+    // Best-effort (same deploy-order reason as leaveGroup): without the
+    // availability rules published this is denied, and it must not block
+    // deleting the group itself.
+    try {
+        const availabilitySnapshot = await getDocs(collection(db(), 'groups', groupId, 'availability'));
+        await Promise.all(availabilitySnapshot.docs.map((availabilityDoc) => deleteDoc(availabilityDoc.ref)));
+    } catch (error) {
+        console.warn('Could not delete availability grids (continuing group deletion):', error);
+    }
+
     await deleteDoc(groupRef);
 }
 
+// A just-created group is withheld until the server has confirmed it. Real
+// bug, reproduced live with network latency: createGroup's setDoc shows up
+// in this query's LOCAL snapshot first (latency compensation), before the
+// write commits. Every per-group listener (tasks, history, suggestions,
+// join requests, availability, team pulse) gets opened for it straight
+// away, the rules' get(groups/{id}) membership check runs against a doc the
+// server doesn't have yet, and each one fails with permission-denied - and
+// Firestore never retries a listener that failed. Gating it here, at the
+// one place every consumer gets its group list from, means none of them
+// can open early, instead of each needing its own retry.
+//
+// "Confirmed" = seen at least once without pending writes (from the server,
+// or from cache, which only ever holds server-acknowledged state for a doc
+// with no pending writes). Once confirmed a group stays visible even while
+// this user's own later writes to it are pending (a rename, etc.) - only a
+// never-yet-committed doc is held back, for about one round trip. That also
+// covers createGroup's code-collision retry: a rejected write onto someone
+// else's code never flashes into the list.
+//
+// includeMetadataChanges is what delivers the pending -> committed flip (a
+// metadata-only change the default listener wouldn't report). Those extra
+// callbacks are dropped unless something visible actually changed, so they
+// don't add renders or re-open the per-group listeners.
 function subscribeToMyGroups(uid, callback, onError) {
     const { collection, query, where, onSnapshot } = fs();
     const myGroupsQuery = query(collection(db(), 'groups'), where('memberIds', 'array-contains', uid));
-    return onSnapshot(myGroupsQuery, (snapshot) => {
-        callback(snapshot.docs.map((groupDoc) => ({ id: groupDoc.id, ...groupDoc.data() })));
+    const confirmedGroupIds = new Set();
+    let lastVisibleIdsKey = null;
+    return onSnapshot(myGroupsQuery, { includeMetadataChanges: true }, (snapshot) => {
+        // Forget any group that has left the result set (you left, were
+        // kicked, or it was deleted). Real bug caught in review: without
+        // this, leave-then-rejoin-by-code in the same session kept the old
+        // "confirmed" mark, so the pending self-join write showed the group
+        // (and opened its listeners) before the server had you as a member -
+        // the exact race this gate exists to prevent. A rejected leave just
+        // brings the doc back without pending writes, re-confirmed at once.
+        const presentIds = new Set(snapshot.docs.map((groupDoc) => groupDoc.id));
+        confirmedGroupIds.forEach((groupId) => {
+            if (!presentIds.has(groupId)) {
+                confirmedGroupIds.delete(groupId);
+            }
+        });
+        snapshot.docs.forEach((groupDoc) => {
+            if (!groupDoc.metadata.hasPendingWrites) {
+                confirmedGroupIds.add(groupDoc.id);
+            }
+        });
+        const visibleDocs = snapshot.docs.filter((groupDoc) => confirmedGroupIds.has(groupDoc.id));
+        const visibleIdsKey = visibleDocs.map((groupDoc) => groupDoc.id).join(',');
+        const hasDataChanges = snapshot.docChanges().length > 0;
+        if (!hasDataChanges && visibleIdsKey === lastVisibleIdsKey) {
+            return;
+        }
+        lastVisibleIdsKey = visibleIdsKey;
+        callback(visibleDocs.map((groupDoc) => ({ id: groupDoc.id, ...groupDoc.data() })));
     }, onError);
 }

@@ -1445,8 +1445,32 @@
                     await Promise.all(ownTaskDocs.map((taskDoc) => deleteDoc(taskDoc.ref)));
                     const historySnapshot = await getDocs(collection(db, 'groups', groupDoc.id, 'history'));
                     await Promise.all(historySnapshot.docs.map((entryDoc) => deleteDoc(entryDoc.ref)));
+                    // Every member's availability doc, not just this account's
+                    // own - mirrors deleteGroupCompletely's own reasoning (no
+                    // "don't touch a teammate's content" concern for a plain
+                    // free/busy grid, unlike tasks above).
+                    //
+                    // Best-effort, like both availability deletes in this
+                    // function: if this client ships before the availability
+                    // rules are republished there's no matching rule, and a
+                    // throw here would block account deletion for everyone.
+                    try {
+                        const availabilitySnapshot = await getDocs(collection(db, 'groups', groupDoc.id, 'availability'));
+                        await Promise.all(availabilitySnapshot.docs.map((availabilityDoc) => deleteDoc(availabilityDoc.ref)));
+                    } catch (error) {
+                        console.warn('Could not delete availability grids for an owned group (continuing account deletion):', error);
+                    }
                     await deleteDoc(groupDoc.ref);
                 } else {
+                    // Own availability grid (and the timezone copied onto it)
+                    // - deleted before leaving memberIds, while still a
+                    // member. The rule allows self-delete either way.
+                    // Best-effort, same reason as the owner branch above.
+                    try {
+                        await deleteDoc(doc(db, 'groups', groupDoc.id, 'availability', uid));
+                    } catch (error) {
+                        console.warn('Could not delete your availability grid in a group (continuing account deletion):', error);
+                    }
                     const memberIds = group.memberIds || [];
                     const memberNames = group.memberNames || [];
                     const adminIds = group.adminIds || [];
@@ -1508,9 +1532,11 @@
         } catch (error) {
             console.error('Failed to delete auth account:', error);
             if (error?.code === 'auth/requires-recent-login') {
+                // Reset first - resetDeleteArm() also clears deleteStatus, so
+                // calling it after setting the message wiped it instantly.
+                resetDeleteArm();
                 deleteStatus.textContent = 'Your data is deleted. For security, please sign out, sign back in, then click Delete once more to remove your login.';
                 deleteBtn.disabled = false;
-                resetDeleteArm();
             } else {
                 deleteStatus.textContent = 'Your data is deleted, but signing out your login failed. Please sign out manually.';
                 window.ToDoAuth.signOutUser?.();

@@ -247,6 +247,22 @@ service cloud.firestore {
             && request.resource.data.name.size() > 0
             && request.resource.data.name.size() <= 80
           )
+          // Feature 11 (availability scheduling): the hour-range VIEW window
+          // (never affects storage - see availability/{uid} below, which
+          // always stores the full 24h regardless of this setting). Matches
+          // rename's owner-only shape - every other group-setting branch in
+          // this file is owner-only, admins only approve/kick, so this isn't
+          // the exception.
+          || (
+            request.auth.uid == resource.data.ownerId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['availabilityHourRange'])
+            && request.resource.data.availabilityHourRange.keys().hasOnly(['startHour', 'endHour'])
+            && request.resource.data.availabilityHourRange.startHour is int
+            && request.resource.data.availabilityHourRange.endHour is int
+            && request.resource.data.availabilityHourRange.startHour >= 0
+            && request.resource.data.availabilityHourRange.startHour < request.resource.data.availabilityHourRange.endHour
+            && request.resource.data.availabilityHourRange.endHour <= 24
+          )
           // Approving a pending join request: the owner or an admin appends
           // someone ELSE's uid - distinct from the self-join branch above,
           // which requires the actor's own uid to be the one added. Requires
@@ -624,6 +640,94 @@ service cloud.firestore {
         allow delete: if request.auth != null
           && (
             request.auth.uid == resource.data.ownerId
+            || request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId
+          );
+      }
+
+      // Feature 11 (availability scheduling, see availability-plan.md).
+      // Doc ID = the member's own uid, same "ID is the identity" convention
+      // as joinRequests/{uid} - collapses both create/update to a plain
+      // uid-equality check. Membership is ALSO required (not just the uid
+      // match) so a kicked/departed member can't keep writing after
+      // leaving - self-only alone isn't enough, unlike joinRequests where
+      // the doc's existence already implies you were never a member yet.
+      // weekdaySlots always stores the full 24h (96 quarter-hour slots per
+      // day, exactly) regardless of the group's own availabilityHourRange
+      // view setting above - that setting is display-only and never needs
+      // to rewrite another member's already-painted data, which self-only
+      // write wouldn't allow anyway. No diff()-based branch on create
+      // (there's no resource yet to diff against) - create validates via
+      // keys().hasOnly() plus explicit type/size checks instead, matching
+      // every other user-written doc in this file (text/size caps
+      // throughout) rather than leaving this one uncapped.
+      match /availability/{uid} {
+        allow read: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
+
+        allow create: if request.auth != null
+          && request.auth.uid == uid
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+          && request.resource.data.keys().hasOnly(['weekdaySlots', 'timezone', 'hasBeenPainted', 'updatedAt'])
+          && request.resource.data.timezone is string
+          && request.resource.data.timezone.size() > 0
+          && request.resource.data.timezone.size() <= 64
+          && request.resource.data.hasBeenPainted is bool
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.weekdaySlots.keys().hasOnly(['0', '1', '2', '3', '4', '5', '6'])
+          // matches() checks type, exact length, AND character set in one
+          // expression - the original size()-only version (peer review
+          // finding) let a member store any 96 characters at all, forcing
+          // every other member's parser to defensively cope with values
+          // outside 'A'/'B'/'I'. matches() requires a full-string match in
+          // Firestore rules, so this is exactly as strict as the storage
+          // format actually is.
+          && request.resource.data.weekdaySlots['0'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['1'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['2'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['3'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['4'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['5'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['6'].matches('[ABI]{96}');
+
+        allow update: if request.auth != null
+          && request.auth.uid == uid
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['weekdaySlots', 'timezone', 'hasBeenPainted', 'updatedAt'])
+          && request.resource.data.timezone is string
+          && request.resource.data.timezone.size() > 0
+          && request.resource.data.timezone.size() <= 64
+          && request.resource.data.hasBeenPainted is bool
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.weekdaySlots.keys().hasOnly(['0', '1', '2', '3', '4', '5', '6'])
+          // matches() checks type, exact length, AND character set in one
+          // expression - the original size()-only version (peer review
+          // finding) let a member store any 96 characters at all, forcing
+          // every other member's parser to defensively cope with values
+          // outside 'A'/'B'/'I'. matches() requires a full-string match in
+          // Firestore rules, so this is exactly as strict as the storage
+          // format actually is.
+          && request.resource.data.weekdaySlots['0'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['1'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['2'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['3'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['4'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['5'].matches('[ABI]{96}')
+          && request.resource.data.weekdaySlots['6'].matches('[ABI]{96}');
+
+        // A voluntary leave deletes the leaver's own doc (leaveGroup in
+        // group/groups-data.js, via the self-delete below, which has no
+        // membership check so it works before or after the membership
+        // update). A kick does NOT delete it: this app's established
+        // convention (see the orphaned-tasks comment on deleteGroupCompletely)
+        // is to leave a departed member's content behind rather than have
+        // the kick itself remove it. The live heatmap/recommendation view
+        // filters to current memberIds client-side instead, so a kicked
+        // member's doc never surfaces even though it isn't force-deleted.
+        // Owner delete here exists for deleteGroupCompletely's own cleanup
+        // when the WHOLE group goes, same as history/{entryId}.
+        allow delete: if request.auth != null
+          && (
+            request.auth.uid == uid
             || request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId
           );
       }

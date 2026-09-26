@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Availability timezone tests</title>
+<script src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js"></script>
+<script src="availability-timezone.js"></script>
+<style>
+    body { font-family: system-ui, sans-serif; background: #14101f; color: #eae6f5; padding: 24px; }
+    h1 { font-size: 20px; }
+    .case { border: 1px solid #3a3350; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
+    .case.pass { border-color: #3fae6a; background: rgba(63,174,106,0.08); }
+    .case.fail { border-color: #d9534f; background: rgba(217,83,79,0.1); }
+    .case h2 { margin: 0 0 6px; font-size: 15px; }
+    .case pre { margin: 4px 0 0; font-size: 12px; color: #b8b0d0; white-space: pre-wrap; }
+    #summary { font-size: 16px; font-weight: 600; margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>Availability timezone tests</h1>
+<div id="results"></div>
+<div id="summary"></div>
+<script>
+const { DateTime } = luxon;
+const results = [];
+
+function assertEqual(actual, expected, label) {
+    const pass = actual === expected;
+    return { pass, label, detail: `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}` };
+}
+
+function runCase(name, fn) {
+    let assertions;
+    let error = null;
+    try {
+        assertions = fn();
+    } catch (err) {
+        error = err;
+        assertions = [];
+    }
+    const pass = !error && assertions.every((a) => a.pass);
+    results.push({ name, pass, assertions, error });
+}
+
+// A full 24-hour range, so slotIndex 0..95 maps directly to hour*4+quarter -
+// keeps the hand-worked expected values in this file simple to verify.
+const FULL_DAY_RANGE = { startHour: 0, endHour: 24 };
+
+function localSlotIndex(hour, minute) {
+    return localTimeToSlotIndex(hour, minute, FULL_DAY_RANGE);
+}
+
+// --- Case 1: Kolkata noon-ish -> Edmonton, same-day conversion --------------
+// Kolkata (UTC+5:30, no DST) Tuesday 21:00 -> UTC Tuesday 15:30 -> Edmonton
+// (UTC-7 in January, standard time) Tuesday 08:30. Hand-checked: 21:00-5:30
+// =15:30 UTC; 15:30-7:00=08:30, no day rollover either direction.
+runCase('1. Kolkata 9pm Tue -> correct local time+day in Edmonton', () => {
+    const weekAnchor = DateTime.fromISO('2026-01-06', { zone: 'utc' }); // a Tuesday
+    const utc = convertLocalSlotToUtc(2, localSlotIndex(21, 0), 'Asia/Kolkata', FULL_DAY_RANGE, weekAnchor).toUTC();
+    const viewer = convertUtcToViewerLocal(utc, 'America/Edmonton', FULL_DAY_RANGE);
+    return [
+        assertEqual(viewer.jsWeekday, 2, 'weekday stays Tuesday'),
+        assertEqual(viewer.dateTime.hour, 8, 'hour'),
+        assertEqual(viewer.dateTime.minute, 30, 'minute')
+    ];
+});
+
+// --- Case 2: day-wrap across midnight ---------------------------------------
+// Edmonton (UTC-7, Jan) Monday 23:00 -> UTC Tuesday 06:00 -> Kolkata
+// (UTC+5:30) Tuesday 11:30. Edmonton painted it under Monday (jsWeekday 1);
+// the India viewer must see it land on Tuesday (jsWeekday 2), not Monday.
+runCase('2. Edmonton 11pm Mon -> lands on Tuesday for an India viewer', () => {
+    const weekAnchor = DateTime.fromISO('2026-01-05', { zone: 'utc' }); // a Monday
+    const utc = convertLocalSlotToUtc(1, localSlotIndex(23, 0), 'America/Edmonton', FULL_DAY_RANGE, weekAnchor).toUTC();
+    const viewer = convertUtcToViewerLocal(utc, 'Asia/Kolkata', FULL_DAY_RANGE);
+    return [
+        assertEqual(viewer.jsWeekday, 2, 'India viewer sees it on Tuesday, not Monday'),
+        assertEqual(viewer.dateTime.hour, 11, 'hour'),
+        assertEqual(viewer.dateTime.minute, 30, 'minute')
+    ];
+});
+
+// --- Case 3: DST boundary, Oct 25 vs Nov 1 2026 -----------------------------
+// A recurring "Tuesday 2pm London" slot. Europe/London ends DST 2026-10-25;
+// America/Edmonton ends DST 2026-11-01 (a week later) - so the SAME
+// recurring rule must convert to a DIFFERENT Edmonton local time depending
+// on which of those two weeks it's evaluated for, even though nothing about
+// the stored rule itself changed.
+// Week of Oct 27 (after London's switch, before Edmonton's): London GMT
+// (UTC+0), Edmonton still MDT (UTC-6) -> 14:00 UTC -> 08:00 Edmonton.
+// Week of Nov 3 (after both have switched): London GMT (UTC+0), Edmonton
+// now MST (UTC-7) -> 14:00 UTC -> 07:00 Edmonton.
+runCase('3. Same recurring slot shifts correctly across the Oct25/Nov1 2026 DST boundary', () => {
+    const weekOfOct27 = DateTime.fromISO('2026-10-27', { zone: 'utc' }); // Tuesday
+    const weekOfNov3 = DateTime.fromISO('2026-11-03', { zone: 'utc' }); // Tuesday
+
+    const beforeEdmontonSwitch = convertLocalSlotToUtc(2, localSlotIndex(14, 0), 'Europe/London', FULL_DAY_RANGE, weekOfOct27)
+        .toUTC().setZone('America/Edmonton');
+    const afterBothSwitched = convertLocalSlotToUtc(2, localSlotIndex(14, 0), 'Europe/London', FULL_DAY_RANGE, weekOfNov3)
+        .toUTC().setZone('America/Edmonton');
+
+    return [
+        assertEqual(beforeEdmontonSwitch.hour, 8, 'week of Oct 27: 8am Edmonton (still MDT)'),
+        assertEqual(afterBothSwitched.hour, 7, 'week of Nov 3: 7am Edmonton (now MST) - same rule, different real offset')
+    ];
+});
+
+// --- Case 4: Kathmandu UTC+5:45, no drift on round-trip ---------------------
+runCase('4. Asia/Kathmandu (UTC+5:45) round-trips with no drift', () => {
+    const weekAnchor = DateTime.fromISO('2026-01-07', { zone: 'utc' }); // a Wednesday
+    const startSlot = localSlotIndex(10, 0);
+    const utc = convertLocalSlotToUtc(3, startSlot, 'Asia/Kathmandu', FULL_DAY_RANGE, weekAnchor).toUTC();
+    const backAgain = convertUtcToViewerLocal(utc, 'Asia/Kathmandu', FULL_DAY_RANGE);
+    return [
+        assertEqual(utc.hour, 4, 'UTC hour (10:00 - 5:45)'),
+        assertEqual(utc.minute, 15, 'UTC minute'),
+        assertEqual(backAgain.jsWeekday, 3, 'round-trips to the same weekday'),
+        assertEqual(backAgain.slotIndex, startSlot, 'round-trips to the exact same slot index, no drift')
+    ];
+});
+
+// --- Case 5: three-timezone overlap -----------------------------------------
+// Three members, each free for exactly one 30-min local window on Wednesday,
+// chosen by hand so all three convert to the SAME UTC 15:00-15:30 window:
+//   Edmonton  08:00-08:30 local (UTC-7 Jan)  -> 15:00-15:30 UTC
+//   Kolkata   20:30-21:00 local (UTC+5:30)   -> 15:00-15:30 UTC
+//   Kathmandu 20:45-21:15 local (UTC+5:45)   -> 15:00-15:30 UTC
+// Busy everywhere else on Wednesday for all three, so this is the one and
+// only valid 30-minute all-free window.
+// NOTE: this only holds with a January anchor (Edmonton on MST, UTC-7). If
+// the anchor date ever moves into Mar-Oct, Edmonton is on MDT (UTC-6)
+// instead, Edmonton's window shifts to 14:00-14:30 UTC, and the three-way
+// overlap this test is checking for disappears - the anchor date is not
+// arbitrary, it's load-bearing for this specific test's math.
+function makeDayString(freeStartSlot, freeEndSlotExclusive, totalSlots) {
+    let out = '';
+    for (let i = 0; i < totalSlots; i += 1) {
+        out += (i >= freeStartSlot && i < freeEndSlotExclusive) ? 'A' : 'B';
+    }
+    return out;
+}
+
+runCase('5. Three-timezone overlap finds the correct shared window', () => {
+    const weekAnchor = DateTime.fromISO('2026-01-07', { zone: 'utc' }); // a Wednesday
+    const totalSlots = getSlotsPerDay(FULL_DAY_RANGE);
+    const members = [
+        { uid: 'a', name: 'Abir', timezone: 'America/Edmonton', hasBeenPainted: true, weekdaySlots: { '3': makeDayString(localSlotIndex(8, 0), localSlotIndex(8, 30), totalSlots) } },
+        { uid: 'b', name: 'Priya', timezone: 'Asia/Kolkata', hasBeenPainted: true, weekdaySlots: { '3': makeDayString(localSlotIndex(20, 30), localSlotIndex(21, 0), totalSlots) } },
+        { uid: 'c', name: 'Sam', timezone: 'Asia/Kathmandu', hasBeenPainted: true, weekdaySlots: { '3': makeDayString(localSlotIndex(20, 45), localSlotIndex(21, 15), totalSlots) } }
+    ];
+
+    const found = findBestMeetingTimes(members, 30, FULL_DAY_RANGE, weekAnchor);
+    const top = found[0];
+
+    return [
+        { pass: found.length === 1, label: 'exactly one valid window found', detail: `got ${found.length}` },
+        { pass: !!top && top.start.toUTC().hour === 15 && top.start.toUTC().minute === 0, label: 'window starts at 15:00 UTC', detail: top ? `got ${top.start.toUTC().toISO()}` : 'no candidate' },
+        { pass: !!top && top.end.toUTC().hour === 15 && top.end.toUTC().minute === 30, label: 'window ends at 15:30 UTC', detail: top ? `got ${top.end.toUTC().toISO()}` : 'no candidate' },
+        { pass: !!top && top.missing.length === 0, label: 'nobody missing', detail: top ? `missing=${top.missing.map((m) => m.uid)}` : 'no candidate' },
+        { pass: !!top && top.ifNeeded.length === 0, label: 'no if-needed compromises', detail: top ? `ifNeeded=${top.ifNeeded.map((m) => m.uid)}` : 'no candidate' }
+    ];
+});
+
+// --- Case 6: Sunday resolves to the correct nearby date, not next week -----
+// Regression test for a real bug found in peer review: a naive forward-only
+// weekday delta would resolve "Sunday" (jsWeekday 0, this app's storage
+// convention) relative to a Wednesday anchor by walking FORWARD to the
+// following Sunday (Jan 11), not the Sunday that actually starts the same
+// calendar week as the Wednesday anchor (Jan 4). Every other test case here
+// uses an anchor that's already the same weekday as its target, which
+// trivially gives delta=0 either way and would never have caught this -
+// this case deliberately anchors on a DIFFERENT weekday than the one it's
+// resolving, specifically to exercise the fixed nearest-occurrence math.
+runCase('6. Sunday resolves to the nearby Sunday (Jan 4), not the following week (Jan 11)', () => {
+    const wednesdayAnchor = DateTime.fromISO('2026-01-07', { zone: 'utc' }); // a Wednesday
+    const resolved = convertLocalSlotToUtc(0, localSlotIndex(10, 0), 'UTC', FULL_DAY_RANGE, wednesdayAnchor);
+    const viewer = convertUtcToViewerLocal(resolved.toUTC(), 'UTC', FULL_DAY_RANGE);
+    return [
+        assertEqual(resolved.day, 4, 'resolves to Jan 4 (the Sunday nearest the Wednesday anchor)'),
+        assertEqual(resolved.month, 1, 'stays in January'),
+        assertEqual(viewer.jsWeekday, 0, 'round-trips back to jsWeekday 0 (Sunday)'),
+        assertEqual(viewer.dateTime.hour, 10, 'hour unaffected by the weekday fix')
+    ];
+});
+
+// --- Case 7: overlapping candidate windows merge into one block -----------
+// Regression test for a real bug found in peer review: candidate windows
+// slide by one 15-min slot regardless of meeting length, so for anything
+// longer than 15 minutes, consecutive candidates OVERLAP rather than
+// exactly touch (a 30-min window at 10:00 ends at 10:30, but the next
+// candidate starts at 10:15) - the old `last.end.equals(candidate.start)`
+// merge condition was never true for these, so a long free block came back
+// as many 15-min-staggered near-duplicate "top 3" results instead of one
+// clean recommendation. Two members, both free for a full 2-hour block
+// (10:00-12:00) on Wednesday and busy everywhere else - a 30-min meeting
+// search should merge every valid window in that block into ONE
+// recommendation spanning the whole 2 hours, not several overlapping ones.
+runCase('7. A long free block merges into one recommendation, not several overlapping ones', () => {
+    const weekAnchor = DateTime.fromISO('2026-01-07', { zone: 'utc' }); // a Wednesday
+    const totalSlots = getSlotsPerDay(FULL_DAY_RANGE);
+    const freeBlock = makeDayString(localSlotIndex(10, 0), localSlotIndex(12, 0), totalSlots);
+    const members = [
+        { uid: 'a', name: 'Abir', timezone: 'UTC', hasBeenPainted: true, weekdaySlots: { '3': freeBlock } },
+        { uid: 'b', name: 'Priya', timezone: 'UTC', hasBeenPainted: true, weekdaySlots: { '3': freeBlock } }
+    ];
+
+    const found = findBestMeetingTimes(members, 30, FULL_DAY_RANGE, weekAnchor);
+    const top = found[0];
+
+    return [
+        { pass: found.length === 1, label: 'exactly one merged recommendation, not several overlapping ones', detail: `got ${found.length}` },
+        { pass: !!top && top.start.toUTC().hour === 10 && top.start.toUTC().minute === 0, label: 'merged block starts at 10:00', detail: top ? `got ${top.start.toUTC().toISO()}` : 'no candidate' },
+        { pass: !!top && top.end.toUTC().hour === 12 && top.end.toUTC().minute === 0, label: 'merged block extends to the full 12:00 (not stuck at 30 min)', detail: top ? `got ${top.end.toUTC().toISO()}` : 'no candidate' }
+    ];
+});
+
+// --- Cases 8 and 9: rolling next-7-days window, zones 11.5h apart ---------
+// Regression tests for a real bug found in review: the live panel used to
+// anchor the weekAnchor path on the VIEWER's today + 3, which maps each
+// weekday to one calendar date for everyone and then reads that date in each
+// member's own zone. With a Kolkata viewer and an Edmonton member that put
+// Edmonton's Thursday a week out while Kolkata's Friday stayed this week, so
+// a slot free for both RIGHT NOW scored as busy. The rolling window reads
+// every member at the same absolute instants instead.
+//
+// "Now" for both cases: Fri 2026-09-25 07:30 IST = Thu 2026-09-24 20:00 MDT
+// (Edmonton is UTC-6 until Nov 1) = 2026-09-25T02:00Z. Window = 7 days, so
+// it covers 2026-09-25T02:00Z up to (not including) 2026-10-02T02:00Z.
+const ROLLING_NOW = DateTime.fromISO('2026-09-25T02:00:00Z', { zone: 'utc' });
+
+function onlyDay(jsWeekday, dayString) {
+    const allBusy = 'B'.repeat(96);
+    const slots = {};
+    for (let d = 0; d <= 6; d += 1) {
+        slots[String(d)] = d === jsWeekday ? dayString : allBusy;
+    }
+    return slots;
+}
+
+// Case 8, near edge: both free for the first 3 hours of the window.
+//   Edmonton Thu 20:00-23:00 MDT = 02:00-05:00Z Sep 25
+//   Kolkata  Fri 07:30-10:30 IST = 02:00-05:00Z Sep 25
+// Under the old anchor (Mon Sep 28), Edmonton's Thursday resolved to Oct 1
+// and Kolkata's Friday to Sep 25, so this overlap was never seen.
+runCase('8. Rolling window finds the soonest all-free slot for zones 11.5h apart (near edge)', () => {
+    const members = [
+        { uid: 'e', name: 'Edmonton', timezone: 'America/Edmonton', hasBeenPainted: true, weekdaySlots: onlyDay(4, makeDayString(localSlotIndex(20, 0), localSlotIndex(23, 0), 96)) },
+        { uid: 'k', name: 'Kolkata', timezone: 'Asia/Kolkata', hasBeenPainted: true, weekdaySlots: onlyDay(5, makeDayString(localSlotIndex(7, 30), localSlotIndex(10, 30), 96)) }
+    ];
+    const found = findBestMeetingTimes(members, 60, FULL_DAY_RANGE, null, { rollingWindow: { startUtc: ROLLING_NOW, days: 7 } });
+    const everyoneFree = found.filter((r) => r.missing.length === 0);
+    const top = found[0];
+    return [
+        { pass: everyoneFree.length === 1, label: 'exactly one all-free window in the next 7 days', detail: `got ${everyoneFree.length}` },
+        { pass: !!top && top.start.toUTC().toISO() === '2026-09-25T02:00:00.000Z', label: 'starts right at the window start, 02:00Z Sep 25', detail: top ? `got ${top.start.toUTC().toISO()}` : 'no candidate' },
+        { pass: !!top && top.end.toUTC().toISO() === '2026-09-25T05:00:00.000Z', label: 'merged block runs to 05:00Z', detail: top ? `got ${top.end.toUTC().toISO()}` : 'no candidate' },
+        { pass: !!top && top.missing.length === 0 && top.ifNeeded.length === 0, label: 'nobody missing or if-needed', detail: top ? `missing=${top.missing.map((m) => m.uid)} ifNeeded=${top.ifNeeded.map((m) => m.uid)}` : 'no candidate' }
+    ];
+});
+
+// Case 9, far edge: both free for the last 3 hours of the window, plus the
+// window boundaries themselves.
+//   Edmonton Thu 17:00-20:00 MDT Oct 1 = 23:00Z Oct 1 - 02:00Z Oct 2
+//   Kolkata  Fri 04:30-07:30 IST Oct 2 = 23:00Z Oct 1 - 02:00Z Oct 2
+// The same weekly rule one week earlier (23:00Z Sep 24) is before the
+// window, so this is the only all-free block. Under the old anchor Kolkata's
+// Friday resolved to Sep 25 (in the past), so this was missed too.
+runCase('9. Rolling window reaches the far edge, and its bounds are exact', () => {
+    const members = [
+        { uid: 'e', name: 'Edmonton', timezone: 'America/Edmonton', hasBeenPainted: true, weekdaySlots: onlyDay(4, makeDayString(localSlotIndex(17, 0), localSlotIndex(20, 0), 96)) },
+        { uid: 'k', name: 'Kolkata', timezone: 'Asia/Kolkata', hasBeenPainted: true, weekdaySlots: onlyDay(5, makeDayString(localSlotIndex(4, 30), localSlotIndex(7, 30), 96)) }
+    ];
+    const found = findBestMeetingTimes(members, 60, FULL_DAY_RANGE, null, { rollingWindow: { startUtc: ROLLING_NOW, days: 7 } });
+    const everyoneFree = found.filter((r) => r.missing.length === 0);
+    const top = found[0];
+
+    // A start that isn't on a slot boundary rounds UP, so nothing already
+    // under way is searched; the window is exactly 7 * 96 slots long.
+    const timeline = buildUtcTimelineForRollingWindow(members, DateTime.fromISO('2026-09-25T02:07:00Z', { zone: 'utc' }), 7);
+    const keys = Array.from(timeline.keys()).sort();
+    return [
+        { pass: everyoneFree.length === 1, label: 'exactly one all-free window in the next 7 days', detail: `got ${everyoneFree.length}` },
+        { pass: !!top && top.start.toUTC().toISO() === '2026-10-01T23:00:00.000Z', label: 'starts 23:00Z Oct 1', detail: top ? `got ${top.start.toUTC().toISO()}` : 'no candidate' },
+        { pass: !!top && top.end.toUTC().toISO() === '2026-10-02T02:00:00.000Z', label: 'ends exactly at the window end, 02:00Z Oct 2', detail: top ? `got ${top.end.toUTC().toISO()}` : 'no candidate' },
+        assertEqual(keys.length, 7 * 96, 'timeline has exactly 7 days of 15-min slots'),
+        assertEqual(keys[0], '2026-09-25T02:15:00.000Z', 'an off-boundary start rounds up to the next slot'),
+        assertEqual(keys[keys.length - 1], '2026-10-02T02:00:00.000Z', 'last slot starts 15 min before the window end')
+    ];
+});
+
+// --- Case 10: the group's usual-hours window (view-only) --------------------
+// Regression test for a real inconsistency found in live E2E testing: out-of-
+// hours time was masked to busy for Best times (so the reason read "<name>
+// is busy" for a slot they'd left free) and not masked at all for the
+// heatmap (so it counted as free). Now one meaning everywhere: outside a
+// member's usual hours in their OWN zone is 'O', and Best times never
+// suggests a window that is outside anyone's hours.
+// Both members are stored free around the clock (the default new grid).
+// Usual hours 7am-11pm in each person's own zone:
+//   Edmonton (MDT, UTC-6): 13:00Z - 05:00Z next day
+//   Kolkata  (IST, UTC+5:30): 01:30Z - 17:30Z
+// So from 02:00Z Sep 25 the shared blocks are 02:00-05:00Z, 13:00-17:30Z,
+// then 01:30-05:00Z Sep 26 - never Edmonton's small hours or Kolkata's.
+runCase('10. Usual-hours window: outside anyone\'s hours is never suggested, and reads as O, not free or busy', () => {
+    const allFree = 'A'.repeat(96);
+    const allWeek = { '0': allFree, '1': allFree, '2': allFree, '3': allFree, '4': allFree, '5': allFree, '6': allFree };
+    const usualHours = { startHour: 7, endHour: 23 };
+    const edmonton = { uid: 'e', name: 'Edmonton', timezone: 'America/Edmonton', hasBeenPainted: true, weekdaySlots: allWeek };
+    const kolkata = { uid: 'k', name: 'Kolkata', timezone: 'Asia/Kolkata', hasBeenPainted: true, weekdaySlots: allWeek };
+    const found = findBestMeetingTimes([edmonton, kolkata], 30, FULL_DAY_RANGE, null, {
+        rollingWindow: { startUtc: ROLLING_NOW, days: 7, viewHourRange: usualHours }
+    });
+    const spans = found.map((r) => `${r.start.toUTC().toISO()} - ${r.end.toUTC().toISO()}`);
+    const fourAmEdmonton = DateTime.fromISO('2026-09-25T10:00:00Z', { zone: 'utc' }); // 04:00 MDT, 15:30 IST
+    return [
+        assertEqual(spans.length, 3, 'three shared blocks'),
+        assertEqual(spans[0], '2026-09-25T02:00:00.000Z - 2026-09-25T05:00:00.000Z', 'block 1 ends at Edmonton 11pm'),
+        assertEqual(spans[1], '2026-09-25T13:00:00.000Z - 2026-09-25T17:30:00.000Z', 'block 2 runs Edmonton 7am to Kolkata 11pm'),
+        assertEqual(spans[2], '2026-09-26T01:30:00.000Z - 2026-09-26T05:00:00.000Z', 'block 3 starts at Kolkata 7am'),
+        { pass: found.every((r) => r.missing.length === 0 && r.ifNeeded.length === 0), label: 'nobody reported busy for time they left free', detail: JSON.stringify(found.map((r) => r.missing.map((m) => m.uid))) },
+        assertEqual(getMemberValueAtInstant(edmonton, fourAmEdmonton, usualHours), 'O', '4am Edmonton reads as outside hours'),
+        assertEqual(getMemberValueAtInstant(kolkata, fourAmEdmonton, usualHours), 'A', 'same instant is 3:30pm Kolkata, inside hours, stored free'),
+        assertEqual(getMemberValueAtInstant(edmonton, fourAmEdmonton), 'A', 'without a window the stored value is unchanged (storage untouched)')
+    ];
+});
+
+// --- Render ------------------------------------------------------------------
+const resultsEl = document.getElementById('results');
+results.forEach((result) => {
+    const div = document.createElement('div');
+    div.className = `case ${result.pass ? 'pass' : 'fail'}`;
+    const title = document.createElement('h2');
+    title.textContent = `${result.pass ? 'PASS' : 'FAIL'} - ${result.name}`;
+    div.appendChild(title);
+    if (result.error) {
+        const pre = document.createElement('pre');
+        pre.textContent = `Threw: ${result.error.message}\n${result.error.stack || ''}`;
+        div.appendChild(pre);
+    } else {
+        result.assertions.forEach((a) => {
+            const pre = document.createElement('pre');
+            pre.textContent = `${a.pass ? 'ok' : 'FAIL'}  ${a.label}${a.pass ? '' : ' - ' + a.detail}`;
+            div.appendChild(pre);
+        });
+    }
+    resultsEl.appendChild(div);
+});
+
+const passCount = results.filter((r) => r.pass).length;
+document.getElementById('summary').textContent = `${passCount}/${results.length} cases passed`;
+document.getElementById('summary').style.color = passCount === results.length ? '#3fae6a' : '#d9534f';
+</script>
+</body>
+</html>

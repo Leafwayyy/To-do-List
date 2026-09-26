@@ -536,6 +536,35 @@ const groupViewPanels = Array.from(document.querySelectorAll('.viewPanel'));
 // self-correct onto the right view regardless of step order or a manual tab
 // click mid-tour.
 function switchGroupView(view) {
+    // Untouched-grid confirmation (per the feature's own spec): leaving the
+    // Availability tab while a start-state has been picked but nothing has
+    // actually been painted yet triggers a confirm, since an all-busy or
+    // all-free grid is usually a mistake, not a real answer. Checked BEFORE
+    // any tab-switching happens below so a "no" leaves the user exactly
+    // where they were.
+    const currentActiveButton = groupViewTabButtons.find((button) => button.classList.contains('active'));
+    // Only when leaving from your OWN grid ('mine') - someone who just
+    // opened Team overlap or Best times to look at the group, without ever
+    // touching their own grid, shouldn't get nagged about an unpainted one.
+    // Also skipped while the guided tour is open: its Availability step
+    // lands here and the very next step switches away, which would pop this
+    // confirm mid-tour for nearly every new user. Checked via the overlay's
+    // DOM state, not groupTourController, which is a const declared much
+    // further down this file (TDZ if this ever ran before it).
+    const isTourOpen = Boolean(document.querySelector('.tourOverlay:not(.hidden)'));
+    if (!isTourOpen && currentActiveButton?.dataset.view === 'availability' && view !== 'availability' && availabilitySubView === 'mine' && availabilityWeekdaySlots && !availabilityHasBeenPainted) {
+        const proceed = confirm('You haven\'t marked any availability yet - save this untouched grid anyway?');
+        if (!proceed) {
+            return;
+        }
+        // Treated as a deliberate confirmation from here on, so it doesn't
+        // ask again every time they glance at another tab - and saved right
+        // now since nothing painted means the debounce that normally
+        // triggers a save was never going to fire on its own.
+        availabilityHasBeenPainted = true;
+        saveAvailabilityNow();
+    }
+
     groupViewTabButtons.forEach((button) => {
         const isActive = button.dataset.view === view;
         button.classList.toggle('active', isActive);
@@ -557,6 +586,17 @@ function switchGroupView(view) {
             groupHistoryUnreadDot?.classList.add('hidden');
         }
     }
+
+    // Start/stop the group-wide availability listener depending on whether a
+    // view that needs it is now showing (Team overlap / Best times), and
+    // render whichever Availability sub-view is current when arriving.
+    syncGroupAvailabilitySubscription();
+    if (view === 'availability') {
+        const availabilityGroup = getSelectedGroup();
+        if (availabilityGroup) {
+            renderGroupAvailabilityView(availabilityGroup);
+        }
+    }
 }
 
 groupViewTabButtons.forEach((button) => {
@@ -565,6 +605,1901 @@ groupViewTabButtons.forEach((button) => {
         switchGroupView(button.dataset.view || 'tasks');
     });
 });
+
+// ---------------------------------------------------------------------
+// Availability scheduling - see availability-plan.md. Everything for the
+// Availability tab lives in this section: your own paintable grid (mouse,
+// touch and pen), the team overlap heatmap, and the best-meeting-times
+// panel, split across three sub-tabs. Reuses this file's
+// db()/fs()/getSelectedGroup()/describeGroupWriteError, and
+// groups-data.js's loadProfileTimezone/saveProfileTimezone/
+// detectBrowserTimezone. The timezone math lives in availability-timezone.js.
+// ---------------------------------------------------------------------
+
+const availabilityTimezoneName = document.querySelector('.availabilityTimezoneName');
+const availabilityChangeTimezoneBtn = document.querySelector('.availabilityChangeTimezoneBtn');
+const availabilityGridWrap = document.querySelector('.availabilityGridWrap');
+const availabilityGridEl = document.querySelector('.availabilityGrid');
+const availabilityBrushButtons = Array.from(document.querySelectorAll('.availabilityBrushBtn'));
+const availabilitySaveStatus = document.querySelector('.availabilitySaveStatus');
+
+const AVAILABILITY_DEFAULT_HOUR_RANGE = { startHour: 7, endHour: 23 };
+const AVAILABILITY_WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const AVAILABILITY_VALUE_TO_STATE = { A: 'free', B: 'busy', I: 'ifNeeded' };
+const AVAILABILITY_STATE_TO_VALUE = { free: 'A', busy: 'B', ifNeeded: 'I' };
+const AVAILABILITY_SAVE_DEBOUNCE_MS = 1500;
+
+// Sub-views inside the Availability tab: 'mine' (your own paint grid),
+// 'team' (everyone's overlap heatmap), 'recommend' (best meeting times).
+// Split into sub-tabs after real feedback that stacking all three on one
+// long page was cluttered. Only 'team' and 'recommend' need every member's
+// data, so that's the only time the group-wide subscription runs (see
+// isGroupAvailabilityDataNeeded).
+const availabilitySubTabButtons = Array.from(document.querySelectorAll('.availabilitySubTab'));
+const availabilitySubPanels = Array.from(document.querySelectorAll('.availabilitySubPanel'));
+let availabilitySubView = 'mine';
+
+// Phase 4/5 shared data: every CURRENT member's availability, live-
+// subscribed. Keyed by uid so heatmap/recommendation code can filter to
+// group.memberIds at render time (see getScorableGroupMembers) - a kicked
+// or departed member's doc isn't force-deleted (this app's established
+// convention), so filtering here is what actually keeps them out of the
+// heatmap/recommendations, not the data layer itself.
+let groupAvailabilityByUid = new Map();
+let unsubscribeGroupAvailability = null;
+let groupAvailabilitySubscriptionKey = null;
+
+let availabilityLoadedForGroupId = null;    // which group's data is currently in memory
+let availabilityWeekdaySlots = null;        // {'0'..'6': 96-char string} - null = not painted/loaded yet
+let availabilityTimezone = null;
+let availabilityHasBeenPainted = false;
+// Default brush is Busy, not Free - the grid now starts fully free (see
+// fetchMyAvailability's auto-init), so the natural first action is marking
+// the exceptions, not re-confirming the default.
+let availabilityActiveBrush = 'busy';
+let availabilitySaveTimer = null;
+let availabilityIsPainting = false;
+let availabilityPaintValue = null;
+let availabilityLastPaintedCell = null;
+let availabilityCurrentHourRange = AVAILABILITY_DEFAULT_HOUR_RANGE;
+let availabilityGridBuiltForRangeKey = null; // only rebuild the grid DOM when the hour range actually changes
+let availabilityGridEventsAttached = false;
+
+function getAvailabilityHourRange(group) {
+    const range = group?.availabilityHourRange;
+    if (range && Number.isInteger(range.startHour) && Number.isInteger(range.endHour) && range.startHour < range.endHour) {
+        return range;
+    }
+    return AVAILABILITY_DEFAULT_HOUR_RANGE;
+}
+
+function formatAvailabilityHourLabel(hour24) {
+    const period = hour24 < 12 ? 'AM' : 'PM';
+    const hour12 = ((hour24 + 11) % 12) + 1;
+    return `${hour12}${period}`;
+}
+
+// Storage is ALWAYS the full 24h (96 quarter-hour slots/day) regardless of
+// the group's configured view window - see availability-plan.md's Data
+// Model for why (changing the view window later must never need to rewrite
+// another member's already-painted data, which self-only write wouldn't
+// allow anyway). slotPairIndex (0-based within the CURRENTLY DISPLAYED
+// range, one per 30-min UI row) maps to the two 15-min storage indices it
+// represents.
+function slotPairToStorageIndices(slotPairIndex) {
+    const base = availabilityCurrentHourRange.startHour * 4 + slotPairIndex * 2;
+    return [base, base + 1];
+}
+
+function renderGroupAvailabilityView(group) {
+    if (!availabilityTimezoneName || !group) {
+        return;
+    }
+
+    if (availabilityLoadedForGroupId !== group.id) {
+        // Flush any pending debounced save FOR THE OLD GROUP before
+        // resetting state - saveAvailabilityNow snapshots
+        // availabilityLoadedForGroupId itself (see its own comment), so
+        // calling it here, before that id changes below, is what makes the
+        // last few strokes in the old group actually land there instead of
+        // being silently discarded once availabilityWeekdaySlots is reset.
+        if (availabilitySaveTimer) {
+            clearTimeout(availabilitySaveTimer);
+            availabilitySaveTimer = null;
+            saveAvailabilityNow();
+        }
+
+        // First time seeing this group (or switched groups) - clear
+        // immediately so a stale PREVIOUS group's grid is never shown even
+        // briefly, then kick off the real fetch, which re-renders on
+        // completion.
+        availabilityLoadedForGroupId = group.id;
+        availabilityWeekdaySlots = null;
+        availabilityHasBeenPainted = false;
+        availabilityTimezone = null;
+        fetchMyAvailability(group);
+    }
+
+    availabilityTimezoneName.textContent = availabilityTimezone || detectBrowserTimezone();
+
+    // The grid now auto-initializes as soon as it's fetched (see
+    // fetchMyAvailability) - there's no "haven't started yet" state to
+    // show a setup prompt for anymore, `hasGrid` is only false during the
+    // brief window before the fetch resolves.
+    const hasGrid = Boolean(availabilityWeekdaySlots);
+    availabilityGridWrap?.classList.toggle('hidden', !hasGrid);
+
+    // Independent of your own grid having loaded - it's built from every
+    // member's live data (see renderAvailabilityHeatmap). Only rendered while
+    // its sub-view is the one showing: the group-wide subscription that
+    // feeds it isn't even running otherwise (see
+    // isGroupAvailabilityDataNeeded), so rendering it from an empty map
+    // would just flash a misleading "nobody has set availability" state.
+    if (availabilitySubView === 'team') {
+        renderAvailabilityHeatmap(group);
+    }
+
+    if (hasGrid) {
+        availabilityCurrentHourRange = getAvailabilityHourRange(group);
+        buildAvailabilityGridDomIfNeeded();
+        paintAllAvailabilityCellsFromState();
+    }
+
+    // Also independent of your own grid - see the Phase 5 block further down.
+    if (availabilitySubView === 'recommend') {
+        renderAvailabilityRecommendations(group);
+    }
+}
+
+// Real feedback after actually using this: it's a "book ahead of time"
+// tool, so the leftmost column should always be TODAY, not a fixed
+// Sun-Sat calendar layout - column 0 is always whatever day it currently
+// is for the viewer, column 6 is six days out. This is display order
+// only; storage stays keyed by absolute jsWeekday (0=Sunday..6=Saturday,
+// this app's existing convention) regardless of which column it's drawn
+// in, so nothing about painting/reading logic below needs to know about
+// column position at all - only the header/cell-building loop in
+// buildAvailabilityGridDomIfNeeded does.
+//
+// luxonWeekdayToJs is defined in availability-timezone.js (loaded before
+// this file) - reused here rather than redefined.
+//
+// "Today" and every column date come from the viewer's SAVED zone, not the
+// browser's - the paint grid, heatmap and recommendations all go through
+// getAvailabilityViewerZone so they agree on which day is column 0 even
+// when the two differ (travel, a VPN). Each column's jsWeekday is read from
+// its date in that same zone, which is what dataset.weekday stores into.
+function getAvailabilityViewerZone() {
+    return normalizeTimezoneName(availabilityTimezone) || detectBrowserTimezone();
+}
+
+function getAvailabilityColumns() {
+    const now = luxon.DateTime.now().setZone(getAvailabilityViewerZone());
+    const columns = [];
+    for (let i = 0; i <= 6; i += 1) {
+        const date = now.plus({ days: i });
+        columns.push({ jsWeekday: luxonWeekdayToJs(date.weekday), date });
+    }
+    return columns;
+}
+
+// Includes today's own date, so the rebuild-guard below naturally forces a
+// full rebuild (correct new column order, not just a text update) exactly
+// once a day rolls over - see the periodic timer at the bottom of
+// buildAvailabilityGridDomIfNeeded's caller.
+function getAvailabilityGridRangeKey() {
+    const todayKey = luxon.DateTime.now().setZone(getAvailabilityViewerZone()).toFormat('yyyy-MM-dd');
+    return `${availabilityCurrentHourRange.startHour}-${availabilityCurrentHourRange.endHour}-${todayKey}`;
+}
+
+// Belt-and-suspenders for the "tab left open quietly overnight" case -
+// renderApp() only fires on actual data changes, which could plausibly not
+// happen for hours in a quiet group, so the grid could otherwise stay on
+// yesterday's column order until something else triggers a re-render.
+// buildAvailabilityGridDomIfNeeded is already a cheap no-op unless its
+// range key actually changed, so it's safe to just call it every minute
+// rather than separately detecting "did the day change" here.
+setInterval(() => {
+    if (availabilityWeekdaySlots && !availabilityGridWrap?.classList.contains('hidden')) {
+        buildAvailabilityGridDomIfNeeded();
+        paintAllAvailabilityCellsFromState();
+    }
+    // Same day-rollover reason for the heatmap - a no-op unless today's
+    // date (part of its render key) has actually changed.
+    if (availabilitySubView === 'team' && availabilityHeatmapWrap && !availabilityHeatmapWrap.classList.contains('hidden')) {
+        renderAvailabilityHeatmap(getSelectedGroup());
+    }
+}, 60000);
+
+// A failed first load must NOT fall back to an all-free grid: if the read
+// failed for a real permission reason while a saved doc exists, showing a
+// blank grid would let the first paint stroke overwrite that saved data
+// (saves are whole-doc setDoc). Instead retry a bounded number of times.
+// Found live: right after "Create group", the server can briefly deny the
+// read (the local cache shows the new group before the write is committed,
+// same race as the join-requests listener), and without a retry the paint
+// grid never rendered until a full reload.
+const AVAILABILITY_FETCH_RETRY_DELAYS_MS = [1500, 4000, 15000];
+
+async function fetchMyAvailability(group, attempt = 0) {
+    const { doc, getDoc } = fs();
+    try {
+        const snapshot = await getDoc(doc(db(), 'groups', group.id, 'availability', currentUser.uid));
+        if (getSelectedGroup()?.id !== group.id) {
+            return; // switched groups again before this resolved - discard, a newer fetch already owns the state
+        }
+        if (snapshot.exists()) {
+            const data = snapshot.data();
+            availabilityWeekdaySlots = data.weekdaySlots;
+            availabilityTimezone = data.timezone;
+            availabilityHasBeenPainted = Boolean(data.hasBeenPainted);
+        } else {
+            // Real feedback after actually using this: a separate "pick a
+            // starting mode" step before you could even see the grid was
+            // just friction - simplified to always start fully free (the
+            // common case for most people most of the week) with nothing
+            // to choose. Painting is now just "mark your exceptions" -
+            // Busy for genuinely unavailable, If needed for a compromise -
+            // rather than picking a whole-grid default first.
+            const allFree = 'A'.repeat(96);
+            availabilityWeekdaySlots = { '0': allFree, '1': allFree, '2': allFree, '3': allFree, '4': allFree, '5': allFree, '6': allFree };
+            availabilityTimezone = await loadProfileTimezone(currentUser);
+        }
+    } catch (error) {
+        console.error('Failed to load your availability:', error);
+        availabilityTimezone = detectBrowserTimezone();
+        if (attempt < AVAILABILITY_FETCH_RETRY_DELAYS_MS.length) {
+            setTimeout(() => {
+                // Only if this group is still the one wanted and nothing
+                // loaded in the meantime (a group switch already started
+                // its own fetch, which owns the state now).
+                if (availabilityLoadedForGroupId === group.id && getSelectedGroup()?.id === group.id && !availabilityWeekdaySlots) {
+                    fetchMyAvailability(group, attempt + 1);
+                }
+            }, AVAILABILITY_FETCH_RETRY_DELAYS_MS[attempt]);
+        }
+    }
+    renderGroupAvailabilityView(group);
+}
+
+// Everyone's availability, live - used by the Phase 4 heatmap and Phase 5
+// recommendation panel. Open to every member (unlike joinRequests, which
+// is owner/admin-gated) since anyone should be able to see the group's
+// overlap. Idempotent against groupAvailabilitySubscriptionKey, same
+// pattern as ensureJoinRequestsSubscription right above it, so calling it
+// on every renderApp() is a cheap no-op once already subscribed.
+// Retry state for a failed listener. The obvious fix for "a terminated
+// listener never retries on its own" (clear the key on error so the next
+// renderApp() re-subscribes, as ensureJoinRequestsSubscription does) becomes
+// an unbounded hot loop here: renderApp() re-subscribes immediately, a
+// persistent denial (availability rules not yet republished in the Console,
+// or a read rule's get() on a group doc the server hasn't caught up on yet)
+// fails again at network round-trip speed, and every cycle also runs a full
+// renderApp(). Unlike join requests (owner/admin only), this listener runs
+// for every member, so it retries a few times with growing delays and then
+// stops until the user leaves and reopens the view.
+const GROUP_AVAILABILITY_RETRY_DELAYS_MS = [2000, 5000, 30000];
+let groupAvailabilityRetryCount = 0;
+let groupAvailabilityRetryTimer = null;
+let groupAvailabilityRetryGroupId = null;
+
+function ensureGroupAvailabilitySubscription(group) {
+    const desiredKey = group ? group.id : null;
+    if (desiredKey === groupAvailabilitySubscriptionKey) {
+        return;
+    }
+    if (unsubscribeGroupAvailability) {
+        unsubscribeGroupAvailability();
+        unsubscribeGroupAvailability = null;
+    }
+    // A different group (or none) means any pending retry is for something
+    // no longer wanted, and reopening the view later deserves a fresh set
+    // of attempts. The retry timer's own re-subscribe below passes the SAME
+    // group id, so it deliberately keeps the count and can't loop forever.
+    if (desiredKey !== groupAvailabilityRetryGroupId) {
+        clearTimeout(groupAvailabilityRetryTimer);
+        groupAvailabilityRetryTimer = null;
+        groupAvailabilityRetryCount = 0;
+        groupAvailabilityRetryGroupId = desiredKey;
+    }
+    groupAvailabilityByUid = new Map();
+    groupAvailabilitySubscriptionKey = desiredKey;
+    if (!desiredKey) {
+        return;
+    }
+    const { collection, onSnapshot } = fs();
+    unsubscribeGroupAvailability = onSnapshot(collection(db(), 'groups', group.id, 'availability'), (snapshot) => {
+        groupAvailabilityRetryCount = 0;
+        groupAvailabilityByUid = new Map(snapshot.docs.map((availabilityDoc) => [availabilityDoc.id, availabilityDoc.data()]));
+        renderApp();
+    }, (error) => {
+        console.error('Failed to load group availability:', error);
+        groupAvailabilityByUid = new Map();
+        // The key stays SET here on purpose, so renderApp() below (and every
+        // later one) is a no-op instead of instantly re-subscribing. Only
+        // the timer clears it, a bounded number of times.
+        if (groupAvailabilityRetryCount < GROUP_AVAILABILITY_RETRY_DELAYS_MS.length) {
+            const delay = GROUP_AVAILABILITY_RETRY_DELAYS_MS[groupAvailabilityRetryCount];
+            groupAvailabilityRetryCount += 1;
+            clearTimeout(groupAvailabilityRetryTimer);
+            groupAvailabilityRetryTimer = setTimeout(() => {
+                groupAvailabilityRetryTimer = null;
+                if (groupAvailabilitySubscriptionKey === desiredKey) {
+                    groupAvailabilitySubscriptionKey = null;
+                    syncGroupAvailabilitySubscription();
+                }
+            }, delay);
+        }
+        renderApp();
+    });
+}
+
+// Only the Team overlap and Best times sub-views read everyone's docs - your
+// own grid reads just your own (fetchMyAvailability), and every other tab in
+// the dashboard doesn't touch availability at all. Subscribing whenever a
+// group was merely selected meant every open dashboard re-read every
+// teammate's doc on each of their paint saves, even for members who never
+// open this feature. Gated on both the top-level Availability tab being the
+// active one AND a sub-view that actually needs the data, and left running
+// while flipping between Team overlap and Best times (same key, so
+// ensureGroupAvailabilitySubscription no-ops) instead of tearing down and
+// re-reading everything on each switch.
+function isGroupAvailabilityDataNeeded() {
+    const activeTopLevelTab = groupViewTabButtons.find((button) => button.classList.contains('active'));
+    return activeTopLevelTab?.dataset.view === 'availability'
+        && (availabilitySubView === 'team' || availabilitySubView === 'recommend');
+}
+
+function syncGroupAvailabilitySubscription() {
+    ensureGroupAvailabilitySubscription(isGroupAvailabilityDataNeeded() ? getSelectedGroup() : null);
+}
+
+function switchAvailabilitySubView(view) {
+    availabilitySubView = view;
+    availabilitySubTabButtons.forEach((button) => {
+        const isActive = button.dataset.availabilityView === view;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    availabilitySubPanels.forEach((panel) => {
+        panel.classList.toggle('hidden', panel.dataset.availabilityPanel !== view);
+    });
+
+    syncGroupAvailabilitySubscription();
+
+    // Render the newly shown view right away from whatever data is already
+    // in memory (empty until the subscription's first snapshot arrives, at
+    // which point renderApp() re-renders it) rather than waiting for the
+    // next unrelated re-render.
+    const group = getSelectedGroup();
+    if (group) {
+        if (view === 'team') {
+            renderAvailabilityHeatmap(group);
+        } else if (view === 'recommend') {
+            renderAvailabilityRecommendations(group);
+        }
+    }
+}
+
+availabilitySubTabButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+        playClickSound();
+        switchAvailabilitySubView(button.dataset.availabilityView || 'mine');
+    });
+});
+
+// The shared input both the heatmap and recommendation panel build from:
+// every CURRENT member's availability, shaped for availability-timezone.js
+// ({uid, name, timezone, weekdaySlots, hasBeenPainted}). Filtering to
+// group.memberIds here (not in the subscription itself) is what actually
+// keeps a kicked/departed member's still-lingering doc out of both - see
+// the comment on groupAvailabilityByUid's declaration.
+function getScorableGroupMembers(group) {
+    if (!group) {
+        return [];
+    }
+    return group.memberIds
+        .map((uid, index) => {
+            const data = groupAvailabilityByUid.get(uid);
+            if (!data) {
+                return null;
+            }
+            return {
+                uid,
+                name: resolveMemberName(uid, group.memberNames?.[index], groupTasks),
+                timezone: data.timezone,
+                weekdaySlots: data.weekdaySlots,
+                hasBeenPainted: Boolean(data.hasBeenPainted)
+            };
+        })
+        .filter(Boolean);
+}
+
+// ---------------------------------------------------------------------
+// Phase 4: the group heatmap. Same today-first columns and hour range as
+// the paint grid above it, so the two line up column-for-column.
+//
+// Deliberately NOT built on buildUtcTimeline: that resolves each weekday to
+// the NEAREST date within -3..+3 days of its anchor, so with a today-first
+// grid three of the columns would resolve to past dates. Each heatmap cell
+// instead starts from its own real date + time in the viewer's zone,
+// converts that single instant into every member's own zone, and reads the
+// member's stored slot for it - DST and half-hour zones fall out of Luxon
+// the same way as everywhere else in this feature.
+//
+// Members who have never painted are left out of the counts entirely (not
+// treated as busy everywhere), same as findBestMeetingTimes, and listed in
+// a separate note instead.
+const availabilityHeatmapWrap = document.querySelector('.availabilityHeatmapWrap');
+// 'O' = outside that member's usual hours (see getMemberValueAtInstant) -
+// ranked worst so a cell straddling the edge of someone's hours reads as
+// outside them, same as Best times never suggesting it.
+const AVAILABILITY_VALUE_RANK = { A: 0, I: 1, B: 2, O: 3 };
+let availabilityHeatmapRenderKey = null;
+let availabilityHeatmapDataRef = null;
+let availabilityHeatmapCellDetails = [];
+
+// One 30-min cell covers two 15-min storage slots - a member only counts as
+// free for the cell if free for both halves (the worse value wins).
+// getMemberValueAtInstant (availability-timezone.js) reads the member's
+// full-24h storage in their own zone - the same lookup the recommendation
+// search uses, so the heatmap and the "best times" panel always agree -
+// including viewHourRange, so time outside a member's usual hours is 'O'
+// here too (not free) instead of whatever their stored grid says.
+function getMemberAvailabilityForCell(member, cellStartUtc, viewHourRange) {
+    const first = getMemberValueAtInstant(member, cellStartUtc, viewHourRange);
+    const second = getMemberValueAtInstant(member, cellStartUtc.plus({ minutes: 15 }), viewHourRange);
+    return AVAILABILITY_VALUE_RANK[first] >= AVAILABILITY_VALUE_RANK[second] ? first : second;
+}
+
+// Level 4 sits next to the legend's "All free" label, so it's reserved for
+// cells where literally everyone is free - plain rounding gave 7 of 8 a 4.
+function getAvailabilityHeatLevel(freeCount, totalCount) {
+    if (!totalCount || freeCount === 0) {
+        return 0;
+    }
+    if (freeCount === totalCount) {
+        return 4;
+    }
+    return Math.min(3, Math.max(1, Math.round((freeCount / totalCount) * 4)));
+}
+
+// Set by each real renderAvailabilityHeatmap pass: the viewer's zone and the
+// members whose local times the hover/tap detail line can show. Kept out of
+// the per-cell details so the (up to 224) cells don't each carry a copy, and
+// the per-member times are only computed for the one cell being looked at.
+let availabilityHeatmapZoneContext = { viewerZone: null, members: [] };
+const AVAILABILITY_LOCAL_TIMES_MAX_SHOWN = 3;
+
+// "Asia/Kolkata" -> "Kolkata", "America/Argentina/Buenos_Aires" -> "Buenos Aires".
+function formatAvailabilityZoneHint(zone) {
+    return String(zone).split('/').pop().replace(/_/g, ' ');
+}
+
+// The spec's "12:30 am for you, 12:00 pm for Priya in India" line. Members
+// whose local clock matches the viewer's are skipped (repeating your own
+// time back adds nothing, and it keeps a same-zone group's detail short),
+// the rest are capped with "and N more" so a big group doesn't turn this
+// into a wall of text. A member whose local DATE differs from the viewer's
+// gets the weekday too, since that's usually the surprising part.
+function describeAvailabilityLocalTimes(startUtc) {
+    const { viewerZone, members } = availabilityHeatmapZoneContext;
+    if (!startUtc || !viewerZone) {
+        return '';
+    }
+    const viewerLocal = startUtc.setZone(viewerZone);
+    const viewerClock = viewerLocal.toFormat('yyyy-MM-dd HH:mm');
+    const others = members
+        .filter((member) => member.uid !== currentUser?.uid && member.timezone && luxon.IANAZone.isValidZone(member.timezone))
+        .map((member) => ({ member, local: startUtc.setZone(member.timezone) }))
+        .filter(({ local }) => local.toFormat('yyyy-MM-dd HH:mm') !== viewerClock);
+    if (!others.length) {
+        return '';
+    }
+    const shown = others.slice(0, AVAILABILITY_LOCAL_TIMES_MAX_SHOWN).map(({ member, local }) => {
+        const sameDate = local.toISODate() === viewerLocal.toISODate();
+        const time = local.toFormat(sameDate ? 'h:mm a' : 'ccc h:mm a');
+        return `${time} for ${member.name} (${formatAvailabilityZoneHint(member.timezone)})`;
+    });
+    const hiddenCount = others.length - shown.length;
+    const more = hiddenCount ? `, and ${hiddenCount} more` : '';
+    return `${viewerLocal.toFormat('h:mm a')} for you, ${shown.join(', ')}${more}`;
+}
+
+function describeAvailabilityHeatmapCell(details) {
+    const parts = [details.timeLabel];
+    const localTimes = describeAvailabilityLocalTimes(details.startUtc);
+    if (localTimes) {
+        parts.push(localTimes);
+    }
+    parts.push(details.free.length ? `Free: ${details.free.join(', ')}` : 'Nobody free');
+    if (details.ifNeeded.length) {
+        parts.push(`If needed: ${details.ifNeeded.join(', ')}`);
+    }
+    if (details.busy.length) {
+        parts.push(`Busy: ${details.busy.join(', ')}`);
+    }
+    const outsideHours = details.outsideHours || [];
+    if (outsideHours.length) {
+        parts.push(`Outside usual hours: ${outsideHours.join(', ')}`);
+    }
+    return parts.join('. ');
+}
+
+function renderAvailabilityHeatmap(group) {
+    if (!availabilityHeatmapWrap || !group || typeof luxon === 'undefined') {
+        return;
+    }
+
+    const viewerZone = getAvailabilityViewerZone();
+    const hourRange = getAvailabilityHourRange(group);
+    const todayKey = luxon.DateTime.now().setZone(viewerZone).toFormat('yyyy-MM-dd');
+    // renderApp() runs on every task/comment/roster change, not just
+    // availability ones - skip the (members x 448 conversions) rebuild
+    // unless something the heatmap actually shows has changed.
+    // groupAvailabilityByUid is replaced with a new Map on every snapshot,
+    // so comparing its identity is a cheap "availability data changed" check.
+    const renderKey = [
+        group.id,
+        (group.memberIds || []).join(','),
+        (group.memberNames || []).join(','),
+        viewerZone,
+        hourRange.startHour,
+        hourRange.endHour,
+        todayKey
+    ].join('|');
+    if (availabilityHeatmapRenderKey === renderKey && availabilityHeatmapDataRef === groupAvailabilityByUid) {
+        return;
+    }
+
+    const members = getScorableGroupMembers(group);
+    const paintedMembers = members.filter((member) => member.hasBeenPainted);
+    const paintedUids = new Set(paintedMembers.map((member) => member.uid));
+    const notSetNames = (group.memberIds || [])
+        .map((uid, index) => (paintedUids.has(uid) ? null : resolveMemberName(uid, group.memberNames?.[index], groupTasks)))
+        .filter(Boolean);
+
+    availabilityHeatmapWrap.innerHTML = '';
+    availabilityHeatmapCellDetails = [];
+    availabilityHeatmapZoneContext = { viewerZone, members };
+
+    const title = document.createElement('p');
+    title.className = 'availabilityHeatmapTitle';
+    title.textContent = 'When everyone is free';
+    availabilityHeatmapWrap.appendChild(title);
+
+    if (paintedMembers.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'availabilityHeatmapNote';
+        empty.textContent = 'Nobody has set their availability yet. Paint your own grid above to get things started.';
+        availabilityHeatmapWrap.appendChild(empty);
+    } else {
+        const legend = document.createElement('div');
+        legend.className = 'availabilityHeatmapLegend';
+        legend.setAttribute('aria-hidden', 'true');
+        const fewer = document.createElement('span');
+        fewer.textContent = 'Fewer free';
+        legend.appendChild(fewer);
+        for (let level = 0; level <= 4; level += 1) {
+            const swatch = document.createElement('span');
+            swatch.className = `heatCell level-${level} availabilityHeatmapSwatch`;
+            legend.appendChild(swatch);
+        }
+        const more = document.createElement('span');
+        more.textContent = 'All free';
+        legend.appendChild(more);
+        const outsideSwatch = document.createElement('span');
+        outsideSwatch.className = 'heatCell level-0 outsideHours availabilityHeatmapSwatch';
+        legend.appendChild(outsideSwatch);
+        const outsideText = document.createElement('span');
+        outsideText.textContent = "Outside someone's usual hours";
+        legend.appendChild(outsideText);
+        availabilityHeatmapWrap.appendChild(legend);
+
+        const scroll = document.createElement('div');
+        scroll.className = 'availabilityGridScroll';
+        const grid = document.createElement('div');
+        grid.className = 'availabilityHeatmapGrid';
+        grid.setAttribute('role', 'group');
+        grid.setAttribute('aria-label', 'Group availability heatmap');
+
+        const columns = getAvailabilityColumns();
+        const corner = document.createElement('div');
+        corner.className = 'availabilityGridCorner';
+        grid.appendChild(corner);
+        columns.forEach(({ jsWeekday, date }) => {
+            const header = document.createElement('div');
+            header.className = 'availabilityGridDayHeader';
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = AVAILABILITY_WEEKDAY_LABELS[jsWeekday];
+            const dateSpan = document.createElement('span');
+            dateSpan.className = 'availabilityGridDateLabel';
+            dateSpan.textContent = date.toFormat('MMM d');
+            header.appendChild(nameSpan);
+            header.appendChild(dateSpan);
+            grid.appendChild(header);
+        });
+
+        const totalHours = hourRange.endHour - hourRange.startHour;
+        for (let hourOffset = 0; hourOffset < totalHours; hourOffset += 1) {
+            for (let half = 0; half < 2; half += 1) {
+                const isHourStart = half === 0;
+                const hour = hourRange.startHour + hourOffset;
+                const minute = half * 30;
+                const label = document.createElement('div');
+                label.className = `availabilityGridTimeLabel${isHourStart ? '' : ' halfHour'}`;
+                if (isHourStart) {
+                    label.textContent = formatAvailabilityHourLabel(hour);
+                }
+                grid.appendChild(label);
+
+                columns.forEach(({ date }) => {
+                    const cellStartLocal = luxon.DateTime.fromObject(
+                        { year: date.year, month: date.month, day: date.day, hour, minute, second: 0, millisecond: 0 },
+                        { zone: viewerZone }
+                    );
+                    const cellStartUtc = cellStartLocal.toUTC();
+                    const details = {
+                        startUtc: cellStartUtc,
+                        timeLabel: cellStartLocal.toFormat('ccc MMM d, h:mm a'),
+                        free: [],
+                        ifNeeded: [],
+                        busy: [],
+                        outsideHours: []
+                    };
+                    paintedMembers.forEach((member) => {
+                        const value = getMemberAvailabilityForCell(member, cellStartUtc, hourRange);
+                        if (value === 'A') {
+                            details.free.push(member.name);
+                        } else if (value === 'I') {
+                            details.ifNeeded.push(member.name);
+                        } else if (value === 'O') {
+                            details.outsideHours.push(member.name);
+                        } else {
+                            details.busy.push(member.name);
+                        }
+                    });
+
+                    // Outside-hours members aren't free, so a cell with any
+                    // can never reach level 4 ("All free"); the extra class
+                    // mutes it so it doesn't read as a good time either.
+                    const cell = document.createElement('button');
+                    cell.type = 'button';
+                    const level = getAvailabilityHeatLevel(details.free.length, paintedMembers.length);
+                    const outsideClass = details.outsideHours.length ? ' outsideHours' : '';
+                    cell.className = `heatCell level-${level} availabilityHeatmapCell${isHourStart ? ' hourStart' : ''}${outsideClass}`;
+                    cell.dataset.detailIndex = String(availabilityHeatmapCellDetails.length);
+                    const outsideAria = details.outsideHours.length ? `, ${details.outsideHours.length} outside usual hours` : '';
+                    cell.setAttribute('aria-label', `${details.timeLabel}, ${details.free.length} of ${paintedMembers.length} free${outsideAria}`);
+                    availabilityHeatmapCellDetails.push(details);
+                    grid.appendChild(cell);
+                });
+            }
+        }
+
+        scroll.appendChild(grid);
+        availabilityHeatmapWrap.appendChild(scroll);
+
+        const detail = document.createElement('p');
+        detail.className = 'availabilityHeatmapDetail';
+        detail.setAttribute('aria-live', 'polite');
+        detail.textContent = 'Hover or tap a time to see who is free.';
+        availabilityHeatmapWrap.appendChild(detail);
+
+        // Delegated, so a grid rebuild never leaves stale per-cell listeners.
+        const showCellDetail = (event) => {
+            const cell = event.target.closest('.availabilityHeatmapCell');
+            if (!cell) {
+                return;
+            }
+            const details = availabilityHeatmapCellDetails[Number(cell.dataset.detailIndex)];
+            if (details) {
+                detail.textContent = describeAvailabilityHeatmapCell(details);
+            }
+        };
+        grid.addEventListener('pointerover', showCellDetail);
+        grid.addEventListener('focusin', showCellDetail);
+        grid.addEventListener('click', showCellDetail);
+    }
+
+    if (notSetNames.length && paintedMembers.length) {
+        const note = document.createElement('p');
+        note.className = 'availabilityHeatmapNote';
+        note.textContent = `${notSetNames.length} ${notSetNames.length === 1 ? "hasn't" : "haven't"} set their availability yet: ${notSetNames.join(', ')}. They aren't counted above.`;
+        availabilityHeatmapWrap.appendChild(note);
+    }
+
+    availabilityHeatmapWrap.classList.remove('hidden');
+    availabilityHeatmapRenderKey = renderKey;
+    availabilityHeatmapDataRef = groupAvailabilityByUid;
+    // The grid element above is brand new, so it has lost .dayMode /
+    // data-day-col - re-apply the shared Week | Day layout onto it (and
+    // show or hide the heatmap's toggle row depending on whether there is
+    // a grid at all this time).
+    applyAvailabilityGridLayout();
+}
+
+function setAvailabilityBrush(brush) {
+    availabilityActiveBrush = brush;
+    availabilityBrushButtons.forEach((button) => {
+        button.classList.toggle('active', button.dataset.brush === brush);
+    });
+}
+
+availabilityBrushButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+        playClickSound();
+        setAvailabilityBrush(button.dataset.brush);
+    });
+});
+setAvailabilityBrush(availabilityActiveBrush);
+
+// Week | Day layout, one shared state for both the paint grid (My
+// availability) and the heatmap (Team overlap), so switching sub-tabs always
+// shows the same mode and day. Each sub-panel has its own copy of the toggle
+// + nav markup; every copy is driven from here. Day mode is purely a display
+// filter over the same 7-column grids (see the .dayMode rules in style.css):
+// the other six columns get display:none, so storage, painting, saving and
+// the pointer code are untouched, elementFromPoint can never land on a hidden
+// cell, and hidden heatmap cells drop out of hover/tap/focus. The selected
+// day is remembered as a DATE, not a column index, so a midnight rollover
+// (columns shift left by one) keeps showing the same day while it's still in
+// range, and falls back to today once it isn't. An hour-range rebuild keeps
+// both mode and day as-is. Re-applied after every paint-grid build and every
+// real heatmap re-render, since the heatmap's grid element is recreated.
+let availabilityGridLayout = 'week';
+let availabilityDaySelectedDateKey = null; // yyyy-MM-dd, in the viewer's zone
+const availabilityDayToggleButtons = Array.from(document.querySelectorAll('.availabilityDayToggleBtn'));
+const availabilityDayNavs = Array.from(document.querySelectorAll('.availabilityDayNav'));
+const availabilityDayNavLabels = Array.from(document.querySelectorAll('.availabilityDayNavLabel'));
+const availabilityDayNavButtons = Array.from(document.querySelectorAll('.availabilityDayNavBtn'));
+const availabilityHeatmapLayoutRow = document.querySelector('.availabilityHeatmapLayoutRow');
+
+function getAvailabilityDayColumnIndex(columns) {
+    const index = columns.findIndex(({ date }) => date.toISODate() === availabilityDaySelectedDateKey);
+    return index === -1 ? 0 : index;
+}
+
+function applyAvailabilityGridLayout() {
+    const isDayMode = availabilityGridLayout === 'day';
+    const columns = getAvailabilityColumns();
+    const dayIndex = getAvailabilityDayColumnIndex(columns);
+    const { date } = columns[dayIndex];
+    availabilityDaySelectedDateKey = date.toISODate();
+
+    // The heatmap may have no grid at all (nobody painted yet, or not
+    // rendered yet) - its toggle row only shows when there is one to filter.
+    const heatmapGridEl = availabilityHeatmapWrap?.querySelector('.availabilityHeatmapGrid');
+    [availabilityGridEl, heatmapGridEl].forEach((gridEl) => {
+        if (gridEl) {
+            gridEl.classList.toggle('dayMode', isDayMode);
+            gridEl.dataset.dayCol = String(dayIndex);
+        }
+    });
+    availabilityHeatmapLayoutRow?.classList.toggle('hidden', !heatmapGridEl);
+
+    availabilityDayToggleButtons.forEach((button) => {
+        const isActive = button.dataset.gridLayout === availabilityGridLayout;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+    availabilityDayNavs.forEach((nav) => nav.classList.toggle('hidden', !isDayMode));
+    const labelText = dayIndex === 0
+        ? `Today, ${date.toFormat('ccc MMM d')}`
+        : date.toFormat('cccc, MMM d');
+    availabilityDayNavLabels.forEach((label) => {
+        label.textContent = labelText;
+    });
+    availabilityDayNavButtons.forEach((button) => {
+        const step = Number(button.dataset.dayStep);
+        button.disabled = step < 0 ? dayIndex === 0 : dayIndex === columns.length - 1;
+    });
+}
+
+availabilityDayToggleButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+        playClickSound();
+        availabilityGridLayout = button.dataset.gridLayout === 'day' ? 'day' : 'week';
+        applyAvailabilityGridLayout();
+    });
+});
+
+availabilityDayNavButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+        playClickSound();
+        const columns = getAvailabilityColumns();
+        const target = getAvailabilityDayColumnIndex(columns) + Number(button.dataset.dayStep);
+        const clamped = Math.max(0, Math.min(columns.length - 1, target));
+        availabilityDaySelectedDateKey = columns[clamped].date.toISODate();
+        applyAvailabilityGridLayout();
+    });
+});
+
+function buildAvailabilityGridDomIfNeeded() {
+    const rangeKey = getAvailabilityGridRangeKey();
+    if (!availabilityGridEl || availabilityGridBuiltForRangeKey === rangeKey) {
+        return;
+    }
+    availabilityGridEl.innerHTML = '';
+
+    // Today-first column order (see getAvailabilityColumns) - columns[0] is
+    // always today, regardless of which absolute jsWeekday that is. Cells
+    // still carry the ABSOLUTE jsWeekday in dataset.weekday (storage/
+    // painting logic is entirely keyed on that, unaware of column
+    // position), so nothing below this loop needs to change.
+    const columns = getAvailabilityColumns();
+
+    const corner = document.createElement('div');
+    corner.className = 'availabilityGridCorner';
+    availabilityGridEl.appendChild(corner);
+
+    columns.forEach(({ jsWeekday, date }) => {
+        const header = document.createElement('div');
+        header.className = 'availabilityGridDayHeader';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = AVAILABILITY_WEEKDAY_LABELS[jsWeekday];
+        const dateSpan = document.createElement('span');
+        dateSpan.className = 'availabilityGridDateLabel';
+        dateSpan.textContent = date.toFormat('MMM d');
+        header.appendChild(nameSpan);
+        header.appendChild(dateSpan);
+        availabilityGridEl.appendChild(header);
+    });
+
+    const totalHours = availabilityCurrentHourRange.endHour - availabilityCurrentHourRange.startHour;
+    for (let hourOffset = 0; hourOffset < totalHours; hourOffset += 1) {
+        for (let half = 0; half < 2; half += 1) {
+            const isHourStart = half === 0;
+            const label = document.createElement('div');
+            label.className = `availabilityGridTimeLabel${isHourStart ? '' : ' halfHour'}`;
+            if (isHourStart) {
+                label.textContent = formatAvailabilityHourLabel(availabilityCurrentHourRange.startHour + hourOffset);
+            }
+            availabilityGridEl.appendChild(label);
+
+            const slotPairIndex = hourOffset * 2 + half;
+            columns.forEach(({ jsWeekday }) => {
+                const cell = document.createElement('div');
+                cell.className = `availabilityGridCell${isHourStart ? ' hourStart' : ''}`;
+                cell.dataset.weekday = String(jsWeekday);
+                cell.dataset.slotPair = String(slotPairIndex);
+                availabilityGridEl.appendChild(cell);
+            });
+        }
+    }
+
+    attachAvailabilityGridPointerEvents();
+    // Set only once the build actually succeeds - real bug caught live
+    // (peer-tested): setting this BEFORE building meant a thrown error
+    // partway through (e.g. a stale reference during active development)
+    // left the grid with zero cells, permanently, since every later render
+    // would see the range key already "built" and skip rebuilding entirely
+    // until a full page reload. Setting it last means a failed build stays
+    // retriable on the very next render instead.
+    availabilityGridBuiltForRangeKey = rangeKey;
+    // Re-resolves the Day-mode column against the new column order (a
+    // rollover rebuild shifts every date one column left) and refreshes the
+    // "Today, ..." label; mode and selected date carry over unchanged.
+    applyAvailabilityGridLayout();
+}
+
+function getAvailabilitySlotPairValue(jsWeekday, slotPairIndex) {
+    const packed = availabilityWeekdaySlots[String(jsWeekday)];
+    const [a] = slotPairToStorageIndices(slotPairIndex);
+    return packed[a];
+}
+
+function applyAvailabilityCellVisual(cell) {
+    const jsWeekday = Number(cell.dataset.weekday);
+    const slotPairIndex = Number(cell.dataset.slotPair);
+    const value = getAvailabilitySlotPairValue(jsWeekday, slotPairIndex);
+    const state = AVAILABILITY_VALUE_TO_STATE[value] || 'busy';
+    cell.classList.remove('state-free', 'state-busy', 'state-ifNeeded');
+    cell.classList.add(`state-${state}`);
+}
+
+function paintAllAvailabilityCellsFromState() {
+    if (!availabilityGridEl || !availabilityWeekdaySlots) {
+        return;
+    }
+    availabilityGridEl.querySelectorAll('.availabilityGridCell').forEach((cell) => {
+        applyAvailabilityCellVisual(cell);
+    });
+}
+
+// Both UI-row halves (the two underlying 15-min slots a single 30-min row
+// represents) are always painted together - the UI never exposes 15-min
+// granularity directly, only storage needs it (see availability-plan.md's
+// Timezone Strategy for why 15-min storage matters even with 30-min rows).
+function paintAvailabilitySlotPair(jsWeekday, slotPairIndex, value) {
+    const key = String(jsWeekday);
+    const packed = availabilityWeekdaySlots[key];
+    const [a, b] = slotPairToStorageIndices(slotPairIndex);
+    if (packed[a] === value && packed[b] === value) {
+        return false;
+    }
+    availabilityWeekdaySlots[key] = packed.slice(0, a) + value + value + packed.slice(b + 1);
+    availabilityHasBeenPainted = true;
+    return true;
+}
+
+function paintAvailabilityCellFromDom(cell) {
+    availabilityLastPaintedCell = cell;
+    const jsWeekday = Number(cell.dataset.weekday);
+    const slotPairIndex = Number(cell.dataset.slotPair);
+    const changed = paintAvailabilitySlotPair(jsWeekday, slotPairIndex, availabilityPaintValue);
+    if (changed) {
+        applyAvailabilityCellVisual(cell);
+        scheduleAvailabilitySave();
+    }
+}
+
+// Attached to the GRID CONTAINER, not per-cell - pointer capture (explicit
+// for mouse, implicit for touch) redirects every later event in a gesture
+// to one element, so per-cell pointerenter/pointerover listeners would
+// never fire as the pointer drags across other cells. pointermove on the
+// container + elementFromPoint is what actually finds the cell under the
+// pointer during a drag. elementFromPoint takes viewport coordinates, same
+// as clientX/clientY, so it stays correct however far .availabilityGridScroll
+// (or the page) is scrolled; a point over a sticky day header or time label
+// resolves to that label, not a cell, so nothing hidden under it paints.
+//
+// Mouse strokes start on pointerdown. Touch strokes can't: the browser fixes
+// touch-action at the START of a touch, so switching it to 'none' from
+// pointerdown is already too late and a vertical drag turns into a scroll
+// (pointercancel, only one cell painted). Cells therefore keep native
+// scrolling (touch-action: pan-x pan-y in style.css) and a touch gesture is
+// read by intent instead:
+// - a quick tap paints the one cell under the finger,
+// - a swipe scrolls the grid/page as normal (the browser takes over and
+//   fires pointercancel, and nothing gets painted),
+// - press and hold (AVAILABILITY_TOUCH_HOLD_MS) arms a stroke, shown by the
+//   grid's .painting outline plus a short vibration where supported, and
+//   dragging after that paints. The non-passive touchmove listener below is
+//   what stops that armed drag from becoming a scroll: preventDefault on a
+//   still-cancelable touchmove works mid-gesture, unlike touch-action.
+// A pen that hovers first (most active styluses) gets .penReady, which
+// switches cells to touch-action:none BEFORE contact, so it can stroke
+// immediately like a mouse. A pen that can't hover falls back to the touch
+// rules.
+function attachAvailabilityGridPointerEvents() {
+    if (!availabilityGridEl || availabilityGridEventsAttached) {
+        return;
+    }
+    availabilityGridEventsAttached = true;
+
+    const AVAILABILITY_TOUCH_HOLD_MS = 300;
+    const AVAILABILITY_TOUCH_SLOP_PX = 10;
+    const AVAILABILITY_AUTOSCROLL_EDGE_PX = 28;
+    const AVAILABILITY_AUTOSCROLL_MAX_STEP_PX = 14;
+
+    let strokePointerId = null;
+    let pendingPress = null; // { pointerId, cell, startX, startY, timer } for a touch press not yet armed
+    let lastPointerX = 0;
+    let lastPointerY = 0;
+    let lastPointerType = 'mouse';
+    let autoScrollFrame = 0;
+    let strokeGroupId = null;
+
+    const paintCellAtPoint = (x, y) => {
+        // A group switch mid-stroke (renderGroupAvailabilityView nulls
+        // availabilityWeekdaySlots, then refetches) would otherwise throw on
+        // the null slots, or, once the new fetch lands, carry the old
+        // group's stroke onto the new group's grid.
+        if (availabilityLoadedForGroupId !== strokeGroupId || !availabilityWeekdaySlots) {
+            endStroke();
+            return;
+        }
+        const cell = document.elementFromPoint(x, y)?.closest('.availabilityGridCell');
+        if (cell && availabilityGridEl.contains(cell) && cell !== availabilityLastPaintedCell) {
+            paintAvailabilityCellFromDom(cell);
+        }
+    };
+
+    const startStroke = (cell, pointerId) => {
+        // A detached cell means the grid was rebuilt (hour range change,
+        // day rollover) while a touch press was pending. Its slotPair index
+        // is relative to the OLD start hour (see slotPairToStorageIndices),
+        // so painting it would write the wrong time - drop it instead.
+        if (!cell.isConnected || !availabilityWeekdaySlots) {
+            return;
+        }
+        strokeGroupId = availabilityLoadedForGroupId;
+        strokePointerId = pointerId;
+        availabilityIsPainting = true;
+        availabilityPaintValue = AVAILABILITY_STATE_TO_VALUE[availabilityActiveBrush];
+        availabilityLastPaintedCell = null;
+        availabilityGridEl.classList.add('painting');
+        paintAvailabilityCellFromDom(cell);
+    };
+
+    const endStroke = () => {
+        strokePointerId = null;
+        if (autoScrollFrame) {
+            cancelAnimationFrame(autoScrollFrame);
+            autoScrollFrame = 0;
+        }
+        if (!availabilityIsPainting) {
+            return;
+        }
+        availabilityIsPainting = false;
+        availabilityGridEl.classList.remove('painting');
+    };
+
+    const cancelPendingPress = () => {
+        if (pendingPress) {
+            clearTimeout(pendingPress.timer);
+            pendingPress = null;
+        }
+    };
+
+    // While a stroke is active the page and grid can't scroll by touch, so
+    // holding the pointer near an edge of the scroll box scrolls it instead
+    // (faster the closer to the edge), painting whatever slides underneath.
+    // Edges are measured inside the sticky header row / time-label column
+    // and clipped to the viewport, since those are where the finger can
+    // actually reach a cell.
+    const autoScrollStep = () => {
+        autoScrollFrame = 0;
+        const scrollEl = availabilityGridEl.closest('.availabilityGridScroll');
+        if (!availabilityIsPainting || !scrollEl) {
+            return;
+        }
+        const box = scrollEl.getBoundingClientRect();
+        const cornerBox = availabilityGridEl.querySelector('.availabilityGridCorner')?.getBoundingClientRect();
+        const top = Math.max(cornerBox ? cornerBox.bottom : box.top, 0);
+        const left = Math.max(cornerBox ? cornerBox.right : box.left, 0);
+        const bottom = Math.min(box.bottom, window.innerHeight);
+        const right = Math.min(box.right, window.innerWidth);
+        const edge = AVAILABILITY_AUTOSCROLL_EDGE_PX;
+        const speed = (distanceIntoEdge) => Math.ceil(AVAILABILITY_AUTOSCROLL_MAX_STEP_PX * Math.min(1, distanceIntoEdge / edge));
+        let dx = 0;
+        let dy = 0;
+        if (lastPointerY < top + edge) {
+            dy = -speed(top + edge - lastPointerY);
+        } else if (lastPointerY > bottom - edge) {
+            dy = speed(lastPointerY - (bottom - edge));
+        }
+        if (lastPointerX < left + edge) {
+            dx = -speed(left + edge - lastPointerX);
+        } else if (lastPointerX > right - edge) {
+            dx = speed(lastPointerX - (right - edge));
+        }
+        if (!dx && !dy) {
+            return;
+        }
+        const beforeTop = scrollEl.scrollTop;
+        const beforeLeft = scrollEl.scrollLeft;
+        scrollEl.scrollTop += dy;
+        scrollEl.scrollLeft += dx;
+        if (scrollEl.scrollTop === beforeTop && scrollEl.scrollLeft === beforeLeft) {
+            return; // already at the end in that direction
+        }
+        paintCellAtPoint(lastPointerX, lastPointerY);
+        autoScrollFrame = requestAnimationFrame(autoScrollStep);
+    };
+
+    availabilityGridEl.addEventListener('pointerdown', (event) => {
+        lastPointerType = event.pointerType;
+        const cell = event.target.closest('.availabilityGridCell');
+        if (!cell || strokePointerId !== null || pendingPress) {
+            return; // not a cell, or a second finger while one is already busy
+        }
+        if (event.pointerType === 'mouse' && event.button !== 0) {
+            return;
+        }
+        lastPointerX = event.clientX;
+        lastPointerY = event.clientY;
+
+        const strokesImmediately = event.pointerType === 'mouse'
+            || (event.pointerType === 'pen' && availabilityGridEl.classList.contains('penReady'));
+        if (strokesImmediately) {
+            event.preventDefault();
+            try {
+                availabilityGridEl.setPointerCapture(event.pointerId);
+            } catch (error) {
+                // Pointer already gone (released between dispatch and here) - the stroke just ends on the next pointerup.
+            }
+            startStroke(cell, event.pointerId);
+            return;
+        }
+
+        const pointerId = event.pointerId;
+        pendingPress = {
+            pointerId,
+            cell,
+            startX: event.clientX,
+            startY: event.clientY,
+            timer: setTimeout(() => {
+                if (!pendingPress || pendingPress.pointerId !== pointerId) {
+                    return;
+                }
+                const armedCell = pendingPress.cell;
+                pendingPress = null;
+                startStroke(armedCell, pointerId);
+                try {
+                    navigator.vibrate?.(12);
+                } catch (error) {
+                    // Haptics are a nice-to-have; the .painting outline is the real cue.
+                }
+            }, AVAILABILITY_TOUCH_HOLD_MS)
+        };
+    });
+
+    availabilityGridEl.addEventListener('pointermove', (event) => {
+        if (event.pointerType === 'pen' && event.buttons === 0) {
+            availabilityGridEl.classList.add('penReady');
+        }
+        if (pendingPress && event.pointerId === pendingPress.pointerId) {
+            const movedX = event.clientX - pendingPress.startX;
+            const movedY = event.clientY - pendingPress.startY;
+            if (Math.hypot(movedX, movedY) > AVAILABILITY_TOUCH_SLOP_PX) {
+                cancelPendingPress(); // moving before the hold completes means scrolling
+            }
+            return;
+        }
+        if (!availabilityIsPainting || event.pointerId !== strokePointerId) {
+            return;
+        }
+        lastPointerX = event.clientX;
+        lastPointerY = event.clientY;
+        paintCellAtPoint(lastPointerX, lastPointerY);
+        if (!autoScrollFrame) {
+            autoScrollFrame = requestAnimationFrame(autoScrollStep);
+        }
+    });
+
+    // Ends are listened for on window, not the grid: if the grid is rebuilt
+    // mid-gesture (hour range change) the captured cell is detached and the
+    // release no longer bubbles through the grid, which would otherwise
+    // leave strokePointerId set and block every later stroke.
+    window.addEventListener('pointerup', (event) => {
+        if (pendingPress && event.pointerId === pendingPress.pointerId) {
+            // Lifted before the hold armed: a tap paints just this one cell.
+            const tappedCell = pendingPress.cell;
+            cancelPendingPress();
+            startStroke(tappedCell, event.pointerId);
+            endStroke();
+            return;
+        }
+        if (event.pointerId === strokePointerId) {
+            endStroke();
+        }
+    });
+
+    window.addEventListener('pointercancel', (event) => {
+        if (pendingPress && event.pointerId === pendingPress.pointerId) {
+            cancelPendingPress(); // the browser started a scroll - nothing to paint
+        }
+        if (event.pointerId === strokePointerId) {
+            endStroke();
+        }
+    });
+
+    availabilityGridEl.addEventListener('pointerleave', (event) => {
+        if (event.pointerType === 'pen' && event.buttons === 0) {
+            availabilityGridEl.classList.remove('penReady');
+        }
+    });
+
+    availabilityGridEl.addEventListener('touchmove', (event) => {
+        if (availabilityIsPainting && event.cancelable) {
+            event.preventDefault();
+        }
+    }, { passive: false });
+
+    // A long press would otherwise pop the context menu / iOS callout right
+    // as the stroke arms.
+    availabilityGridEl.addEventListener('contextmenu', (event) => {
+        if (lastPointerType !== 'mouse' && event.target.closest('.availabilityGridCell')) {
+            event.preventDefault();
+        }
+    });
+}
+
+function scheduleAvailabilitySave() {
+    if (availabilitySaveTimer) {
+        clearTimeout(availabilitySaveTimer);
+    }
+    if (availabilitySaveStatus) {
+        availabilitySaveStatus.textContent = 'Saving...';
+    }
+    // Debounced, not per-cell/per-stroke - a whole painting session
+    // coalesces into one write ~1.5s after the last change, given the
+    // earlier write-quota incident this session (see
+    // single-firebase-project-no-staging memory / availability-plan.md's
+    // Risks). The beforeunload flush below covers closing the tab before
+    // this fires.
+    availabilitySaveTimer = setTimeout(() => {
+        availabilitySaveTimer = null;
+        // Found live: a slow drag that pauses over 1.5s with the pointer
+        // still down fired a write mid-stroke (7 writes for 7 cells with
+        // ~3s gaps). Never save while a stroke is in progress - check again
+        // one debounce later, so the save lands after the stroke ends.
+        if (availabilityIsPainting) {
+            scheduleAvailabilitySave();
+            return;
+        }
+        saveAvailabilityNow();
+    }, AVAILABILITY_SAVE_DEBOUNCE_MS);
+}
+
+async function saveAvailabilityNow() {
+    // Real bug caught by peer review: this used to resolve the target via
+    // getSelectedGroup() at FIRE time (1.5s after the debounce started),
+    // not the group the in-memory grid actually belongs to
+    // (availabilityLoadedForGroupId). Painting in group A, then switching
+    // to group B within that window, would silently write A's grid into
+    // B's availability doc once the timer fired - a real cross-group data
+    // corruption path, not a hypothetical. Snapshotting both the target
+    // group id and the data itself at call time (rather than re-reading
+    // module state after the fact) also means a group-switch reset
+    // happening between now and the await below can't retroactively change
+    // what gets written.
+    const groupId = availabilityLoadedForGroupId;
+    // Backstop for the same privacy promise as applyAvailabilityTimezone:
+    // never create a group-readable doc for a grid nobody painted. Painting
+    // and the "save this untouched grid anyway?" confirm both set the flag
+    // before calling here.
+    if (!groupId || !currentUser || !availabilityWeekdaySlots || !availabilityHasBeenPainted) {
+        return;
+    }
+    const weekdaySlotsToSave = availabilityWeekdaySlots;
+    const timezoneToSave = availabilityTimezone || detectBrowserTimezone();
+    const hasBeenPaintedToSave = availabilityHasBeenPainted;
+    const { doc, setDoc, serverTimestamp } = fs();
+    try {
+        await setDoc(doc(db(), 'groups', groupId, 'availability', currentUser.uid), {
+            weekdaySlots: weekdaySlotsToSave,
+            timezone: timezoneToSave,
+            hasBeenPainted: hasBeenPaintedToSave,
+            updatedAt: serverTimestamp()
+        });
+        if (availabilitySaveStatus) {
+            availabilitySaveStatus.textContent = 'Saved';
+            setTimeout(() => {
+                if (availabilitySaveStatus && availabilitySaveStatus.textContent === 'Saved') {
+                    availabilitySaveStatus.textContent = '';
+                }
+            }, 2000);
+        }
+    } catch (error) {
+        console.error('Failed to save availability:', error);
+        if (availabilitySaveStatus) {
+            availabilitySaveStatus.textContent = describeGroupWriteError(error, 'Could not save.');
+        }
+    }
+}
+
+window.addEventListener('beforeunload', () => {
+    if (availabilitySaveTimer) {
+        // Can't await inside beforeunload - firing the write is still
+        // better than silently losing the last stroke if the debounce
+        // hadn't settled yet.
+        clearTimeout(availabilitySaveTimer);
+        availabilitySaveTimer = null;
+        saveAvailabilityNow();
+    }
+});
+
+// Legacy IANA names some engines (Chromium's ICU, historically) still report
+// from both Intl.supportedValuesOf and resolvedOptions() - mapped to the
+// modern name so search ("Kolkata"), display, and same-zone comparison all
+// work regardless of which spelling a browser hands back. Only swapped to
+// the modern name when this engine actually accepts it (Europe/Kyiv is
+// newer than some ICU builds).
+const LEGACY_TIMEZONE_ALIASES = {
+    'Asia/Calcutta': 'Asia/Kolkata',
+    'Asia/Katmandu': 'Asia/Kathmandu',
+    'Europe/Kiev': 'Europe/Kyiv',
+    'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+    'Asia/Rangoon': 'Asia/Yangon',
+    'America/Godthab': 'America/Nuuk',
+    'Atlantic/Faeroe': 'Atlantic/Faroe',
+    'Pacific/Truk': 'Pacific/Chuuk',
+    'Pacific/Ponape': 'Pacific/Pohnpei',
+    'America/Buenos_Aires': 'America/Argentina/Buenos_Aires',
+    'America/Indianapolis': 'America/Indiana/Indianapolis',
+    'America/Louisville': 'America/Kentucky/Louisville'
+};
+const MODERN_TO_LEGACY_TIMEZONE = Object.fromEntries(
+    Object.entries(LEGACY_TIMEZONE_ALIASES).map(([legacy, modern]) => [modern, legacy])
+);
+
+// Canonical case (Intl accepts "america/edmonton" and hands back
+// "America/Edmonton") plus legacy -> modern name. Returns null for anything
+// that isn't a real zone. Every zone comparison in the picker goes through
+// this, never raw ===.
+function normalizeTimezoneName(zone) {
+    if (!zone || !luxon.IANAZone.isValidZone(zone)) {
+        return null;
+    }
+    let canonical = zone;
+    try {
+        canonical = new Intl.DateTimeFormat('en-US', { timeZone: zone }).resolvedOptions().timeZone || zone;
+    } catch {
+        canonical = zone;
+    }
+    const modern = LEGACY_TIMEZONE_ALIASES[canonical];
+    return modern && luxon.IANAZone.isValidZone(modern) ? modern : canonical;
+}
+
+// Profile save first, local state only after it succeeds - so a failed
+// write never leaves the label (or the next debounced availability save)
+// using a zone that was never actually stored. Then re-stamps the zone
+// onto every OTHER group's availability doc this user has painted, so
+// teammates there don't keep seeing the grid in the old zone. One write
+// per painted group, only on this rare action. updateDoc on a group the
+// user never painted fails with not-found - expected, ignored.
+async function applyAvailabilityTimezone(zone) {
+    if (!currentUser) {
+        return;
+    }
+    const normalized = normalizeTimezoneName(zone);
+    const current = normalizeTimezoneName(availabilityTimezone || detectBrowserTimezone());
+    if (!normalized || normalized === current) {
+        return;
+    }
+
+    await saveProfileTimezone(currentUser, normalized);
+
+    availabilityTimezone = normalized;
+    if (availabilityTimezoneName) {
+        availabilityTimezoneName.textContent = normalized;
+    }
+    // The paint grid's column order and dates come from the SAVED zone (see
+    // getAvailabilityColumns), so rebuild it now. Found live: without this
+    // the heatmap and Best times switched days immediately but the paint
+    // grid kept the old zone's column order until the 60-second timer fired.
+    if (availabilityWeekdaySlots) {
+        buildAvailabilityGridDomIfNeeded();
+        paintAllAvailabilityCellsFromState();
+    }
+    // Only a PAINTED grid is saved here. An untouched auto-init grid must
+    // not become a group-readable doc just because the zone changed
+    // (privacy.html promises teammates only see the zone on a grid you've
+    // actually painted); its doc gets the new zone on the first real paint.
+    // An unpainted current group falls through to the existence-checked
+    // loop below instead, which also covers an older doc that exists with
+    // hasBeenPainted false.
+    const currentGroupHandledByDebounce = Boolean(availabilityWeekdaySlots && availabilityHasBeenPainted);
+    if (currentGroupHandledByDebounce) {
+        scheduleAvailabilitySave();
+    }
+
+    // getDoc first rather than relying on updateDoc's not-found: rules run
+    // before the existence check, and the update rule's diff(resource.data)
+    // errors on a missing doc - so an unpainted group comes back as
+    // permission-denied, indistinguishable from a real failure. One read
+    // per group, only on this rare action.
+    const { doc, getDoc, updateDoc, serverTimestamp } = fs();
+    const otherGroups = (groups || []).filter((group) => !(currentGroupHandledByDebounce && group.id === availabilityLoadedForGroupId));
+    await Promise.all(otherGroups.map(async (group) => {
+        const availabilityRef = doc(db(), 'groups', group.id, 'availability', currentUser.uid);
+        try {
+            const snapshot = await getDoc(availabilityRef);
+            if (!snapshot.exists()) {
+                return;
+            }
+            await updateDoc(availabilityRef, { timezone: normalized, updatedAt: serverTimestamp() });
+        } catch (error) {
+            console.error(`Failed to update timezone on group ${group.id} availability:`, error);
+        }
+    }));
+}
+
+// Timezone picker - same build-fresh-on-open .taskEditorOverlay chrome as
+// the handoff picker (see openHandoffPicker), reusing its list/row styling
+// and, like it, plain buttons rather than a listbox role (no arrow-key
+// navigation to promise). Each row shows the zone's CURRENT local time, so
+// someone can recognize "that's evening there" without knowing UTC
+// offsets - the real fix for a misconfigured OS zone (e.g. Regina vs
+// Edmonton, which share an offset for part of the year) is being able to
+// see and pick, not type IANA syntax from memory. Search matches the zone
+// name (and its legacy alias); IANA has no entry for every city (no
+// "Calgary"), an accepted v1 limitation.
+let timezonePickerOverlay = null;
+let timezonePickerKeydownHandler = null;
+let timezonePickerReturnFocusEl = null;
+
+function getAllTimezoneNames() {
+    let zones = [];
+    try {
+        zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+    } catch {
+        zones = [];
+    }
+    const normalized = new Set();
+    zones.forEach((zone) => {
+        const name = normalizeTimezoneName(zone);
+        if (name) {
+            normalized.add(name);
+        }
+    });
+    normalized.add('UTC');
+    return Array.from(normalized).sort();
+}
+
+function formatTimezoneLabel(zone) {
+    return zone.replace(/_/g, ' ');
+}
+
+function openTimezonePicker() {
+    if (!currentUser) {
+        return;
+    }
+    closeTimezonePicker();
+    timezonePickerReturnFocusEl = document.activeElement;
+
+    const detected = normalizeTimezoneName(detectBrowserTimezone()) || 'UTC';
+    const current = normalizeTimezoneName(availabilityTimezone) || detected;
+    const allZones = getAllTimezoneNames();
+    [current, detected].forEach((zone) => {
+        if (!allZones.includes(zone)) {
+            allZones.push(zone);
+        }
+    });
+
+    // Formatted once per open, not per keystroke - ~400 Luxon zone
+    // conversions on every input event is real jank on a low-end phone.
+    const now = luxon.DateTime.now();
+    const timeByZone = new Map(allZones.map((zone) => [zone, now.setZone(zone).toFormat('h:mm a, ccc')]));
+    const searchTextByZone = new Map(allZones.map((zone) => [
+        zone,
+        `${zone} ${MODERN_TO_LEGACY_TIMEZONE[zone] || ''}`.toLowerCase()
+    ]));
+
+    timezonePickerOverlay = document.createElement('div');
+    timezonePickerOverlay.className = 'taskEditorOverlay timezonePickerOverlay open';
+    timezonePickerOverlay.innerHTML = `
+        <div class="taskEditorCard handoffPickerCard" role="dialog" aria-modal="true" aria-label="Choose your timezone">
+            <h2>Your Timezone</h2>
+            <p class="handoffPickerHint">Pick the zone you're actually in. The time next to each one is the time there right now. Your painted hours keep their clock times in the new zone, so 9 to 5 stays 9 to 5.</p>
+            <input type="text" class="editorTextInput timezonePickerSearch" placeholder="Search, e.g. Edmonton, Kolkata, London" autocomplete="off" spellcheck="false" aria-label="Search timezones">
+            <div class="handoffPickerList timezonePickerList" aria-label="Timezones"></div>
+            <div class="editorActions">
+                <button type="button" class="editorCancelBtn timezonePickerCancelBtn">Cancel</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(timezonePickerOverlay);
+
+    const card = timezonePickerOverlay.querySelector('.taskEditorCard');
+    const searchInput = timezonePickerOverlay.querySelector('.timezonePickerSearch');
+    const list = timezonePickerOverlay.querySelector('.timezonePickerList');
+
+    const pick = (zone) => {
+        playClickSound();
+        closeTimezonePicker();
+        applyAvailabilityTimezone(zone).catch((error) => {
+            console.error('Failed to save timezone:', error);
+            alert(describeGroupWriteError(error, 'Could not save your timezone.'));
+        });
+    };
+
+    const buildRow = (zone, tag) => {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.classList.add('handoffPickerRow', 'timezonePickerRow');
+        if (zone === current) {
+            row.classList.add('selected');
+            row.setAttribute('aria-current', 'true');
+        }
+        const name = document.createElement('span');
+        name.classList.add('timezonePickerName');
+        name.textContent = formatTimezoneLabel(zone);
+        row.appendChild(name);
+        if (tag) {
+            const tagEl = document.createElement('span');
+            tagEl.classList.add('timezonePickerTag');
+            tagEl.textContent = tag;
+            row.appendChild(tagEl);
+        }
+        const time = document.createElement('span');
+        time.classList.add('timezonePickerTime');
+        time.textContent = timeByZone.get(zone) || '';
+        row.appendChild(time);
+        row.addEventListener('click', () => pick(zone));
+        return row;
+    };
+
+    let visibleZones = [];
+    const renderList = () => {
+        const query = searchInput.value.trim().toLowerCase().replace(/\s+/g, '_');
+        list.textContent = '';
+        visibleZones = [];
+
+        if (!query) {
+            // Common case first: the saved zone, and the auto-detected one
+            // if it differs, pinned at the top - a correct auto-detect needs
+            // zero searching.
+            const pinned = current === detected ? [current] : [current, detected];
+            pinned.forEach((zone) => {
+                let tag = 'Detected';
+                if (zone === current) {
+                    tag = current === detected ? 'Current, detected' : 'Current';
+                }
+                list.appendChild(buildRow(zone, tag));
+                visibleZones.push(zone);
+            });
+            allZones.filter((zone) => !pinned.includes(zone)).forEach((zone) => {
+                list.appendChild(buildRow(zone));
+                visibleZones.push(zone);
+            });
+            return;
+        }
+
+        visibleZones = allZones.filter((zone) => searchTextByZone.get(zone).includes(query));
+        // A valid zone the browser's list doesn't include (older browsers
+        // without Intl.supportedValuesOf) can still be typed exactly -
+        // normalized first, so an oddly-cased entry is saved canonically.
+        if (visibleZones.length === 0) {
+            const typed = normalizeTimezoneName(searchInput.value.trim());
+            if (typed) {
+                timeByZone.set(typed, now.setZone(typed).toFormat('h:mm a, ccc'));
+                visibleZones = [typed];
+            }
+        }
+        if (visibleZones.length === 0) {
+            const empty = document.createElement('p');
+            empty.classList.add('handoffPickerHint');
+            empty.textContent = 'No matching timezone. Try a nearby major city or your region name.';
+            list.appendChild(empty);
+            return;
+        }
+        visibleZones.forEach((zone) => list.appendChild(buildRow(zone)));
+    };
+
+    renderList();
+    searchInput.addEventListener('input', renderList);
+    searchInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && visibleZones.length > 0) {
+            event.preventDefault();
+            pick(visibleZones[0]);
+        }
+    });
+
+    // Bound on document (not the overlay) so Esc still works after focus
+    // falls to <body>, and Tab is trapped inside the card instead of
+    // walking into the page behind the overlay. Removed in closeTimezonePicker.
+    timezonePickerKeydownHandler = (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeTimezonePicker();
+            return;
+        }
+        if (event.key !== 'Tab') {
+            return;
+        }
+        const focusables = Array.from(card.querySelectorAll('input, button')).filter((el) => !el.disabled);
+        if (focusables.length === 0) {
+            return;
+        }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (!card.contains(document.activeElement)) {
+            event.preventDefault();
+            first.focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    };
+    document.addEventListener('keydown', timezonePickerKeydownHandler);
+
+    timezonePickerOverlay.querySelector('.timezonePickerCancelBtn').addEventListener('click', () => {
+        playClickSound();
+        closeTimezonePicker();
+    });
+    timezonePickerOverlay.addEventListener('click', (event) => {
+        if (event.target === timezonePickerOverlay) {
+            closeTimezonePicker();
+        }
+    });
+
+    // Skip autofocus on touch devices - it pops the on-screen keyboard
+    // immediately and covers the pinned rows the common case needs.
+    if (window.matchMedia('(pointer: coarse)').matches) {
+        card.setAttribute('tabindex', '-1');
+        card.focus();
+    } else {
+        searchInput.focus();
+    }
+}
+
+function closeTimezonePicker() {
+    if (timezonePickerKeydownHandler) {
+        document.removeEventListener('keydown', timezonePickerKeydownHandler);
+        timezonePickerKeydownHandler = null;
+    }
+    if (!timezonePickerOverlay) {
+        return;
+    }
+    timezonePickerOverlay.remove();
+    timezonePickerOverlay = null;
+    const returnTo = timezonePickerReturnFocusEl && document.contains(timezonePickerReturnFocusEl)
+        ? timezonePickerReturnFocusEl
+        : availabilityChangeTimezoneBtn;
+    timezonePickerReturnFocusEl = null;
+    returnTo?.focus();
+}
+
+availabilityChangeTimezoneBtn?.addEventListener('click', () => {
+    playClickSound();
+    openTimezonePicker();
+});
+
+// ---------------------------------------------------------------------
+// Availability Phase 5 - "best times to meet" panel. Always live: rebuilt
+// from getScorableGroupMembers (the one shared availability listener, see
+// ensureGroupAvailabilitySubscription) on every renderApp, memoized so an
+// unrelated re-render (a task edit, say) doesn't redo the search.
+//
+// Three input fixes on top of findBestMeetingTimes, all found by reading
+// availability-timezone.js against how the grid actually stores data:
+// - hourRange is always the FULL day ({0, 24}), because weekdaySlots is
+//   always 96 slots from midnight - passing the group's display range
+//   (7-23 by default) would shift every slot by startHour hours.
+// - The group's display range is each member's "usual hours" (in their OWN
+//   local time). A window outside anyone's usual hours is never suggested
+//   (findBestMeetingTimes' rollingWindow.viewHourRange). New members start
+//   all-free around the clock, so without this the top pick would be
+//   something like "Tuesday 12:00 am, everyone free". This used to mask
+//   those hours to BUSY, which let "3:00 am" through as a partial match
+//   with the reason "<name> is busy" for a slot they had left free.
+// - The search is a ROLLING window: every 15-min instant from the next slot
+//   boundary through now + 7 days, each member read at that instant in
+//   their own zone (findBestMeetingTimes' rollingWindow option). This used
+//   to use the weekAnchor path anchored on the viewer's today + 3, which
+//   gave members far apart in zone (Kolkata vs Edmonton) week spans offset
+//   by most of a day, so a slot free for everyone right now could score as
+//   busy - see cases 8 and 9 in availability-timezone.test.html. Starting
+//   at the next slot boundary also means nothing already under way or in
+//   the past is ever suggested, with no separate past-masking step.
+// ---------------------------------------------------------------------
+
+const availabilityRecommendPanel = document.querySelector('.availabilityRecommendPanel');
+const AVAILABILITY_FULL_DAY_RANGE = { startHour: 0, endHour: 24 };
+const AVAILABILITY_MEETING_LENGTH_OPTIONS = [
+    { minutes: 15, label: '15 min' },
+    { minutes: 30, label: '30 min' },
+    { minutes: 45, label: '45 min' },
+    { minutes: 60, label: '1 hour' },
+    { minutes: 90, label: '1.5 hours' }
+];
+
+// Client-side only, deliberately never written to Firestore - each viewer
+// picks a length for their own exploring, it isn't a group setting.
+let availabilityMeetingLengthMinutes = 30;
+let availabilityRecommendRenderKey = null;
+let availabilityRecommendListEl = null;
+let availabilityRecommendNoteEl = null;
+
+function buildAvailabilityRecommendPanelIfNeeded() {
+    if (!availabilityRecommendPanel || availabilityRecommendListEl) {
+        return;
+    }
+
+    const header = document.createElement('div');
+    header.className = 'availabilityRecommendHeader';
+
+    const title = document.createElement('p');
+    title.className = 'availabilityRecommendTitle';
+    title.textContent = 'Best times to meet';
+
+    const lengthLabel = document.createElement('label');
+    lengthLabel.className = 'availabilityRecommendLengthLabel';
+    lengthLabel.append('Meeting length ');
+    const lengthSelect = document.createElement('select');
+    lengthSelect.className = 'availabilityRecommendLengthSelect';
+    AVAILABILITY_MEETING_LENGTH_OPTIONS.forEach(({ minutes, label }) => {
+        const option = document.createElement('option');
+        option.value = String(minutes);
+        option.textContent = label;
+        option.selected = minutes === availabilityMeetingLengthMinutes;
+        lengthSelect.appendChild(option);
+    });
+    lengthSelect.addEventListener('change', () => {
+        availabilityMeetingLengthMinutes = Number(lengthSelect.value) || 30;
+        availabilityRecommendRenderKey = null;
+        renderAvailabilityRecommendations(getSelectedGroup());
+    });
+    lengthLabel.appendChild(lengthSelect);
+
+    header.appendChild(title);
+    header.appendChild(lengthLabel);
+
+    availabilityRecommendListEl = document.createElement('ol');
+    availabilityRecommendListEl.className = 'availabilityRecommendList';
+
+    availabilityRecommendNoteEl = document.createElement('p');
+    availabilityRecommendNoteEl.className = 'availabilityRecommendNote';
+
+    availabilityRecommendPanel.appendChild(header);
+    availabilityRecommendPanel.appendChild(availabilityRecommendListEl);
+    availabilityRecommendPanel.appendChild(availabilityRecommendNoteEl);
+}
+
+// Appends "Sam", "Sam and Alex", "Sam, Alex and Jo" - each name with its
+// member-color dot, same dots the calendar legend uses.
+function appendAvailabilityMemberNames(parent, members, group) {
+    members.forEach((member, index) => {
+        if (index > 0) {
+            parent.append(index === members.length - 1 ? ' and ' : ', ');
+        }
+        const nameEl = document.createElement('span');
+        nameEl.className = 'availabilityRecommendMember';
+        const dot = document.createElement('span');
+        dot.classList.add('calendarChipMemberDot', `calendarMemberColor-${getGroupMemberColorIndex(member.uid, group)}`);
+        nameEl.appendChild(dot);
+        nameEl.append(member.name);
+        parent.appendChild(nameEl);
+    });
+}
+
+function formatAvailabilityRecommendWhen(start, end, viewerZone) {
+    const localStart = start.setZone(viewerZone);
+    const localEnd = end.setZone(viewerZone);
+    const today = luxon.DateTime.local().setZone(viewerZone).startOf('day');
+    const dayOffset = Math.round(localStart.startOf('day').diff(today, 'days').days);
+    const dayName = dayOffset === 0 ? 'Today' : dayOffset === 1 ? 'Tomorrow' : localStart.toFormat('cccc');
+    const startMeridiem = localStart.toFormat('a').toLowerCase();
+    const endMeridiem = localEnd.toFormat('a').toLowerCase();
+    const timeRange = startMeridiem === endMeridiem
+        ? `${localStart.toFormat('h:mm')} to ${localEnd.toFormat('h:mm')} ${endMeridiem}`
+        : `${localStart.toFormat('h:mm')} ${startMeridiem} to ${localEnd.toFormat('h:mm')} ${endMeridiem}`;
+    return `${dayName}, ${localStart.toFormat('LLL d')} · ${timeRange}`;
+}
+
+function buildAvailabilityRecommendItem(recommendation, rank, scoredCount, hasUnsetMembers, group, viewerZone) {
+    const item = document.createElement('li');
+    item.className = 'availabilityRecommendItem';
+    if (recommendation.missing.length === 0) {
+        item.classList.add('isEveryone');
+    }
+
+    const rankEl = document.createElement('span');
+    rankEl.className = 'availabilityRecommendRank';
+    rankEl.textContent = String(rank);
+
+    const body = document.createElement('div');
+    body.className = 'availabilityRecommendBody';
+
+    const when = document.createElement('p');
+    when.className = 'availabilityRecommendWhen';
+    when.textContent = formatAvailabilityRecommendWhen(recommendation.start, recommendation.end, viewerZone);
+
+    const why = document.createElement('p');
+    why.className = 'availabilityRecommendWhy';
+    const { missing, ifNeeded } = recommendation;
+    if (missing.length === 0) {
+        why.append(hasUnsetMembers ? 'Everyone who has set their availability is free' : 'Everyone is free');
+        if (ifNeeded.length > 0) {
+            why.append(', but ');
+            appendAvailabilityMemberNames(why, ifNeeded, group);
+            why.append(' marked this as if needed.');
+        } else {
+            why.append('.');
+        }
+    } else {
+        why.append(`${scoredCount - missing.length} of ${scoredCount} can make it. `);
+        appendAvailabilityMemberNames(why, missing, group);
+        why.append(missing.length === 1 ? ' is busy.' : ' are busy.');
+        if (ifNeeded.length > 0) {
+            why.append(' ');
+            appendAvailabilityMemberNames(why, ifNeeded, group);
+            why.append(' marked this as if needed.');
+        }
+    }
+
+    body.appendChild(when);
+    body.appendChild(why);
+    item.appendChild(rankEl);
+    item.appendChild(body);
+    return item;
+}
+
+function renderAvailabilityRecommendations(group) {
+    if (!availabilityRecommendPanel) {
+        return;
+    }
+    if (!group) {
+        availabilityRecommendPanel.classList.add('hidden');
+        availabilityRecommendRenderKey = null;
+        return;
+    }
+    buildAvailabilityRecommendPanelIfNeeded();
+    availabilityRecommendPanel.classList.remove('hidden');
+
+    const viewerZone = getAvailabilityViewerZone();
+    const viewHourRange = getAvailabilityHourRange(group);
+    const scoredMembers = getScorableGroupMembers(group)
+        .filter((member) => member.hasBeenPainted && luxon.IANAZone.isValidZone(member.timezone));
+    const scoredUids = new Set(scoredMembers.map((member) => member.uid));
+    const unsetMembers = group.memberIds
+        .map((uid, index) => (scoredUids.has(uid) ? null : { uid, name: resolveMemberName(uid, group.memberNames?.[index], groupTasks) }))
+        .filter(Boolean);
+
+    // Re-search only when an input actually changed, or a new 15-min slot
+    // started (so a window that just began drops off the list).
+    const now = luxon.DateTime.local();
+    const renderKey = JSON.stringify([
+        group.id,
+        availabilityMeetingLengthMinutes,
+        viewerZone,
+        viewHourRange.startHour,
+        viewHourRange.endHour,
+        Math.floor(now.toMillis() / (15 * 60 * 1000)),
+        scoredMembers.map((member) => [member.uid, member.name, member.timezone, member.weekdaySlots]),
+        unsetMembers.map((member) => member.name)
+    ]);
+    if (renderKey === availabilityRecommendRenderKey) {
+        return;
+    }
+    availabilityRecommendRenderKey = renderKey;
+
+    availabilityRecommendListEl.innerHTML = '';
+    availabilityRecommendNoteEl.textContent = '';
+
+    const addEmptyMessage = (text) => {
+        const empty = document.createElement('li');
+        empty.className = 'availabilityRecommendEmpty';
+        empty.textContent = text;
+        availabilityRecommendListEl.appendChild(empty);
+    };
+
+    if (scoredMembers.length < 2) {
+        addEmptyMessage('Best times show up here once at least 2 members have set their availability.');
+    } else {
+        // findBestMeetingTimes drops windows nobody can make, and any window
+        // outside ANY scored member's usual hours (viewHourRange, in their
+        // own zone) - so everyone it lists as missing really marked busy.
+        const recommendations = findBestMeetingTimes(
+            scoredMembers,
+            availabilityMeetingLengthMinutes,
+            AVAILABILITY_FULL_DAY_RANGE,
+            null,
+            { rollingWindow: { startUtc: now.toUTC(), days: 7, viewHourRange } }
+        );
+
+        if (recommendations.length === 0) {
+            addEmptyMessage("No time in the next 7 days works for anyone within everyone's usual hours yet.");
+        } else {
+            recommendations.forEach((recommendation, index) => {
+                availabilityRecommendListEl.appendChild(buildAvailabilityRecommendItem(
+                    recommendation,
+                    index + 1,
+                    scoredMembers.length,
+                    unsetMembers.length > 0,
+                    group,
+                    viewerZone
+                ));
+            });
+        }
+    }
+
+    const hourText = `${formatAvailabilityHourLabel(viewHourRange.startHour)} and ${formatAvailabilityHourLabel(viewHourRange.endHour % 24)}`;
+    availabilityRecommendNoteEl.append(`Only times between ${hourText} in each person's own time zone are suggested.`);
+    if (unsetMembers.length > 0) {
+        availabilityRecommendNoteEl.append(' ');
+        appendAvailabilityMemberNames(availabilityRecommendNoteEl, unsetMembers, group);
+        availabilityRecommendNoteEl.append(unsetMembers.length === 1
+            ? " hasn't set their availability yet, so they aren't counted."
+            : " haven't set their availability yet, so they aren't counted.");
+    }
+}
+
+// renderApp only runs on data changes, so a quiet group could otherwise
+// keep showing a window that already started. Cheap: the render key above
+// makes this a no-op unless a new 15-min slot has begun.
+setInterval(() => {
+    if (availabilitySubView === 'recommend' && availabilityRecommendPanel && !availabilityRecommendPanel.classList.contains('hidden')) {
+        renderAvailabilityRecommendations(getSelectedGroup());
+    }
+}, 60000);
 
 // Group calendar - same .calendarPanel markup/CSS as solo's app.html (see
 // renderGroupCalendarView further down); the member-color legend is the one
@@ -3114,8 +5049,10 @@ function submitSuggestTaskModal() {
     closeSuggestModal();
 }
 
-// Group settings modal - owner/admin only entry point (see .groupSettingsBtn
-// wiring below) for who-can-join and pending join requests. Built the same
+// Group settings modal - open to every member (see .groupSettingsBtn wiring
+// below). Owner/admin get who-can-join and pending join requests; everyone
+// gets the leave/delete danger zone (openGroupSettingsModal gates each
+// section by role). Built the same
 // dynamic way as the suggest-task modal above: reuses .taskEditorOverlay/
 // .taskEditorCard styling, toggled via the .open class. No member/role list
 // duplicated in here - kick/promote controls already live on the roster
@@ -3145,13 +5082,30 @@ function initializeGroupSettingsModal() {
                 </label>
                 <p class="groupSettingsPrivacyNote hidden">Only the group's owner can change this.</p>
             </section>
+            <section class="settingsSection availabilityHoursSetting hidden">
+                <h3>Availability hours</h3>
+                <p class="settingsHint">The hours everyone sees on the availability grid. Painted times outside this window are kept, just hidden.</p>
+                <p class="availabilityHoursSettingCurrent"></p>
+                <div class="availabilityHoursSettingRow">
+                    <label class="availabilityHoursSettingLabel">
+                        From
+                        <select class="availabilityHoursSettingSelect availabilityHoursSettingStart" aria-label="Start hour"></select>
+                    </label>
+                    <label class="availabilityHoursSettingLabel">
+                        To
+                        <select class="availabilityHoursSettingSelect availabilityHoursSettingEnd" aria-label="End hour"></select>
+                    </label>
+                    <button type="button" class="availabilityHoursSettingSaveBtn">Save</button>
+                </div>
+                <p class="availabilityHoursSettingStatus" aria-live="polite"></p>
+            </section>
             <section class="settingsSection groupSettingsRequestsSection">
                 <h3>Pending join requests</h3>
                 <div class="groupSettingsRequestsList"></div>
             </section>
             <section class="settingsSection settingsDangerSection groupSettingsDangerSection">
-                <h3>Leave or delete this group</h3>
-                <p class="settingsHint">Leaving removes you from this group. Deleting removes it - and every task in it - for everyone. Neither can be undone.</p>
+                <h3 class="groupSettingsDangerTitle">Leave or delete this group</h3>
+                <p class="settingsHint groupSettingsDangerHint">Leaving removes you from this group and deletes your availability grid here. Deleting removes it - and every task in it - for everyone. Neither can be undone.</p>
                 <div class="groupSettingsDangerActions"></div>
             </section>
             <div class="editorActions">
@@ -3186,6 +5140,48 @@ function initializeGroupSettingsModal() {
             console.error('Failed to update privacy:', error);
             alert(error.message || 'Could not update who can join.');
         });
+    });
+
+    // Availability hours: start options 0-23, end options 1-24 (24 = the
+    // midnight that ends the day), matching the rule's 0 <= start < end <= 24.
+    const hoursStartSelect = groupSettingsOverlay.querySelector('.availabilityHoursSettingStart');
+    const hoursEndSelect = groupSettingsOverlay.querySelector('.availabilityHoursSettingEnd');
+    for (let hour = 0; hour <= 24; hour += 1) {
+        if (hour < 24) {
+            hoursStartSelect.appendChild(new Option(formatAvailabilityHoursSettingLabel(hour), String(hour)));
+        }
+        if (hour > 0) {
+            hoursEndSelect.appendChild(new Option(formatAvailabilityHoursSettingLabel(hour), String(hour)));
+        }
+    }
+    hoursStartSelect.addEventListener('change', updateAvailabilityHoursSettingValidity);
+    hoursEndSelect.addEventListener('change', updateAvailabilityHoursSettingValidity);
+
+    const hoursSaveBtn = groupSettingsOverlay.querySelector('.availabilityHoursSettingSaveBtn');
+    const hoursStatus = groupSettingsOverlay.querySelector('.availabilityHoursSettingStatus');
+    hoursSaveBtn.addEventListener('click', () => {
+        const groupId = groupSettingsGroupId;
+        const startHour = Number.parseInt(hoursStartSelect.value, 10);
+        const endHour = Number.parseInt(hoursEndSelect.value, 10);
+        if (!groupId || !updateAvailabilityHoursSettingValidity()) {
+            return;
+        }
+        playClickSound();
+        hoursSaveBtn.disabled = true;
+        hoursStatus.classList.remove('isError');
+        hoursStatus.textContent = 'Saving...';
+        setGroupAvailabilityHourRange(groupId, startHour, endHour)
+            .then(() => {
+                hoursStatus.textContent = 'Saved.';
+            })
+            .catch((error) => {
+                console.error('Failed to update availability hours:', error);
+                hoursStatus.classList.add('isError');
+                hoursStatus.textContent = describeGroupWriteError(error, 'Could not save the availability hours.');
+            })
+            .finally(() => {
+                updateAvailabilityHoursSettingValidity();
+            });
     });
 
     groupSettingsOverlay.querySelector('.editorCancelBtn').addEventListener('click', closeGroupSettingsModal);
@@ -3254,6 +5250,63 @@ function renderPendingJoinRequests(requests) {
     });
 }
 
+// 0 and 24 are both midnight (start of day vs end of day) - "Midnight"
+// reads clearer than formatAvailabilityHourLabel's "12AM"/"12PM" for them.
+function formatAvailabilityHoursSettingLabel(hour24) {
+    return (hour24 === 0 || hour24 === 24) ? 'Midnight' : formatAvailabilityHourLabel(hour24);
+}
+
+// Enables Save only for a valid range that differs from what's saved.
+// Returns whether the picked range is valid.
+function updateAvailabilityHoursSettingValidity() {
+    if (!groupSettingsOverlay) {
+        return false;
+    }
+    const startHour = Number.parseInt(groupSettingsOverlay.querySelector('.availabilityHoursSettingStart').value, 10);
+    const endHour = Number.parseInt(groupSettingsOverlay.querySelector('.availabilityHoursSettingEnd').value, 10);
+    const isValid = Number.isInteger(startHour) && Number.isInteger(endHour)
+        && startHour >= 0 && endHour <= 24 && startHour < endHour;
+    const group = (groups || []).find((item) => item.id === groupSettingsGroupId);
+    const saved = getAvailabilityHourRange(group);
+    const isUnchanged = startHour === saved.startHour && endHour === saved.endHour;
+
+    const status = groupSettingsOverlay.querySelector('.availabilityHoursSettingStatus');
+    if (!isValid) {
+        status.classList.add('isError');
+        status.textContent = 'The start time has to be before the end time.';
+    } else if (status.classList.contains('isError') && status.textContent.startsWith('The start time')) {
+        status.classList.remove('isError');
+        status.textContent = '';
+    }
+    groupSettingsOverlay.querySelector('.availabilityHoursSettingSaveBtn').disabled = !isValid || isUnchanged;
+    return isValid;
+}
+
+// Owner-only section (the rule only lets the owner write this field, so
+// admins don't see it at all rather than seeing a control that always fails).
+function renderAvailabilityHoursSetting(group, { resetSelects }) {
+    if (!groupSettingsOverlay) {
+        return;
+    }
+    const section = groupSettingsOverlay.querySelector('.availabilityHoursSetting');
+    const { isOwner } = getMyRoleInGroup(group);
+    section.classList.toggle('hidden', !isOwner);
+    if (!isOwner) {
+        return;
+    }
+    const range = getAvailabilityHourRange(group);
+    groupSettingsOverlay.querySelector('.availabilityHoursSettingCurrent').textContent =
+        `Currently ${formatAvailabilityHoursSettingLabel(range.startHour)} to ${formatAvailabilityHoursSettingLabel(range.endHour)}.`;
+    if (resetSelects) {
+        groupSettingsOverlay.querySelector('.availabilityHoursSettingStart').value = String(range.startHour);
+        groupSettingsOverlay.querySelector('.availabilityHoursSettingEnd').value = String(range.endHour);
+        const status = groupSettingsOverlay.querySelector('.availabilityHoursSettingStatus');
+        status.classList.remove('isError');
+        status.textContent = '';
+    }
+    updateAvailabilityHoursSettingValidity();
+}
+
 function openGroupSettingsModal(group) {
     if (!currentUser) {
         return;
@@ -3261,12 +5314,23 @@ function openGroupSettingsModal(group) {
     initializeGroupSettingsModal();
 
     groupSettingsGroupId = group.id;
-    const { isOwner } = getMyRoleInGroup(group);
+    const { isOwner, isAdmin } = getMyRoleInGroup(group);
+
+    // Plain members only get the danger zone (their way to leave); join
+    // requests are owner/admin business, and the rules deny members reading
+    // them anyway.
+    groupSettingsOverlay.querySelector('.groupSettingsRequestsSection').classList.toggle('hidden', !(isOwner || isAdmin));
+    groupSettingsOverlay.querySelector('.groupSettingsDangerTitle').textContent = isOwner ? 'Leave or delete this group' : 'Leave this group';
+    groupSettingsOverlay.querySelector('.groupSettingsDangerHint').textContent = isOwner
+        ? 'Leaving removes you from this group and deletes your availability grid here. Deleting removes it - and every task in it - for everyone. Neither can be undone.'
+        : 'Leaving removes you from this group and deletes your availability grid here. You\'ll need the invite code to rejoin.';
 
     const privacySelect = groupSettingsOverlay.querySelector('.groupSettingsPrivacySelect');
     privacySelect.value = group.privacy || 'open';
     privacySelect.disabled = !isOwner;
     groupSettingsOverlay.querySelector('.groupSettingsPrivacyNote').classList.toggle('hidden', isOwner);
+
+    renderAvailabilityHoursSetting(group, { resetSelects: true });
 
     // Join requests are already loaded live by ensureJoinRequestsSubscription
     // (started whenever an owner/admin has a group selected, not just while
@@ -4303,8 +6367,21 @@ function ensureJoinRequestsSubscription(group, canSeeJoinRequests) {
         groupJoinRequests = requests;
         renderApp();
     }, (error) => {
+        // Real, verified race: right after createGroup, the local cache
+        // reflects the new group before the server has actually committed
+        // it - renderApp fires from that cache, opens this listener, and
+        // the server-side get(groups/{id}) inside the joinRequests rule
+        // evaluates against a doc that doesn't exist yet, denying it.
+        // Firestore terminates an errored listener permanently, and
+        // leaving joinRequestsSubscriptionKey set would mean this never
+        // retries on its own - only a reload or group switch would recover
+        // it, silently hiding the join-request badge/list for a brand-new
+        // group's owner until then. Clearing it here lets the very next
+        // renderApp() (which fires again momentarily once the server
+        // catches up) re-subscribe and succeed normally.
         console.error('Failed to load join requests:', error);
         groupJoinRequests = [];
+        joinRequestsSubscriptionKey = null;
         renderApp();
     });
 }
@@ -4394,18 +6471,25 @@ function renderApp() {
         groupLeaveBtn?.classList.remove('hidden');
         groupDeleteBtn?.classList.toggle('hidden', !isOwner);
         groupRenameBtn?.classList.toggle('hidden', !isOwner);
-        groupSettingsBtn?.classList.toggle('hidden', !(isOwner || isAdmin));
+        // Every member, not just owner/admin: it's also where plain members
+        // find "Leave group". openGroupSettingsModal hides the owner/admin
+        // sections for them.
+        groupSettingsBtn?.classList.remove('hidden');
         // Re-evaluated every render (not just on group switch) so a role
         // change alone - e.g. you just got promoted to admin - starts the
         // subscription without needing a reload; the idempotency check
         // inside makes this a no-op once nothing's actually changed.
         ensureJoinRequestsSubscription(group, isOwner || isAdmin);
+        // Gated on the Availability tab's Team overlap / Best times views
+        // actually being open - see isGroupAvailabilityDataNeeded.
+        syncGroupAvailabilitySubscription();
         updateGroupSettingsBadge();
         if (groupSettingsOverlay?.classList.contains('open') && groupSettingsGroupId === group.id) {
             // Keep an already-open Settings modal live too, not just the
             // badge - e.g. approving one request updates the remaining list
             // immediately instead of only on next open.
             renderPendingJoinRequests(groupJoinRequests);
+            renderAvailabilityHoursSetting(group, { resetSelects: false });
         }
         renderGroupMemberScopeTabs(group);
         renderMemberRoster(group, { isOwner, isAdmin });
@@ -4418,6 +6502,7 @@ function renderApp() {
         renderHandoffRequestsForYou(group.id);
         renderGroupTasks();
         renderGroupCalendarView();
+        renderGroupAvailabilityView(group);
         // The 6-button deadline-filter row isn't worth much with barely any
         // tasks to filter - condense it down to just All/Overdue (Overdue
         // stays regardless of count, since it's meaningful even at 1 task
@@ -4433,6 +6518,7 @@ function renderApp() {
         maybeShowGroupTeamPulse(group);
     } else {
         ensureJoinRequestsSubscription(null, false);
+        ensureGroupAvailabilitySubscription(null);
         updateNavAttentionBadge(null);
     }
 }
@@ -5542,6 +7628,9 @@ if (groupLeaveBtn) {
         }
         try {
             await leaveGroup(group.id, currentUser);
+            // The button lives in the Group Settings modal, which would
+            // otherwise stay open over whichever group renders next.
+            closeGroupSettingsModal();
             selectedGroupId = null;
             activeMemberScope = 'all';
             renderApp();
@@ -5564,6 +7653,7 @@ if (groupDeleteBtn) {
         }
         try {
             await deleteGroupCompletely(group.id, currentUser);
+            closeGroupSettingsModal();
             selectedGroupId = null;
             activeMemberScope = 'all';
             renderApp();
@@ -6486,6 +8576,17 @@ const GROUP_TOUR_STEPS = [
         title: 'Calendar',
         text: 'Everyone\'s due dates and planned work, laid out by day, each teammate gets their own color so whose task is on what day reads at a glance. Only your own tasks are clickable to edit.',
         beforeShow: () => switchGroupView('calendar')
+    },
+    {
+        // The sub-tab bar, not the grid: it's static HTML, so it exists even
+        // for a group whose availability hasn't loaded yet (the grid stays
+        // hidden until the fetch lands). Leaves whichever sub-view is current
+        // alone rather than forcing one, so the tour never opens the
+        // group-wide listener on its own.
+        selector: '.availabilitySubTabs',
+        title: 'Availability',
+        text: 'Find a time the whole team can meet. Under My availability everything starts out free, so just paint the times you\'re busy (or If needed). Then check Team overlap to see when everyone\'s around, and Best times for the slots that work for the most people.',
+        beforeShow: () => switchGroupView('availability')
     },
     {
         selector: '.groupBrowseAllLink',

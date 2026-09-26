@@ -94,7 +94,7 @@
   <div class="page">
     <a class="backLink" href="app.html">&larr; Back to To-Do List</a>
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated September 14, 2026</p>
+    <p class="updated">Last updated September 25, 2026</p>
 
     <div class="card">
       <h2>What this covers</h2>
@@ -107,6 +107,7 @@
         <tr><td>Display name and profile photo</td><td>From your Google account, or a name you set yourself for group display</td></tr>
         <tr><td>Task content</td><td>Everything you type into a task: text, subtasks, deadlines, priority, difficulty, effort estimate</td></tr>
         <tr><td>Group data</td><td>Group names, invite codes, membership (including when you joined, used once for a "here's what you missed" summary, and whether you've dismissed it), task comments, task suggestions, and task handoff requests (offering one of your own tasks to a specific teammate) if you use the Group workspace</td></tr>
+        <tr><td>Timezone and group availability</td><td>Your timezone (e.g. "America/Edmonton"), detected automatically from your browser and changeable by you, and the weekly free / busy / if-needed grid you paint in a group's Availability tab, if you use it. Painting availability is optional, a group works fine without it</td></tr>
         <tr><td>Brain Dump chat (Dusty)</td><td>What you type, and any image, PDF, or text file you attach, if you use the Brain Dump chat</td></tr>
         <tr><td>Dusty's memory</td><td>Short facts Dusty saves about you during a chat (e.g. a preference, an interest, or a recurring pattern), automatically when he's confident it's useful - see AI features below for how you're shown and can undo each one</td></tr>
         <tr><td>Completed-task history and streaks</td><td>A short record of each task (and each individual step of a task) you complete, its text and when, plus your current/longest streak, total completions, and earned achievement badges - kept in your account so they follow you across devices, not just the browser you completed them in</td></tr>
@@ -116,6 +117,7 @@
 
       <h2>Where it's stored</h2>
       <p>Your account and task data are stored in <strong>Firebase Authentication</strong> and <strong>Cloud Firestore</strong>, both Google Cloud services. We don't run our own separate servers or databases outside of Firebase. Some preferences (like whether auto-sort is on) live only in your browser's local storage and never leave your device.</p>
+      <p>Some fonts, icons, and code libraries are loaded from public content delivery networks (Google Fonts, cdnjs, and jsDelivr). Like any website you load a file from, they receive your IP address and basic browser info when your browser requests those files. None of your account or task data is ever sent to them.</p>
 
       <h2>Cookies</h2>
       <p>We don't set or use any cookies of our own. Staying signed in works through your browser's local storage and IndexedDB instead (the same on-device storage already mentioned above), not a cookie. The only place a cookie could be involved at all is if you sign in with Google: that sign-in popup runs on Google's own domain, and anything it sets there is Google's cookie, under Google's own privacy policy, not something this app reads, sets, or controls. We also don't use any tracking or advertising cookies, ours or anyone else's.</p>
@@ -131,6 +133,7 @@
       <h2>Who else sees it</h2>
       <p>Google Cloud (Firebase) as our hosting and database provider, and Google's Gemini API for the Brain Dump chat described above. We do not sell your data, and we do not currently run any analytics or ad tracking. If that changes, this page will be updated first.</p>
       <p>If you join a Group, the tasks, comments, and suggestions you post there, including anything you ask Dusty to send or post on your behalf and then confirm, are visible to the other members of that specific group, that's the point of a shared workspace, but never to anyone outside it. This includes a task you suggest to one specific teammate: it's visible to everyone else in the group too, the same as everything else posted there, not private between just the two of you. The same is true if you hand off one of your own tasks to a specific teammate: the request, and who it's offered to, are visible to the whole group the same way the task itself already is. Your join date, and whether you've dismissed the one-time "here's what you missed" card shown to new members, are part of the same group membership data every member can already see, like the roster itself. Your current streak and earned achievement badges (not your task history, email, or name) are also kept in a small separate record built specifically to be readable this way, so a group's roster can show them next to your name - the app only ever displays this inside a group you share, though technically it's not restricted to only people you're grouped with the way the rest of your account data is.</p>
+      <p>If you paint your availability in a group, that grid and the timezone it was painted in are visible to the other members of that specific group, so the app can line up everyone's free time and suggest meeting times. It's never shown outside that group, and each group you're in has its own separate grid. The grid only records free, busy, or if-needed for each time slot, never a reason or what you're doing instead. The timezone saved on your own profile stays private to you. Teammates only see the copy attached to a grid you've actually painted. If you leave a group, your grid is deleted. If you're removed by the owner or an admin, it stays in that group's data but is no longer shown to anyone, and it's deleted along with the rest of the group if the group is deleted.</p>
       <p>Feedback you submit from Settings &rarr; Feedback is only ever visible to you and to us (the developer), never to other users, and is used solely to read, triage, and follow up on what you sent.</p>
 
       <h2>Your choices and rights</h2>

@@ -11,7 +11,7 @@
     <!-- Same stylesheet as the solo app, loaded once, the normal way - no
          second build/bundle for this page, so there's nothing for its rules
          to collide with. -->
-    <link rel="stylesheet" href="../style.css?v=20260910f">
+    <link rel="stylesheet" href="../style.css?v=20260926b">
 </head>
 <body class="authChecking">
 
@@ -134,10 +134,12 @@
 
         <p class="groupStatusMsg hidden"></p>
 
-        <!-- Outcome of a ?join=CODE link, handled once at sign-in (see
-             maybeHandleJoinLink in group.js) - its own dedicated banner
-             since it can fire whether the setup screen or a real dashboard
-             ends up showing underneath it, so it can't live inside either. -->
+        <!-- Outcome of creating a group, joining one (by code or via a
+             ?join=CODE link, handled once at sign-in - see maybeHandleJoinLink
+             in group.js), shown through the shared showJoinLinkBanner(). Its
+             own dedicated banner since it can fire whether the setup screen
+             or a real dashboard ends up showing underneath it, so it can't
+             live inside either. -->
         <div class="joinLinkBanner hidden" role="status" aria-live="polite">
             <p class="joinLinkBannerText"></p>
         </div>
@@ -186,6 +188,7 @@
                     <button class="viewTab" type="button" data-view="team" role="tab" aria-selected="false"><i class="fa-solid fa-people-group" aria-hidden="true"></i> Team</button>
                     <button class="viewTab" type="button" data-view="calendar" role="tab" aria-selected="false"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Calendar</button>
                     <button class="viewTab" type="button" data-view="leaderboard" role="tab" aria-selected="false"><i class="fa-solid fa-trophy" aria-hidden="true"></i> Leaderboard</button>
+                    <button class="viewTab" type="button" data-view="availability" role="tab" aria-selected="false"><i class="fa-solid fa-calendar-check" aria-hidden="true"></i> Availability</button>
                     <button class="viewTab" type="button" data-view="activity" role="tab" aria-selected="false"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Activity<span class="historyUnreadDot hidden" aria-label="Unread"></span></button>
                 </div>
 
@@ -199,6 +202,13 @@
                             <div class="groupDashboardHeaderActions">
                                 <button type="button" class="groupAlertToggleBtn hidden">Popup alerts: Off</button>
                                 <button type="button" class="groupSettingsBtn hidden"><i class="fa-solid fa-gear"></i> Group settings<span class="groupSettingsCountBadge"></span></button>
+                                <!-- Not shown here: group.js moves both into the Group
+                                     Settings danger zone at load (see
+                                     initializeGroupSettingsModal). They must exist as static
+                                     markup, since group.js looks them up before building
+                                     that modal. -->
+                                <button type="button" class="groupLeaveBtn hidden">Leave group</button>
+                                <button type="button" class="groupDeleteBtn hidden">Delete group</button>
                             </div>
                         </div>
 
@@ -456,6 +466,95 @@
                         <div class="groupHistoryList"></div>
                     </div>
                 </div>
+
+                <!-- Availability: a paintable weekly grid of busy/if-needed time
+                     (everything else counts as free), per member per group - see
+                     availability-plan.md. Three sub-tabs: your own grid, the
+                     team overlap heatmap, and best meeting times. The heatmap
+                     and recommendation containers below are filled in by JS
+                     (renderAvailabilityHeatmap / renderAvailabilityRecommendations
+                     in group.js). -->
+                <div class="viewPanel hidden" data-view-panel="availability">
+                    <div class="availabilityPanel">
+                        <div class="availabilityHeader">
+                            <p class="availabilityPanelTitle">Availability</p>
+                            <p class="availabilityTimezoneRow">Times shown in <strong class="availabilityTimezoneName"></strong> <button type="button" class="availabilityChangeTimezoneBtn">Change</button></p>
+                        </div>
+
+                        <!-- Sub-tabs instead of stacking your own grid, the team
+                             overlap and the recommendations all on one long page.
+                             Deliberately NOT the .viewTab class - switchGroupView
+                             queries every .viewTab on the page, so reusing it would
+                             hijack the top-level tab logic. -->
+                        <div class="availabilitySubTabs" role="tablist" aria-label="Availability view">
+                            <button type="button" class="availabilitySubTab active" data-availability-view="mine" role="tab" aria-selected="true"><i class="fa-solid fa-pen" aria-hidden="true"></i> My availability</button>
+                            <button type="button" class="availabilitySubTab" data-availability-view="team" role="tab" aria-selected="false"><i class="fa-solid fa-people-group" aria-hidden="true"></i> Team overlap</button>
+                            <button type="button" class="availabilitySubTab" data-availability-view="recommend" role="tab" aria-selected="false"><i class="fa-solid fa-star" aria-hidden="true"></i> Best times</button>
+                        </div>
+
+                        <div class="availabilitySubPanel" data-availability-panel="mine">
+                            <div class="availabilityGridWrap hidden">
+                                <!-- Grid starts fully free by default (see fetchMyAvailability
+                                     in group.js) - painting only ever marks the exceptions, so
+                                     Busy is the primary/default-selected brush, listed first. -->
+                                <div class="availabilityBrushRow" role="group" aria-label="Paint brush">
+                                    <button type="button" class="availabilityBrushBtn" data-brush="busy"><i class="fa-solid fa-ban" aria-hidden="true"></i> Busy</button>
+                                    <button type="button" class="availabilityBrushBtn" data-brush="ifNeeded"><i class="fa-solid fa-circle-question" aria-hidden="true"></i> If needed</button>
+                                    <button type="button" class="availabilityBrushBtn" data-brush="free"><i class="fa-solid fa-check" aria-hidden="true"></i> Free</button>
+                                    <span class="availabilitySaveStatus" aria-live="polite"></span>
+                                </div>
+                                <!-- Week | Day layout toggle: a display filter over the same
+                                     grid (see applyAvailabilityGridLayout in group.js), never a
+                                     separate grid. Own classes and data-grid-layout, not
+                                     .availabilitySubTab / data-availability-view, so the
+                                     sub-tab switcher can't pick these buttons up. -->
+                                <div class="availabilityDayToggleRow">
+                                    <div class="availabilityDayToggle" role="group" aria-label="Grid layout">
+                                        <button type="button" class="availabilityDayToggleBtn active" data-grid-layout="week" aria-pressed="true">Week</button>
+                                        <button type="button" class="availabilityDayToggleBtn" data-grid-layout="day" aria-pressed="false">Day</button>
+                                    </div>
+                                    <div class="availabilityDayNav hidden">
+                                        <button type="button" class="availabilityDayNavBtn" data-day-step="-1" aria-label="Previous day"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+                                        <span class="availabilityDayNavLabel" aria-live="polite"></span>
+                                        <button type="button" class="availabilityDayNavBtn" data-day-step="1" aria-label="Next day"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+                                    </div>
+                                </div>
+                                <!-- Shown only on touch-first devices (see the
+                                     (pointer: coarse) rule in style.css): a plain swipe
+                                     scrolls, so painting a run needs a press-and-hold
+                                     first, which isn't discoverable without a hint. -->
+                                <p class="availabilityTouchHint">Tap a cell to paint it, or press and hold, then drag to paint a run.</p>
+                                <div class="availabilityGridScroll">
+                                    <div class="availabilityGrid"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="availabilitySubPanel hidden" data-availability-panel="team">
+                            <!-- Same Week | Day toggle as the paint grid, sharing one
+                                 layout state (applyAvailabilityGridLayout in group.js).
+                                 Lives outside .availabilityHeatmapWrap because
+                                 renderAvailabilityHeatmap resets that with innerHTML.
+                                 Hidden until the heatmap actually has a grid. -->
+                            <div class="availabilityDayToggleRow availabilityHeatmapLayoutRow hidden">
+                                <div class="availabilityDayToggle" role="group" aria-label="Heatmap layout">
+                                    <button type="button" class="availabilityDayToggleBtn active" data-grid-layout="week" aria-pressed="true">Week</button>
+                                    <button type="button" class="availabilityDayToggleBtn" data-grid-layout="day" aria-pressed="false">Day</button>
+                                </div>
+                                <div class="availabilityDayNav hidden">
+                                    <button type="button" class="availabilityDayNavBtn" data-day-step="-1" aria-label="Previous day"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+                                    <span class="availabilityDayNavLabel" aria-live="polite"></span>
+                                    <button type="button" class="availabilityDayNavBtn" data-day-step="1" aria-label="Next day"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+                                </div>
+                            </div>
+                            <div class="availabilityHeatmapWrap hidden"></div>
+                        </div>
+
+                        <div class="availabilitySubPanel hidden" data-availability-panel="recommend">
+                            <div class="availabilityRecommendPanel hidden"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -559,12 +658,17 @@
         </div>
     </div>
 
-    <script src="../task-shared.js?v=20260910d"></script>
-    <script src="../brain-dump.js?v=20260910c"></script>
-    <script src="../auth-gate.js?v=20260830a"></script>
-    <script src="groups-data.js?v=20260830c"></script>
-    <script src="group.js?v=20260910d"></script>
-    <script type="module" src="../firebase-init.js?v=20260910a"></script>
-    <script src="../settings.js?v=20260910b"></script>
+    <script src="../task-shared.js?v=20260925a"></script>
+    <script src="../brain-dump.js?v=20260925a"></script>
+    <script src="../auth-gate.js?v=20260925a"></script>
+    <script src="groups-data.js?v=20260926c"></script>
+    <!-- Availability feature only - see availability-plan.md. Global,
+         classic-script build (no module wrapper), matching how every other
+         third-party script on this page is loaded. -->
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js"></script>
+    <script src="availability-timezone.js?v=20260926b"></script>
+    <script src="group.js?v=20260926c"></script>
+    <script type="module" src="../firebase-init.js?v=20260925a"></script>
+    <script src="../settings.js?v=20260926c"></script>
 </body>
 </html>
