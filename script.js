@@ -94,6 +94,13 @@ const STORAGE_KEY = 'todoTasksV3';
 const PREV_STORAGE_KEY = 'todoTasksV2';
 const LEGACY_STORAGE_KEY = 'todoTasks';
 const SETTINGS_KEY = 'todoSettingsV1';
+// The activity keys (and SOLO_STATS_BACKFILLED_KEY below) are always used
+// through accountStorageKey(), suffixed with the signed-in uid, so two
+// accounts on one browser never read or backfill from each other's data.
+// The old bare keys are adopted once by adoptLegacyActivityKeys() and then
+// deleted; hydrateActivityFromCloudHistory() fills in the rest from
+// Firestore. SOLO_STATS_BACKFILLED_KEY is suffixed
+// directly in maybeBackfillSoloCompletionStats (it's handed the uid).
 const ACTIVITY_KEY = 'todoActivityV1';
 const ACTIVITY_HISTORY_KEY = 'todoActivityHistoryV1';
 const CELEBRATED_DAILY_CLEAR_KEY = 'todoCelebratedDailyClearDate';
@@ -166,10 +173,16 @@ let activityTooltip = null;
 let soloCompletionStats = { totalCompletions: 0, heavyTaskCompletions: 0, streak: { current: 0, longest: 0, lastCompletionDateKey: null }, badges: [] };
 // taskId -> the Firestore history doc id just created for it, so an undo
 // in the SAME session can delete the right entry without a query. Doesn't
-// survive a reload - an undo after a reload just leaves that one history
-// entry in place (a harmless, documented limitation, see the plan).
+// survive a reload - an undo after a reload falls back to
+// findTodaysSoloHistoryDocId(), a small bounded query for today's entry.
 const pendingSoloHistoryIds = new Map();
 const SOLO_STATS_BACKFILLED_KEY = 'todoSoloStatsBackfilledV1';
+// Set by startApp() from the signed-in user, cleared on sign-out.
+let activityStorageUid = null;
+
+function accountStorageKey(baseKey) {
+    return activityStorageUid ? `${baseKey}:${activityStorageUid}` : null;
+}
 let pendingDeletedTask = null;
 let undoDeleteTimeoutId = null;
 let pendingSubtaskFocusTaskId = null;
@@ -630,8 +643,12 @@ function startApp() {
     appStarted = true;
 
     loadSettings();
+    // Before the activity loads below, which read per-account keys.
+    activityStorageUid = window.ToDoAuth?.auth?.currentUser?.uid || null;
     loadActivityCounts();
     loadActivityHistory();
+    // Before loadSoloCompletionStats() below, whose backfill reads this data.
+    adoptLegacyActivityKeys();
     setTaskTypePillState('open');
     updateDurationInputVisibility();
     setDetailsPanelOpen(false);
@@ -647,7 +664,14 @@ function startApp() {
     // derives its starting numbers from that local data. The weekly recap
     // check runs only after that resolves, since it needs the real
     // (possibly just-backfilled) badges list to diff against.
-    loadSoloCompletionStats().then(() => maybeShowWeeklyRecap());
+    const soloStatsReady = loadSoloCompletionStats();
+    soloStatsReady.then(() => maybeShowWeeklyRecap());
+    // Self-heals the heatmap from users/{uid}/history if local storage was
+    // cleared - fire-and-forget, re-renders itself when it resolves. Only
+    // after the backfill above has decided: the cloud log includes subtask
+    // steps, which must never feed totalCompletions or the count badges.
+    const hydrateUid = activityStorageUid;
+    soloStatsReady.catch(() => {}).then(() => hydrateActivityFromCloudHistory(hydrateUid));
 
     renderTaskListSkeleton();
     subscribeToCloudTasks();
@@ -706,6 +730,12 @@ AuthGate.init({
         pendingSoloHistoryIds.clear();
         refreshSoloStreakPill();
         renderSoloAchievements();
+        // Same for the heatmap: the next account loads its own keys in
+        // startApp(), this just stops the last one's grid lingering.
+        activityStorageUid = null;
+        activityCountsByDate = {};
+        activityHistoryByDate = {};
+        renderActivityHeatmap();
     }
 });
 
@@ -3606,7 +3636,8 @@ function saveSettings() {
 }
 
 function loadActivityCounts() {
-    const raw = localStorage.getItem(ACTIVITY_KEY);
+    const storageKey = accountStorageKey(ACTIVITY_KEY);
+    const raw = storageKey ? localStorage.getItem(storageKey) : null;
     if (!raw) {
         activityCountsByDate = {};
         return;
@@ -3623,7 +3654,8 @@ function loadActivityCounts() {
 }
 
 function loadActivityHistory() {
-    const raw = localStorage.getItem(ACTIVITY_HISTORY_KEY);
+    const storageKey = accountStorageKey(ACTIVITY_HISTORY_KEY);
+    const raw = storageKey ? localStorage.getItem(storageKey) : null;
     if (!raw) {
         activityHistoryByDate = {};
         return;
@@ -3639,12 +3671,211 @@ function loadActivityHistory() {
     pruneActivityHistory();
 }
 
+// The heatmap's local data (ACTIVITY_KEY/ACTIVITY_HISTORY_KEY) is only a
+// cache - clearing site data, a private window or a new device wipes it
+// even though every completion is also logged durably at users/{uid}/history
+// (updateSoloCompletionStats/updateSoloSubtaskActivityStats). This rebuilds
+// the heatmap window from that log once per sign-in. Not awaited by
+// startApp(): the heatmap renders off local data first, then re-renders here
+// if the cloud log fills in anything missing.
+const ACTIVITY_HYDRATE_LOOKBACK_DAYS = 190; // heatmap shows 182, small margin for the boundary
+// Bounded so a very heavy account can't turn this into a huge read. Ordered
+// newest-first, so if the cap is ever hit only the oldest days in the window
+// come back short - those days just keep whatever local data they had.
+const ACTIVITY_HYDRATE_MAX_DOCS = 3000;
+// onSignedIn also fires on every page load's auth restore, and dev shares
+// prod's read quota, so hydration is skipped for this long after the last
+// successful one. Local data is normally already right; a repeat run mostly
+// just picks up another device's completions. Never skipped when this
+// account has no local activity at all, so recovery from a wiped cache is
+// still immediate.
+const ACTIVITY_HYDRATED_AT_KEY = 'todoActivityHydratedAtV1';
+const ACTIVITY_HYDRATE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+// Shared by the cloud hydration and the one-time legacy-key adoption:
+// counts take the max per day, and a day's entry list is replaced only by
+// one at least as long, so neither source can shrink a day.
+function mergeActivityData(sourceCounts, sourceEntries) {
+    Object.keys(sourceCounts).forEach((dateKey) => {
+        const sourceCount = Number(sourceCounts[dateKey]) || 0;
+        if (sourceCount > 0) {
+            activityCountsByDate[dateKey] = Math.max(Number(activityCountsByDate[dateKey]) || 0, sourceCount);
+        }
+    });
+    Object.keys(sourceEntries).forEach((dateKey) => {
+        const incoming = sourceEntries[dateKey];
+        if (!Array.isArray(incoming) || incoming.length === 0) {
+            return;
+        }
+        const localEntries = Array.isArray(activityHistoryByDate[dateKey]) ? activityHistoryByDate[dateKey] : [];
+        // A normal session writes each completion to both stores, so
+        // replacing (not appending) avoids duplicate rows in the day view.
+        if (incoming.length >= localEntries.length) {
+            activityHistoryByDate[dateKey] = incoming;
+        }
+    });
+}
+
+// One-time move off the pre-namespacing bare keys, run by startApp() right
+// after the per-account loads. Adopted only when this account has no
+// per-account data yet, then the bare keys are deleted so it never re-runs.
+// A shared browser's bare data can't be attributed to the right person -
+// the same ambiguity the old un-namespaced code had on every load, just
+// resolved once here instead of forever.
+function adoptLegacyActivityKeys() {
+    const countsKey = accountStorageKey(ACTIVITY_KEY);
+    const historyKey = accountStorageKey(ACTIVITY_HISTORY_KEY);
+    if (!countsKey || !historyKey) {
+        return;
+    }
+    try {
+        const legacyCountsRaw = localStorage.getItem(ACTIVITY_KEY);
+        const legacyHistoryRaw = localStorage.getItem(ACTIVITY_HISTORY_KEY);
+        if (legacyCountsRaw === null && legacyHistoryRaw === null) {
+            return;
+        }
+        if (localStorage.getItem(countsKey) === null && localStorage.getItem(historyKey) === null) {
+            const parseObject = (raw) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed && typeof parsed === 'object' ? parsed : {};
+                } catch {
+                    return {};
+                }
+            };
+            mergeActivityData(parseObject(legacyCountsRaw), parseObject(legacyHistoryRaw));
+            pruneActivityCounts();
+            pruneActivityHistory();
+            saveActivityCounts();
+            saveActivityHistory();
+        }
+        localStorage.removeItem(ACTIVITY_KEY);
+        localStorage.removeItem(ACTIVITY_HISTORY_KEY);
+    } catch (error) {
+        console.error('Failed to adopt legacy activity data:', error);
+    }
+}
+
+async function hydrateActivityFromCloudHistory(uid) {
+    if (!uid || !window.ToDoAuth?.db || activityStorageUid !== uid) {
+        return;
+    }
+    const { db, firestore } = window.ToDoAuth;
+    const { collection, query, where, orderBy, limit, getDocs } = firestore;
+
+    const hydratedAtKey = accountStorageKey(ACTIVITY_HYDRATED_AT_KEY);
+    const hasLocalActivity = Object.keys(activityCountsByDate).length > 0;
+    let lastHydratedAt = 0;
+    try {
+        lastHydratedAt = Number(localStorage.getItem(hydratedAtKey)) || 0;
+    } catch {
+        lastHydratedAt = 0;
+    }
+    if (hasLocalActivity && Date.now() - lastHydratedAt < ACTIVITY_HYDRATE_COOLDOWN_MS) {
+        return;
+    }
+
+    try {
+        const fullCutoff = new Date();
+        fullCutoff.setHours(0, 0, 0, 0);
+        fullCutoff.setDate(fullCutoff.getDate() - ACTIVITY_HYDRATE_LOOKBACK_DAYS);
+
+        // Full 190-day read only when it's actually needed: no local data
+        // (wiped cache, new device) or never hydrated on this browser.
+        // Otherwise just what's new since the last hydration - rounded back
+        // to that day's local midnight, so every day the query returns comes
+        // back complete and the max/replace-if-longer merge stays correct
+        // (a partial boundary day would undercount against local data).
+        let cutoff = fullCutoff;
+        if (hasLocalActivity && lastHydratedAt > 0) {
+            const incrementalCutoff = new Date(lastHydratedAt);
+            incrementalCutoff.setHours(0, 0, 0, 0);
+            if (incrementalCutoff > fullCutoff) {
+                cutoff = incrementalCutoff;
+            }
+        }
+
+        const historyQuery = query(
+            collection(db, 'users', uid, 'history'),
+            where('completedAt', '>=', cutoff.toISOString()),
+            orderBy('completedAt', 'desc'),
+            limit(ACTIVITY_HYDRATE_MAX_DOCS)
+        );
+        const snapshot = await getDocs(historyQuery);
+
+        // Signed out (or switched account) while the read was in flight.
+        if (activityStorageUid !== uid || window.ToDoAuth.auth?.currentUser?.uid !== uid) {
+            return;
+        }
+
+        // Every doc counts as 1, subtask steps included - same as
+        // addActivityCount() on the live completion path.
+        const cloudCounts = {};
+        const cloudEntries = {};
+        snapshot.docs.forEach((entryDoc) => {
+            const data = entryDoc.data();
+            if (typeof data.completedAt !== 'string' || !isValidDateValue(data.completedAt)) {
+                return;
+            }
+            const dateKey = getDateKey(new Date(data.completedAt));
+            cloudCounts[dateKey] = (cloudCounts[dateKey] || 0) + 1;
+            if (!cloudEntries[dateKey]) {
+                cloudEntries[dateKey] = [];
+            }
+            // Local subtask rows use `${taskId}:${subtaskId}` as their id
+            // (see the subtask toggle's subtaskActivityRef), which
+            // removeLatestActivityHistoryEntry matches on. Docs written
+            // before subtaskId was stored can't rebuild that id, so they
+            // get one that matches neither the parent task nor any step -
+            // an undo of such a step that same day just leaves its row.
+            let entryId = data.taskId;
+            if (data.entryType === 'subtask') {
+                entryId = data.subtaskId ? `${data.taskId}:${data.subtaskId}` : `${data.taskId}:legacy-subtask`;
+            }
+            const entry = {
+                taskId: entryId,
+                taskText: typeof data.taskText === 'string' ? data.taskText : '',
+                completedAt: data.completedAt
+            };
+            if (data.entryType) {
+                entry.entryType = data.entryType;
+            }
+            cloudEntries[dateKey].push(entry);
+        });
+
+        // Merge, never blind-replace: the history log postdates some
+        // accounts' earliest local-only activity (see
+        // maybeBackfillSoloCompletionStats), so a day with more local
+        // completions than cloud ones keeps its local data.
+        mergeActivityData(cloudCounts, cloudEntries);
+
+        pruneActivityCounts();
+        pruneActivityHistory();
+        saveActivityCounts();
+        saveActivityHistory();
+        try {
+            localStorage.setItem(hydratedAtKey, String(Date.now()));
+        } catch {
+            // Non-fatal - worst case the next load re-reads.
+        }
+        renderActivityHeatmap();
+    } catch (error) {
+        console.error('Failed to hydrate activity from cloud history:', error);
+    }
+}
+
 function saveActivityCounts() {
-    localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activityCountsByDate));
+    const storageKey = accountStorageKey(ACTIVITY_KEY);
+    if (storageKey) {
+        localStorage.setItem(storageKey, JSON.stringify(activityCountsByDate));
+    }
 }
 
 function saveActivityHistory() {
-    localStorage.setItem(ACTIVITY_HISTORY_KEY, JSON.stringify(activityHistoryByDate));
+    const storageKey = accountStorageKey(ACTIVITY_HISTORY_KEY);
+    if (storageKey) {
+        localStorage.setItem(storageKey, JSON.stringify(activityHistoryByDate));
+    }
 }
 
 function addActivityCount(delta) {
@@ -3700,6 +3931,29 @@ function removeLatestActivityHistoryEntry(task) {
     saveActivityHistory();
 }
 
+// Undo after a reload (pendingSoloHistoryIds is empty then): finds the
+// newest matching entry completed since local midnight. Today only, to
+// match removeLatestActivityHistoryEntry/addActivityCount(-1), which also
+// only touch today - an older completion undone later stays logged on its
+// own day in both places. Single-field range + order, no composite index;
+// matched client-side from a small capped page.
+const SOLO_UNDO_LOOKUP_MAX_DOCS = 50;
+
+async function findTodaysSoloHistoryDocId(uid, matches) {
+    const { db, firestore } = window.ToDoAuth;
+    const { collection, query, where, orderBy, limit, getDocs } = firestore;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const snapshot = await getDocs(query(
+        collection(db, 'users', uid, 'history'),
+        where('completedAt', '>=', startOfToday.toISOString()),
+        orderBy('completedAt', 'desc'),
+        limit(SOLO_UNDO_LOOKUP_MAX_DOCS)
+    ));
+    const match = snapshot.docs.find((entryDoc) => matches(entryDoc.data()));
+    return match ? match.id : null;
+}
+
 // Writes the durable per-completion log entry (users/{uid}/history, mirrors
 // group's groups/{id}/history - see logGroupTaskCompletion in group/group.js)
 // and updates the denormalized streak/badge summary, on a genuine completion
@@ -3727,8 +3981,11 @@ async function updateSoloCompletionStats(task, completed) {
             });
             pendingSoloHistoryIds.set(task.id, historyRef.id);
         } else {
-            const historyId = pendingSoloHistoryIds.get(task.id);
+            let historyId = pendingSoloHistoryIds.get(task.id);
             pendingSoloHistoryIds.delete(task.id);
+            if (!historyId) {
+                historyId = await findTodaysSoloHistoryDocId(uid, (entry) => entry.taskId === task.id && !entry.entryType);
+            }
             if (historyId) {
                 await deleteDoc(doc(db, 'users', uid, 'history', historyId));
             }
@@ -3765,14 +4022,20 @@ async function updateSoloSubtaskActivityStats(task, subtask, completed) {
             const historyRef = doc(collection(db, 'users', uid, 'history'));
             await setDoc(historyRef, {
                 taskId: task.id,
+                // Lets hydrateActivityFromCloudHistory rebuild the local
+                // `${taskId}:${subtaskId}` row id.
+                subtaskId: subtask.id,
                 taskText: `${task.text}: ${subtask.text}`,
                 entryType: 'subtask',
                 completedAt: new Date().toISOString()
             });
             pendingSoloHistoryIds.set(pendingKey, historyRef.id);
         } else {
-            const historyId = pendingSoloHistoryIds.get(pendingKey);
+            let historyId = pendingSoloHistoryIds.get(pendingKey);
             pendingSoloHistoryIds.delete(pendingKey);
+            if (!historyId) {
+                historyId = await findTodaysSoloHistoryDocId(uid, (entry) => entry.entryType === 'subtask' && entry.subtaskId === subtask.id);
+            }
             if (historyId) {
                 await deleteDoc(doc(db, 'users', uid, 'history', historyId));
             }
@@ -3952,20 +4215,27 @@ async function loadSoloCompletionStats() {
 // first time it loads after the update - see the plan's "existing users"
 // risk note. Derives totals from the local activityCountsByDate/
 // activityHistoryByDate this account's browser already has (no new
-// Firestore reads needed) and writes them once. Gated on a localStorage
-// flag (per-browser, not per-account) - a genuinely new account has no
+// Firestore reads needed) and writes them once. Gated on a per-account
+// localStorage flag - a genuinely new account has no
 // local activity data to derive anything from anyway, so this is a no-op
 // for them either way, just marked done so it never re-runs.
 async function maybeBackfillSoloCompletionStats(uid) {
+    // Both the flag and the activityCountsByDate it derives from are
+    // per-account (see accountStorageKey) - bail if the in-memory data
+    // belongs to someone else, e.g. a sign-out/sign-in mid-request.
+    if (activityStorageUid !== uid) {
+        return;
+    }
+    const backfilledKey = `${SOLO_STATS_BACKFILLED_KEY}:${uid}`;
     let alreadyBackfilled = false;
     try {
-        alreadyBackfilled = localStorage.getItem(SOLO_STATS_BACKFILLED_KEY) === 'true';
+        alreadyBackfilled = localStorage.getItem(backfilledKey) === 'true';
     } catch {
         alreadyBackfilled = false;
     }
     if (alreadyBackfilled || soloCompletionStats.totalCompletions > 0) {
         try {
-            localStorage.setItem(SOLO_STATS_BACKFILLED_KEY, 'true');
+            localStorage.setItem(backfilledKey, 'true');
         } catch {
             // Non-fatal - worst case this re-checks (and no-ops, since
             // totalCompletions is already > 0) next load.
@@ -3976,7 +4246,7 @@ async function maybeBackfillSoloCompletionStats(uid) {
     const localTotal = Object.values(activityCountsByDate).reduce((sum, count) => sum + (Number(count) || 0), 0);
     if (localTotal === 0) {
         try {
-            localStorage.setItem(SOLO_STATS_BACKFILLED_KEY, 'true');
+            localStorage.setItem(backfilledKey, 'true');
         } catch {
         }
         return;
@@ -4008,7 +4278,7 @@ async function maybeBackfillSoloCompletionStats(uid) {
     }
 
     try {
-        localStorage.setItem(SOLO_STATS_BACKFILLED_KEY, 'true');
+        localStorage.setItem(backfilledKey, 'true');
     } catch {
     }
 }
