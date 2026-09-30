@@ -1517,14 +1517,21 @@
                     // deleteOwnGroupTaskWithComments), before leaving since
                     // both delete rules require membership. Best-effort per
                     // group, like availability below: an odd task here must
-                    // not block the rest of the account deletion.
+                    // not block the rest of the account deletion. Also
+                    // best-effort per TASK: leaving below happens regardless,
+                    // and after that the delete rule denies any task left
+                    // behind, so one failure must not skip the tasks after it.
                     try {
                         const ownGroupTasksSnapshot = await getDocs(query(
                             collection(db, 'groups', groupDoc.id, 'tasks'),
                             where('ownerId', '==', uid)
                         ));
                         for (const taskDoc of ownGroupTasksSnapshot.docs) {
-                            await deleteOwnGroupTaskWithComments(groupDoc.id, taskDoc);
+                            try {
+                                await deleteOwnGroupTaskWithComments(groupDoc.id, taskDoc);
+                            } catch (error) {
+                                console.warn('Could not delete one of your tasks in a group (continuing with the rest):', error);
+                            }
                         }
                     } catch (error) {
                         console.warn('Could not delete your tasks in a group (continuing account deletion):', error);

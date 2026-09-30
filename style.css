@@ -10785,9 +10785,29 @@ body.authGateActive .authOverlay{
     color: #fdfcff;
 }
 
+.availabilityApplyBtn i{
+    margin-right: 2px;
+}
+
 .availabilityApplyBtn.active{
     background: rgba(193, 152, 255, 0.28);
     color: #fdfcff;
+}
+
+/* Date mode gets its own sky-blue accent, shared with the grid's dashed
+   border below, so the active one-off scope is unmistakable and reads as a
+   different kind of control from the violet Week | Day pill. */
+.availabilityApplyBtn.active[data-apply-scope="date"]{
+    background: rgba(94, 200, 230, 0.22);
+    color: #c8f0fb;
+    box-shadow: inset 0 0 0 1px #5ec8e6;
+}
+
+/* Grid-level cue while painting one-off exceptions. Dashed and sky blue so
+   it can't be confused with the solid violet .painting outline, which is
+   declared later and wins border-color for the length of a stroke. */
+.availabilityGridWrap.dateScope .availabilityGridScroll{
+    border: 2px dashed #5ec8e6;
 }
 
 .availabilityApplyBtn:focus-visible{
@@ -10796,15 +10816,31 @@ body.authGateActive .authOverlay{
 }
 
 /* "Reset to weekly" chips (renderAvailabilityOverrideResets in group.js).
-   Empty most of the time, so the row just collapses. */
-.availabilityResetList{
-    display: inline-flex;
+   Own full-width line after the hint, so the list of active exceptions
+   reads as separate from the setting above it. Empty most of the time, so
+   the whole row just collapses. */
+.availabilityResetRow{
+    flex-basis: 100%;
+    display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: var(--space-2);
 }
 
-.availabilityResetList:empty{
+.availabilityResetRow:has(> .availabilityResetList:empty){
     display: none;
+}
+
+.availabilityResetLabel{
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--violet-muted);
+}
+
+.availabilityResetList{
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
 }
 
 .availabilityResetBtn{
@@ -10835,6 +10871,19 @@ body.authGateActive .authOverlay{
     margin: 0;
     font-size: var(--text-xs);
     color: var(--violet-muted);
+}
+
+/* Touch targets: same (pointer: coarse) gate as .availabilityTouchHint. */
+@media (pointer: coarse){
+    .availabilityApplyBtn{
+        min-height: 40px;
+        padding: 6px 14px;
+    }
+
+    .availabilityResetBtn{
+        min-height: 44px;
+        padding: 6px 14px;
+    }
 }
 
 /* Group heatmap (Phase 4): same column template as .availabilityGrid below

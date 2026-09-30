@@ -658,6 +658,7 @@ const availabilityGridEl = document.querySelector('.availabilityGrid');
 const availabilityBrushButtons = Array.from(document.querySelectorAll('.availabilityBrushBtn'));
 const availabilityApplyButtons = Array.from(document.querySelectorAll('.availabilityApplyBtn'));
 const availabilityResetList = document.querySelector('.availabilityResetList');
+const availabilityApplyHint = document.querySelector('.availabilityApplyHint');
 const availabilitySaveStatus = document.querySelector('.availabilitySaveStatus');
 
 const AVAILABILITY_DEFAULT_HOUR_RANGE = { startHour: 7, endHour: 23 };
@@ -1428,7 +1429,7 @@ availabilityBrushButtons.forEach((button) => {
 });
 setAvailabilityBrush(availabilityActiveBrush);
 
-// "Apply to: Every week | This day only". Resets to 'weekly' on a group
+// "Apply to: Repeat weekly | Just this date". Resets to 'weekly' on a group
 // switch, so someone who never touches it paints exactly as before.
 function setAvailabilityApplyScope(scope) {
     availabilityApplyScope = scope === 'date' ? 'date' : 'weekly';
@@ -1437,6 +1438,14 @@ function setAvailabilityApplyScope(scope) {
         button.classList.toggle('active', isActive);
         button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     });
+    const isDateScope = availabilityApplyScope === 'date';
+    // Grid-level cue (dashed border) so date mode can't be left on unnoticed.
+    availabilityGridWrap?.classList.toggle('dateScope', isDateScope);
+    if (availabilityApplyHint) {
+        availabilityApplyHint.textContent = isDateScope
+            ? 'Changes only affect the day you paint. Switch back to Repeat weekly for your usual pattern.'
+            : 'Painting repeats every week. Use Just this date for a one-off change, marked with a corner tick.';
+    }
 }
 
 availabilityApplyButtons.forEach((button) => {
@@ -1453,7 +1462,10 @@ availabilityApplyButtons.forEach((button) => {
 let availabilityResetListKey = null;
 
 function renderAvailabilityOverrideResets() {
-    if (!availabilityResetList) {
+    // Never mid-stroke: the row showing/hiding moves the grid, and the stroke
+    // finds cells by elementFromPoint, so the rest of the drag would paint the
+    // wrong rows. endStroke renders it once the pointer is released.
+    if (!availabilityResetList || availabilityIsPainting) {
         return;
     }
     const columns = availabilityWeekdaySlots ? getAvailabilityColumns() : [];
@@ -1559,9 +1571,12 @@ function applyAvailabilityGridLayout() {
     });
     // In Day mode there's one weekday on screen, so name it; in Week mode
     // the stroke's weekday varies, so the generic label stays.
-    const weeklyApplyButton = availabilityApplyButtons.find((button) => button.dataset.applyScope === 'weekly');
-    if (weeklyApplyButton) {
-        weeklyApplyButton.textContent = isDayMode ? `Every ${date.toFormat('cccc')}` : 'Every week';
+    // Only the text span, so the button's icon survives.
+    const weeklyApplyText = availabilityApplyButtons
+        .find((button) => button.dataset.applyScope === 'weekly')
+        ?.querySelector('.availabilityApplyBtnText');
+    if (weeklyApplyText) {
+        weeklyApplyText.textContent = isDayMode ? `Every ${date.toFormat('cccc')}` : 'Repeat weekly';
     }
     renderAvailabilityOverrideResets();
     availabilityDayNavButtons.forEach((button) => {
@@ -1838,6 +1853,8 @@ function attachAvailabilityGridPointerEvents() {
         }
         availabilityIsPainting = false;
         availabilityGridEl.classList.remove('painting');
+        // Deferred from paintAvailabilityCellFromDom, see renderAvailabilityOverrideResets.
+        renderAvailabilityOverrideResets();
     };
 
     const cancelPendingPress = () => {
@@ -2073,7 +2090,7 @@ async function saveAvailabilityNow() {
         updatedAt: serverTimestamp()
     };
     // Only written when there's at least one exception, so someone who never
-    // uses "This day only" saves exactly the same doc as before. setDoc
+    // uses "Just this date" saves exactly the same doc as before. setDoc
     // replaces the whole doc, so leaving it out also clears the last pruned one.
     if (Object.keys(availabilityDateOverrides).length) {
         docToSave.dateOverrides = { ...availabilityDateOverrides };
@@ -8979,7 +8996,7 @@ const GROUP_TOUR_STEPS = [
         // group-wide listener on its own.
         selector: '.availabilitySubTabs',
         title: 'Availability',
-        text: 'Find a time the whole team can meet. Under My availability everything starts out free, so just paint the times you\'re busy (or If needed). Then check Team overlap to see when everyone\'s around, and Best times for the slots that work for the most people. Times show in your own timezone (tap Change if it\'s wrong), Week or Day switches the layout, This day only paints a one-off change instead of your weekly pattern, and teammates only ever see free, busy, or if needed, never why.',
+        text: 'Find a time the whole team can meet. Under My availability everything starts out free, so just paint the times you\'re busy (or If needed). Then check Team overlap to see when everyone\'s around, and Best times for the slots that work for the most people. Times show in your own timezone (tap Change if it\'s wrong), Week or Day switches the layout, Just this date paints a one-off change instead of your weekly pattern, and teammates only ever see free, busy, or if needed, never why.',
         beforeShow: () => switchGroupView('availability')
     },
     {
