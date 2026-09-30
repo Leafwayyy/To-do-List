@@ -10,6 +10,43 @@
 
 const SLOT_MINUTES = 15;
 
+// One-off exceptions to the recurring weekly pattern live in
+// dateOverrides: { "YYYY-MM-DD": 96-char [ABI] string }, keyed by a calendar
+// date in the MEMBER's own zone (same implicit convention as weekdaySlots).
+// The client only ever writes today through today + 13: Best times plans a
+// rolling 7-day window, and the extra week is slack for zones near a date
+// boundary without letting the map grow.
+const MAX_DATE_OVERRIDE_DAYS_AHEAD = 14;
+const DAY_STRING_PATTERN = /^[ABI]{96}$/;
+
+// Firestore rules can't check the shape of each dateOverrides value (the
+// keys are dynamic dates), so a buggy or hostile write can store anything.
+// Every read goes through this: a value that isn't a valid 96-char day
+// string is treated as if no override existed for that date.
+function getValidDateOverride(dateOverrides, dateKey) {
+    if (!dateOverrides || typeof dateOverrides !== 'object') {
+        return null;
+    }
+    const value = Object.prototype.hasOwnProperty.call(dateOverrides, dateKey) ? dateOverrides[dateKey] : null;
+    return typeof value === 'string' && DAY_STRING_PATTERN.test(value) ? value : null;
+}
+
+// Returns a NEW map with only the dates from todayDateKey onward. Plain
+// string comparison is correct because every key is YYYY-MM-DD. Run before
+// every save so past exceptions never accumulate.
+function pruneDateOverrides(dateOverrides, todayDateKey) {
+    const pruned = {};
+    if (!dateOverrides || typeof dateOverrides !== 'object') {
+        return pruned;
+    }
+    Object.keys(dateOverrides).forEach((dateKey) => {
+        if (dateKey >= todayDateKey) {
+            pruned[dateKey] = dateOverrides[dateKey];
+        }
+    });
+    return pruned;
+}
+
 // This app's existing calendar code (getDateKey, getStartOfCalendarWeek in
 // task-shared.js/group.js) uses JS's native Date.getDay() convention:
 // 0=Sunday..6=Saturday. Luxon's own .weekday is ISO: 1=Monday..7=Sunday.
@@ -105,6 +142,10 @@ function convertUtcToViewerLocal(utcDateTime, viewerZone, hourRange) {
 // Builds { utcIsoString -> Map<uid, 'A'|'B'|'I'> } for every member, for the
 // real week containing weekAnchor. Shared by the heatmap and the
 // recommendation search so both always agree on the same timeline.
+// Recurring template only: this reads weekdaySlots directly and ignores
+// dateOverrides. The live panel and heatmap never use it (they go through
+// getMemberValueAtInstant); it's only the weekAnchor path of
+// findBestMeetingTimes, kept for the fixed-week test cases.
 function buildUtcTimeline(members, hourRange, weekAnchor) {
     const timeline = new Map();
     members.forEach((member) => {
@@ -136,6 +177,11 @@ const OUTSIDE_HOURS_VALUE = 'O';
 // simply local hour * 4 + quarter-hour. Anything unreadable (no zone, an
 // invalid zone, a missing day string) counts as busy.
 //
+// A valid dateOverrides entry for the member's local date (same local
+// DateTime, so DST and half-hour zones resolve exactly as the weekday
+// lookup does) wins over weekdaySlots for that one date. A missing or
+// malformed entry falls back to weekdaySlots unchanged.
+//
 // viewHourRange (optional, the group's view-only {startHour, endHour}):
 // when given, any instant outside it in the member's own local hours
 // returns 'O' instead of the stored value. The one meaning used everywhere:
@@ -153,7 +199,9 @@ function getMemberValueAtInstant(member, utcDateTime, viewHourRange = null) {
     if (viewHourRange && (local.hour < viewHourRange.startHour || local.hour >= viewHourRange.endHour)) {
         return OUTSIDE_HOURS_VALUE;
     }
-    const packed = member.weekdaySlots ? member.weekdaySlots[String(luxonWeekdayToJs(local.weekday))] : null;
+    const override = getValidDateOverride(member.dateOverrides, local.toISODate());
+    const packed = override
+        || (member.weekdaySlots ? member.weekdaySlots[String(luxonWeekdayToJs(local.weekday))] : null);
     const index = local.hour * (60 / SLOT_MINUTES) + Math.floor(local.minute / SLOT_MINUTES);
     return (packed && packed[index]) || 'B';
 }

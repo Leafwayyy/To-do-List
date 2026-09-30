@@ -45,6 +45,19 @@ Day view is purely a display filter over the same grid: the other six columns ge
 
 **Changed from original plan:** the plan had a start-state setup step ("paint free time" vs "paint busy time") before you could paint. In real use most time is free, so marking only busy time is far less work, and the setup step was removed.
 
+### One-off exceptions ("This day only")
+
+The weekly grid is a recurring template: painting a Tuesday changes every Tuesday. For "normally free Tuesday afternoon, but not THIS Tuesday", an **Apply to: Every week | This day only** toggle sits under the brush row. It defaults to **Every week**, which behaves exactly as before this feature existed, and resets to Every week on a group switch. In Day view the button names the day ("Every Tuesday"); in Week view it just says "Every week". A one-line hint under it says painting repeats weekly and This day only is for a one-off change.
+
+- **This day only** writes to that literal date's entry in `dateOverrides` instead of `weekdaySlots`. The first stroke on a date seeds the exception from that weekday's pattern, so the rest of the day stays as it was, and the whole column gets the exception marker immediately.
+- **Every week** writes the weekday pattern as always. If the painted date already has an exception, the same stroke is applied to it too, otherwise the paint would land on the hidden weekly layer and the cell wouldn't visibly change.
+- **Marker**: exception cells on your own grid get a small white corner tick layered over the free/busy/if-needed color (`.availabilityGridCell.hasOverride`). Only on My availability; Team overlap and Best times just show the resolved value, since teammates don't need to know a slot was an exception.
+- **Reset to weekly**: each visible day with an exception gets a small "↺ Tue, Oct 6" chip in the Apply-to row (every such day in Week view, just the shown day in Day view). It deletes only that one date's exception, re-renders the day from the weekly pattern, and goes through the normal debounced save. No confirm, since it's easy to re-paint.
+
+Resolution is per date: for any instant, the member's own local date is worked out in their zone, and a valid exception for that date wins; otherwise the weekday template is used. This happens inside `getMemberValueAtInstant`, the one lookup both the heatmap and Best times go through, so DST and 45-minute zones behave exactly as they do for the weekly pattern. `buildUtcTimeline`'s week-anchor path still reads `weekdaySlots` directly and ignores exceptions, but only old tests use it, never the live UI.
+
+**Changed from original plan:** the plan only had the recurring weekly template. Real use needed one-off exceptions without disturbing the weekly pattern.
+
 ### Mouse, touch and pen
 
 - **Mouse**: press to start a stroke, drag to paint, release to end. The brush is fixed for the whole stroke.
@@ -54,7 +67,7 @@ Day view is purely a display filter over the same grid: the other six columns ge
 
 **Changed from original plan:** the plan toggled `touch-action` to `none` per stroke. That can't work for touch: the browser fixes `touch-action` when the touch starts, so on a phone a drag became a scroll and only the first cell painted. Making the grid permanently `touch-action: none` would have trapped page scrolling instead. Press-and-hold keeps normal scrolling and makes painting deliberate.
 
-## Data model (unchanged)
+## Data model
 
 **`users/{uid}.timezone`**: IANA zone, auto-detected, user-editable. Self-read only; it's just the default copied onto a new availability doc.
 
@@ -66,6 +79,9 @@ Day view is purely a display filter over the same grid: the other six columns ge
     "0": "AAAABBBB...",          // one char per 15-min slot over the full 24h.
     ...                          // 'A' free, 'B' busy, 'I' if-needed.
   },
+  dateOverrides: {               // OPTIONAL one-off exceptions, same 96-char format,
+    "2026-10-06": "AAAABBBB..."  // keyed by date in this doc's timezone.
+  },
   hasBeenPainted: true,
   updatedAt: serverTimestamp
 }
@@ -75,6 +91,7 @@ Day view is purely a display filter over the same grid: the other six columns ge
 - A doc is only ever created for a grid that was actually painted (or deliberately saved untouched via the "save this untouched grid anyway?" confirm). Changing your timezone on an unpainted grid writes nothing to the group; the new zone is stamped on the first real paint.
 - **Leave deletes your own doc** (`leaveGroup`, and account deletion). **A kick does not** (same convention as tasks); views filter to current `memberIds` instead, so a kicked member's doc never shows. Every member's doc is deleted in `deleteGroupCompletely`.
 - Writes are debounced: one write about 1.5s after the last change, plus a `beforeunload` flush. Never one write per cell (dev and prod share one Firebase project).
+- **`dateOverrides`** (see One-off exceptions) is only written when at least one exception exists, so someone who never uses This day only saves exactly the same doc as before; clearing the last one drops the field (saves are whole-doc `setDoc`). Docs from before the feature have no field and read as `{}`. The client prunes on load and before every save (`pruneDateOverrides` in `availability-timezone.js`, wrapped by `pruneOwnAvailabilityDateOverrides` in `group.js`): past dates, anything `MAX_DATE_OVERRIDE_DAYS_AHEAD` (14) or more days out, and any malformed value are dropped, so stale exceptions never pile up. The grid only shows 7 days, so 14 is the write limit with slack: it covers the 7-day Best times horizon plus date keys that differ from the viewer's by a day across timezones, without letting a doc fill up with far-future dates. Every read goes through `getValidDateOverride`, which treats a malformed value as no exception.
 
 ## Timezone strategy (unchanged)
 
@@ -106,9 +123,9 @@ Algorithm (client-side, no writes): build one UTC timeline at 15-minute resoluti
 - `group/group.js`: the Availability section (starts at the comment "Availability scheduling - see availability-plan.md"), plus one guided-tour step in `GROUP_TOUR_STEPS`.
 - `group/index.html`: the Availability tab button and panel, sub-tabs, Luxon `<script>` tag.
 - `style.css`: `.availability*` rules.
-- `firestore.rules`: `match /availability/{uid}` under `groups/{groupId}` (create/update self-only AND a current member, strict key/type/size checks, delete by self or group owner), plus an owner-only `availabilityHourRange` update on the group doc. **Needs a manual Firebase Console republish** (no CLI in this repo).
+- `firestore.rules`: `match /availability/{uid}` under `groups/{groupId}` (create/update self-only AND a current member, strict key/type/size checks, delete by self or group owner), plus an owner-only `availabilityHourRange` update on the group doc. `dateOverrides` is allowed as an optional map of at most 20 entries; rules can't check each value's shape (dynamic date keys), which is why the client validates every read. **Needs a manual Firebase Console republish** (no CLI in this repo); until the version with `dateOverrides` is published, saving an exception is rejected, while weekly-only saves keep working.
 
-## Tests (`availability-timezone.test.html`, 10 cases)
+## Tests (`availability-timezone.test.html`, 15 cases)
 
 1. Kolkata evening slot shows at the correct local time and day in Edmonton.
 2. A slot crossing midnight lands on the correct day for both viewers.
@@ -120,6 +137,11 @@ Algorithm (client-side, no writes): build one UTC timeline at 15-minute resoluti
 8. Rolling window finds the soonest all-free slot for zones 11.5h apart (near edge).
 9. Rolling window reaches the far edge, and its bounds are exact.
 10. Usual-hours window: time outside a member's hours in their own zone reads as outside (`O`), not free or busy, and Best times never suggests it (found in live E2E testing).
+11. An exception for the member's own local date replaces the weekday template (keyed by their date, not the UTC date).
+12. A date with no exception falls back to the weekday template unchanged.
+13. `pruneDateOverrides` drops dates that have passed and doesn't mutate its input.
+14. A malformed exception is ignored and falls back safely to the weekday template.
+15. Exception lookup respects DST and 45-minute zones the same way the weekday lookup does.
 
 The touch/mouse painting behavior was verified separately with a headless Edge harness (touch emulation): swipe scrolls without painting, tap paints one cell, hold-then-drag paints a run without scrolling, edge auto-scroll, second finger ignored, correct cells when the grid is scrolled, group switch mid-stroke ends the stroke cleanly.
 
@@ -128,4 +150,5 @@ The touch/mouse painting behavior was verified separately with a headless Edge h
 Done since the original plan: the owner-only hour-range setting (Group Settings > "Availability hours", originally Phase 6), the Day view (see Week and Day views), and Leave/Delete group inside Group Settings (now open to every member; plain members see only Leave).
 
 - Not yet tested on a real phone, iOS Safari, or with a real pen.
+- Exceptions can only be painted, seen, or reset within the 7 visible days, even though a doc may hold dates up to 13 days out; there's no list of upcoming exceptions to manage further ahead.
 - The group-wide listener reads every member's doc at once. That's fine at normal group sizes; very large groups may need a cap.

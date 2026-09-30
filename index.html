@@ -13,8 +13,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260910f">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" integrity="sha512-2SwdPD6INVrV/lHTZbO2nodKhrnDdJK9/kg2XD1r9uGqPo1cUbujc+IYdlYdEErWNu69gVcYgdxlmVmzTWnetw==" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="stylesheet" href="style.css?v=20260930e">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
 </head>
 <body class="landingPage">
@@ -312,6 +312,84 @@
                     card.style.setProperty('--tiltY', '0deg');
                 });
             });
+        })();
+    </script>
+
+    <!-- Background signed-in check: if someone who is ALREADY signed in loads
+         this bare marketing page, send them straight into app.html instead of
+         showing them the logged-out landing page. firebase-init.js is a
+         type="module" script, so the browser fetches and runs it
+         asynchronously after the page has already parsed and painted - a
+         logged-out visitor (the common case, e.g. from an ad or shared link)
+         sees this page exactly as fast as before, with no flash and no
+         delay, since nothing here blocks first paint or the initial render.
+         This reuses the app's own firebase-init.js (same config, same
+         version as app.html) instead of a second, possibly-drifting copy of
+         the Firebase config living here.
+
+         firebase-init.js is only loaded for browsers that have used the app
+         before (Firebase Auth's own "firebaseLocalStorageDb" IndexedDB
+         database exists). New visitors and bots never load Firebase here,
+         so they never trigger an App Check / reCAPTCHA Enterprise token
+         exchange - that has a monthly free limit, and a landing page is
+         exactly what bots hit most. indexedDB.databases() is used rather
+         than indexedDB.open(), which would CREATE the database as a side
+         effect. Where databases() isn't supported, it just skips the
+         redirect - the visitor can still click Sign in. -->
+    <script>
+        (function () {
+            if (!window.indexedDB || typeof indexedDB.databases !== 'function') {
+                return;
+            }
+            indexedDB.databases().then(function (dbs) {
+                var usedAppBefore = dbs.some(function (db) {
+                    return db.name === 'firebaseLocalStorageDb';
+                });
+                if (!usedAppBefore) {
+                    return;
+                }
+                var script = document.createElement('script');
+                script.type = 'module';
+                script.src = 'firebase-init.js?v=20260925a';
+                document.body.appendChild(script);
+            }).catch(function () {});
+        })();
+    </script>
+    <script>
+        (function () {
+            // Mirrors auth-gate.js's own wait-for-ready pattern: firebase-init.js
+            // always finishes after this classic script (module scripts are
+            // deferred relative to classic ones), so check whether
+            // window.ToDoAuth is already set and, if not, wait for its
+            // one-time "ready" signal instead of assuming it exists yet.
+            function checkSignedIn() {
+                if (!window.ToDoAuth || typeof window.ToDoAuth.onAuthChange !== 'function') {
+                    return;
+                }
+                // onAuthChange wraps Firebase Auth's own onAuthStateChanged,
+                // which resolves against the persisted (IndexedDB) session -
+                // a real, currently-valid sign-in, never a stale localStorage
+                // flag. Only fire once, then unsubscribe.
+                var unsubscribe = window.ToDoAuth.onAuthChange(function (user) {
+                    if (typeof unsubscribe === 'function') {
+                        unsubscribe();
+                    }
+                    if (user) {
+                        // Relative path on purpose - this site deploys under
+                        // /To-do-List/, and a leading-slash path would break there.
+                        window.location.replace('app.html');
+                    }
+                    // No user: do nothing. The logged-out marketing page the
+                    // visitor is already looking at simply stays as is, with
+                    // no "checking..." UI ever shown either way.
+                });
+            }
+
+            if (window.ToDoAuth) {
+                checkSignedIn();
+            } else {
+                window.addEventListener('todoauth:ready', checkSignedIn, { once: true });
+            }
         })();
     </script>
 

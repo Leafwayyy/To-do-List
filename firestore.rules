@@ -639,13 +639,15 @@ service cloud.firestore {
         // the owner-update branch above. Every client delete of a group
         // task happens while still a member: group.js's own delete button,
         // deleteGroupCompletely (before the group doc goes), and settings.js
-        // account deletion (owned groups only, before the group doc goes).
+        // account deletion (in owned groups before the group doc goes, and
+        // the member's own tasks in non-owned groups before leaving).
         allow delete: if request.auth != null
           && request.auth.uid == resource.data.ownerId
           && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
 
         // Feature 7: a discussion thread under each task. Any member can
-        // read/post; only the comment's own author can delete it. No
+        // read/post; the comment's own author or the task's own owner can
+        // delete it (see the delete rule below). No
         // update rule - comments aren't editable after posting, kept
         // simple on purpose.
         match /comments/{commentId} {
@@ -659,11 +661,22 @@ service cloud.firestore {
             && request.resource.data.text.size() <= 500
             && (!('authorName' in request.resource.data) || (request.resource.data.authorName is string && request.resource.data.authorName.size() <= 80));
           // Membership required (security review fix). No client flow
-          // deletes a comment after leaving: only the in-group delete button
-          // and deleteComment's batch, both while a member.
+          // deletes a comment after leaving: only the in-group delete button,
+          // deleteComment's batch, and settings.js account deletion (before
+          // leaving), all while a member.
+          //
+          // The comment's author OR the parent task's own owner may delete
+          // it - the latter only for comments on THEIR OWN task (not group
+          // owners/admins over everyone's), so account deletion can take a
+          // teammate's comments down with the task instead of orphaning them.
+          // Author check first: if the task doc is already gone, the get()
+          // would error, and the author can still delete their own comment.
           allow delete: if request.auth != null
-            && request.auth.uid == resource.data.authorId
-            && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
+            && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+            && (
+              request.auth.uid == resource.data.authorId
+              || request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)/tasks/$(taskId)).data.ownerId
+            );
         }
       }
 
@@ -768,13 +781,26 @@ service cloud.firestore {
         allow create: if request.auth != null
           && request.auth.uid == uid
           && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
-          && request.resource.data.keys().hasOnly(['weekdaySlots', 'timezone', 'hasBeenPainted', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['weekdaySlots', 'dateOverrides', 'timezone', 'hasBeenPainted', 'updatedAt'])
           && request.resource.data.timezone is string
           && request.resource.data.timezone.size() > 0
           && request.resource.data.timezone.size() <= 64
           && request.resource.data.hasBeenPainted is bool
           && request.resource.data.updatedAt == request.time
           && request.resource.data.weekdaySlots.keys().hasOnly(['0', '1', '2', '3', '4', '5', '6'])
+          // dateOverrides (optional, one-off exceptions keyed "YYYY-MM-DD"):
+          // structural check only. Rules can't iterate or regex-check the
+          // values of a map with dynamic date keys, so per-entry shape is
+          // validated client-side instead (getValidDateOverride in
+          // availability-timezone.js falls back to weekdaySlots on anything
+          // malformed). Garbage beyond this check is inert: the app only
+          // ever looks up one specific computed date key, so a junk key is
+          // never read. 20 gives slack over the 14-day write window for a
+          // few not-yet-pruned past dates; the doc is still bounded by the
+          // 1MB limit and the self-only, members-only write gate above.
+          && (!('dateOverrides' in request.resource.data)
+            || (request.resource.data.dateOverrides is map
+              && request.resource.data.dateOverrides.size() <= 20))
           // matches() checks type, exact length, AND character set in one
           // expression - the original size()-only version (peer review
           // finding) let a member store any 96 characters at all, forcing
@@ -793,13 +819,26 @@ service cloud.firestore {
         allow update: if request.auth != null
           && request.auth.uid == uid
           && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['weekdaySlots', 'timezone', 'hasBeenPainted', 'updatedAt'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['weekdaySlots', 'dateOverrides', 'timezone', 'hasBeenPainted', 'updatedAt'])
           && request.resource.data.timezone is string
           && request.resource.data.timezone.size() > 0
           && request.resource.data.timezone.size() <= 64
           && request.resource.data.hasBeenPainted is bool
           && request.resource.data.updatedAt == request.time
           && request.resource.data.weekdaySlots.keys().hasOnly(['0', '1', '2', '3', '4', '5', '6'])
+          // dateOverrides (optional, one-off exceptions keyed "YYYY-MM-DD"):
+          // structural check only. Rules can't iterate or regex-check the
+          // values of a map with dynamic date keys, so per-entry shape is
+          // validated client-side instead (getValidDateOverride in
+          // availability-timezone.js falls back to weekdaySlots on anything
+          // malformed). Garbage beyond this check is inert: the app only
+          // ever looks up one specific computed date key, so a junk key is
+          // never read. 20 gives slack over the 14-day write window for a
+          // few not-yet-pruned past dates; the doc is still bounded by the
+          // 1MB limit and the self-only, members-only write gate above.
+          && (!('dateOverrides' in request.resource.data)
+            || (request.resource.data.dateOverrides is map
+              && request.resource.data.dateOverrides.size() <= 20))
           // matches() checks type, exact length, AND character set in one
           // expression - the original size()-only version (peer review
           // finding) let a member store any 96 characters at all, forcing

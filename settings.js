@@ -1430,6 +1430,29 @@
         const { doc, getDoc, getDocs, collection, query, where, updateDoc, deleteDoc } = window.ToDoAuth.firestore;
         const db = window.ToDoAuth.db;
 
+        // One of this account's own group tasks: its comment thread first,
+        // then the task. Firestore doesn't cascade subcollection deletes, and
+        // once the task is gone its comments are unreachable from the app.
+        // The comments rule lets a comment's author OR the task's owner
+        // delete it, so teammates' comments go too. allSettled still matters
+        // for deploy order: until that rule is published, teammates'
+        // comments are denied, and a denial is skipped instead of stopping
+        // the task delete or the account deletion. Must run while still a
+        // member - both delete rules require it.
+        async function deleteOwnGroupTaskWithComments(groupId, taskDoc) {
+            try {
+                const commentsSnapshot = await getDocs(collection(db, 'groups', groupId, 'tasks', taskDoc.id, 'comments'));
+                const commentResults = await Promise.allSettled(commentsSnapshot.docs.map((commentDoc) => deleteDoc(commentDoc.ref)));
+                const deniedComments = commentResults.filter((result) => result.status === 'rejected').length;
+                if (deniedComments) {
+                    console.warn(`Could not delete ${deniedComments} teammate comment(s) on one of your group tasks (continuing account deletion).`);
+                }
+            } catch (error) {
+                console.warn('Could not read the comments on one of your group tasks (continuing account deletion):', error);
+            }
+            await deleteDoc(taskDoc.ref);
+        }
+
         try {
             const groupsSnapshot = await getDocs(query(collection(db, 'groups'), where('memberIds', 'array-contains', uid)));
             for (const groupDoc of groupsSnapshot.docs) {
@@ -1439,10 +1462,11 @@
                     // give an owner standing permission to delete a teammate's
                     // task, not even here (mirrors deleteGroupCompletely in
                     // group/groups-data.js). Teammates' task docs are left
-                    // behind, orphaned, same as a normal group deletion.
+                    // behind, orphaned, same as a normal group deletion. Each
+                    // own task takes its comment thread with it.
                     const tasksSnapshot = await getDocs(collection(db, 'groups', groupDoc.id, 'tasks'));
                     const ownTaskDocs = tasksSnapshot.docs.filter((taskDoc) => taskDoc.data().ownerId === uid);
-                    await Promise.all(ownTaskDocs.map((taskDoc) => deleteDoc(taskDoc.ref)));
+                    await Promise.all(ownTaskDocs.map((taskDoc) => deleteOwnGroupTaskWithComments(groupDoc.id, taskDoc)));
                     const historySnapshot = await getDocs(collection(db, 'groups', groupDoc.id, 'history'));
                     await Promise.all(historySnapshot.docs.map((entryDoc) => deleteDoc(entryDoc.ref)));
                     // Every member's availability doc, not just this account's
@@ -1472,9 +1496,41 @@
                     }
                     await deleteDoc(groupDoc.ref);
                 } else {
-                    // Own availability grid (and the timezone copied onto it)
-                    // - deleted before leaving memberIds, while still a
-                    // member. The rule allows self-delete either way.
+                    // Everything of this account's own in the group goes
+                    // BEFORE the memberIds update below, same "own stuff
+                    // first, then leave" order as deleteGroupCompletely and
+                    // leaveGroup (group/groups-data.js). The history READ rule
+                    // requires current membership, so this query used to be
+                    // denied when it ran after leaving: deletion aborted with
+                    // an error on the first try, already half-done.
+                    //
+                    // Own history entries in a group left behind - the rule
+                    // lets each person delete only their own, matching what
+                    // leaving normally leaves alone, but account deletion
+                    // should still take a leaver's name/task text with it.
+                    const ownHistorySnapshot = await getDocs(query(
+                        collection(db, 'groups', groupDoc.id, 'history'),
+                        where('ownerId', '==', uid)
+                    ));
+                    await Promise.all(ownHistorySnapshot.docs.map((entryDoc) => deleteDoc(entryDoc.ref)));
+                    // Own group tasks too, each with its comment thread (see
+                    // deleteOwnGroupTaskWithComments), before leaving since
+                    // both delete rules require membership. Best-effort per
+                    // group, like availability below: an odd task here must
+                    // not block the rest of the account deletion.
+                    try {
+                        const ownGroupTasksSnapshot = await getDocs(query(
+                            collection(db, 'groups', groupDoc.id, 'tasks'),
+                            where('ownerId', '==', uid)
+                        ));
+                        for (const taskDoc of ownGroupTasksSnapshot.docs) {
+                            await deleteOwnGroupTaskWithComments(groupDoc.id, taskDoc);
+                        }
+                    } catch (error) {
+                        console.warn('Could not delete your tasks in a group (continuing account deletion):', error);
+                    }
+                    // Own availability grid (and the timezone copied onto it).
+                    // The rule allows self-delete either way.
                     // Best-effort, same reason as the owner branch above.
                     try {
                         await deleteDoc(doc(db, 'groups', groupDoc.id, 'availability', uid));
@@ -1492,15 +1548,6 @@
                             adminIds: adminIds.filter((adminId) => adminId !== uid)
                         });
                     }
-                    // Own history entries in a group left behind - the rule
-                    // lets each person delete only their own, matching what
-                    // leaving normally leaves alone, but account deletion
-                    // should still take a leaver's name/task text with it.
-                    const ownHistorySnapshot = await getDocs(query(
-                        collection(db, 'groups', groupDoc.id, 'history'),
-                        where('ownerId', '==', uid)
-                    ));
-                    await Promise.all(ownHistorySnapshot.docs.map((entryDoc) => deleteDoc(entryDoc.ref)));
                 }
             }
 

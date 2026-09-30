@@ -11,7 +11,7 @@
     <!-- Same stylesheet as the solo app, loaded once, the normal way - no
          second build/bundle for this page, so there's nothing for its rules
          to collide with. -->
-    <link rel="stylesheet" href="../style.css?v=20260926e">
+    <link rel="stylesheet" href="../style.css?v=20260930e">
 </head>
 <body class="authChecking">
 
@@ -511,6 +511,22 @@
                                     <button type="button" class="availabilityBrushBtn" data-brush="free"><i class="fa-solid fa-check" aria-hidden="true"></i> Free</button>
                                     <span class="availabilitySaveStatus" aria-live="polite"></span>
                                 </div>
+                                <!-- Where a stroke is written (setAvailabilityApplyScope in
+                                     group.js): the recurring weekday pattern by default, or a
+                                     one-off exception for that exact date. Own classes, not
+                                     .availabilityDayToggleBtn, so the Week | Day code can't
+                                     pick these buttons up. -->
+                                <div class="availabilityApplyRow">
+                                    <span class="availabilityApplyLabel">Apply to</span>
+                                    <div class="availabilityApplyToggle" role="group" aria-label="Apply painting to">
+                                        <button type="button" class="availabilityApplyBtn active" data-apply-scope="weekly" aria-pressed="true">Every week</button>
+                                        <button type="button" class="availabilityApplyBtn" data-apply-scope="date" aria-pressed="false">This day only</button>
+                                    </div>
+                                    <!-- One "reset to weekly" chip per visible day that has
+                                         an exception (renderAvailabilityOverrideResets). -->
+                                    <div class="availabilityResetList"></div>
+                                    <p class="availabilityApplyHint">Painting repeats every week. Use This day only for a one-off change, marked with a corner tick.</p>
+                                </div>
                                 <!-- Week | Day layout toggle: a display filter over the same
                                      grid (see applyAvailabilityGridLayout in group.js), never a
                                      separate grid. Own classes and data-grid-layout, not
@@ -674,9 +690,9 @@
          classic-script build (no module wrapper), matching how every other
          third-party script on this page is loaded. -->
     <script src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js" integrity="sha384-CU0J6nu6GO5gWB5IqOOhPQsG0LKyjpotF5Gw502R+0zbkzKHjDWc6FKSZsNTJfLX" crossorigin="anonymous"></script>
-    <script src="availability-timezone.js?v=20260926b"></script>
-    <script src="group.js?v=20260926f"></script>
+    <script src="availability-timezone.js?v=20260930a"></script>
+    <script src="group.js?v=20260930d"></script>
     <script type="module" src="../firebase-init.js?v=20260925a"></script>
-    <script src="../settings.js?v=20260926f"></script>
+    <script src="../settings.js?v=20260930a"></script>
 </body>
 </html>

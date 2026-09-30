@@ -324,6 +324,103 @@ runCase('10. Usual-hours window: outside anyone\'s hours is never suggested, and
     ];
 });
 
+// --- Cases 11-15: dateOverrides (one-off exceptions to the weekly pattern) --
+// Each member's weekly template is 'I' (if needed) around the clock, so a
+// value of 'A' or 'B' can only have come from an override, and 'I' can only
+// have come from the template.
+const ALL_IF_NEEDED_WEEK = { '0': 'I'.repeat(96), '1': 'I'.repeat(96), '2': 'I'.repeat(96), '3': 'I'.repeat(96), '4': 'I'.repeat(96), '5': 'I'.repeat(96), '6': 'I'.repeat(96) };
+
+// Case 11: the override is keyed by the MEMBER's local date, not the UTC
+// date. Edmonton Tue Oct 27 20:00 MDT (UTC-6) = Wed Oct 28 02:00Z, so the
+// "2026-10-27" override must apply even though the UTC date is the 28th.
+runCase('11. An override for the member\'s local date replaces the weekday template', () => {
+    const member = {
+        uid: 'e', name: 'Edmonton', timezone: 'America/Edmonton', hasBeenPainted: true,
+        weekdaySlots: ALL_IF_NEEDED_WEEK,
+        dateOverrides: { '2026-10-27': makeDayString(localSlotIndex(20, 0), localSlotIndex(21, 0), 96) }
+    };
+    const eightPmLocal = DateTime.fromISO('2026-10-28T02:00:00Z', { zone: 'utc' });
+    return [
+        assertEqual(getMemberValueAtInstant(member, eightPmLocal), 'A', '8pm local Oct 27 reads the override (free)'),
+        assertEqual(getMemberValueAtInstant(member, eightPmLocal.minus({ hours: 1 })), 'B', '7pm local Oct 27 reads the override (busy), not the template'),
+        assertEqual(getMemberValueAtInstant(member, eightPmLocal.plus({ hours: 4 })), 'I', 'midnight local is Oct 28, no override, template')
+    ];
+});
+
+// Case 12: a date with no override is untouched, including when the map is
+// missing entirely (older docs).
+runCase('12. No override for that date falls back to the weekday template unchanged', () => {
+    const template = onlyDay(3, makeDayString(localSlotIndex(10, 0), localSlotIndex(11, 0), 96));
+    const withOtherDate = { uid: 'a', timezone: 'UTC', weekdaySlots: template, dateOverrides: { '2026-01-08': 'A'.repeat(96) } };
+    const withoutMap = { uid: 'b', timezone: 'UTC', weekdaySlots: template };
+    const wedTenAm = DateTime.fromISO('2026-01-07T10:00:00Z', { zone: 'utc' }); // a Wednesday
+    const wedNineAm = DateTime.fromISO('2026-01-07T09:00:00Z', { zone: 'utc' });
+    return [
+        assertEqual(getMemberValueAtInstant(withOtherDate, wedTenAm), 'A', 'override on another date: template free slot'),
+        assertEqual(getMemberValueAtInstant(withOtherDate, wedNineAm), 'B', 'override on another date: template busy slot'),
+        assertEqual(getMemberValueAtInstant(withoutMap, wedTenAm), 'A', 'no dateOverrides field at all: template free slot'),
+        assertEqual(getMemberValueAtInstant(withoutMap, wedNineAm), 'B', 'no dateOverrides field at all: template busy slot')
+    ];
+});
+
+// Case 13: pruning keeps today and later, drops the past, and never mutates
+// its input.
+runCase('13. pruneDateOverrides drops dates that have passed', () => {
+    const input = { '2026-09-28': 'A'.repeat(96), '2026-09-29': 'B'.repeat(96), '2026-09-30': 'I'.repeat(96), '2026-10-12': 'A'.repeat(96) };
+    const pruned = pruneDateOverrides(input, '2026-09-30');
+    return [
+        assertEqual(Object.keys(pruned).sort().join(','), '2026-09-30,2026-10-12', 'keeps today and later only'),
+        assertEqual(Object.keys(input).length, 4, 'input map is not mutated'),
+        { pass: pruned !== input, label: 'returns a new object', detail: 'got the same reference' },
+        assertEqual(Object.keys(pruneDateOverrides(undefined, '2026-09-30')).length, 0, 'missing map prunes to {}'),
+        assertEqual(MAX_DATE_OVERRIDE_DAYS_AHEAD, 14, 'write window constant')
+    ];
+});
+
+// Case 14: rules can't validate override values, so anything malformed must
+// be ignored (template used) and must never throw.
+runCase('14. A malformed override is ignored and falls back safely', () => {
+    const instant = DateTime.fromISO('2026-01-07T10:00:00Z', { zone: 'utc' });
+    const badValues = ['A'.repeat(95), 'A'.repeat(97), 'X'.repeat(96), 'a'.repeat(96), 96, null, ['A'], { length: 96 }];
+    const assertions = badValues.map((bad) => assertEqual(
+        getMemberValueAtInstant({ uid: 'a', timezone: 'UTC', weekdaySlots: ALL_IF_NEEDED_WEEK, dateOverrides: { '2026-01-07': bad } }, instant),
+        'I',
+        `override ${JSON.stringify(bad).slice(0, 20)} ignored, template used`
+    ));
+    assertions.push(assertEqual(
+        getMemberValueAtInstant({ uid: 'a', timezone: 'UTC', weekdaySlots: ALL_IF_NEEDED_WEEK, dateOverrides: 'not a map' }, instant),
+        'I',
+        'a non-map dateOverrides is ignored'
+    ));
+    return assertions;
+});
+
+// Case 15: same DST dates as case 3, plus Kathmandu (UTC+5:45) from case 4.
+// Edmonton has an override on Tue Oct 27 (still MDT, UTC-6) and on Tue Nov 3
+// (now MST, UTC-7), each free for 08:00-08:15 local only. The same 14:00Z
+// instant is 08:00 local on Oct 27 but 07:00 local on Nov 3.
+runCase('15. Override lookup respects DST and 45-minute zones like the weekday lookup', () => {
+    const freeAtEight = makeDayString(localSlotIndex(8, 0), localSlotIndex(8, 15), 96);
+    const edmonton = {
+        uid: 'e', timezone: 'America/Edmonton', weekdaySlots: ALL_IF_NEEDED_WEEK,
+        dateOverrides: { '2026-10-27': freeAtEight, '2026-11-03': freeAtEight }
+    };
+    const kathmandu = {
+        uid: 'k', timezone: 'Asia/Kathmandu', weekdaySlots: ALL_IF_NEEDED_WEEK,
+        dateOverrides: { '2026-01-07': makeDayString(localSlotIndex(10, 0), localSlotIndex(10, 15), 96) }
+    };
+    const at = (iso) => DateTime.fromISO(iso, { zone: 'utc' });
+    return [
+        assertEqual(getMemberValueAtInstant(edmonton, at('2026-10-27T14:00:00Z')), 'A', 'Oct 27 14:00Z = 08:00 MDT, override free'),
+        assertEqual(getMemberValueAtInstant(edmonton, at('2026-11-03T14:00:00Z')), 'B', 'Nov 3 14:00Z = 07:00 MST, override busy'),
+        assertEqual(getMemberValueAtInstant(edmonton, at('2026-11-03T15:00:00Z')), 'A', 'Nov 3 15:00Z = 08:00 MST, override free'),
+        assertEqual(getMemberValueAtInstant(kathmandu, at('2026-01-07T04:15:00Z')), 'A', '04:15Z = 10:00 Kathmandu, override free'),
+        assertEqual(getMemberValueAtInstant(kathmandu, at('2026-01-07T04:00:00Z')), 'B', '04:00Z = 09:45 Kathmandu, override busy'),
+        assertEqual(getMemberValueAtInstant(kathmandu, at('2026-01-06T18:14:00Z')), 'I', '18:14Z Jan 6 = 23:59 Jan 6 Kathmandu, no override, template'),
+        assertEqual(getMemberValueAtInstant(kathmandu, at('2026-01-06T18:15:00Z')), 'B', '18:15Z Jan 6 = 00:00 Jan 7 Kathmandu, override applies')
+    ];
+});
+
 // --- Render ------------------------------------------------------------------
 const resultsEl = document.getElementById('results');
 results.forEach((result) => {

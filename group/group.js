@@ -656,6 +656,8 @@ const availabilityChangeTimezoneBtn = document.querySelector('.availabilityChang
 const availabilityGridWrap = document.querySelector('.availabilityGridWrap');
 const availabilityGridEl = document.querySelector('.availabilityGrid');
 const availabilityBrushButtons = Array.from(document.querySelectorAll('.availabilityBrushBtn'));
+const availabilityApplyButtons = Array.from(document.querySelectorAll('.availabilityApplyBtn'));
+const availabilityResetList = document.querySelector('.availabilityResetList');
 const availabilitySaveStatus = document.querySelector('.availabilitySaveStatus');
 
 const AVAILABILITY_DEFAULT_HOUR_RANGE = { startHour: 7, endHour: 23 };
@@ -686,6 +688,14 @@ let groupAvailabilitySubscriptionKey = null;
 
 let availabilityLoadedForGroupId = null;    // which group's data is currently in memory
 let availabilityWeekdaySlots = null;        // {'0'..'6': 96-char string} - null = not painted/loaded yet
+// One-off exceptions: {'yyyy-MM-dd' (in the viewer's saved zone): 96-char
+// string}, same slot format as a weekdaySlots value. Checked before
+// weekdaySlots for that literal date only. Saved as the doc's dateOverrides,
+// pruned to today..today+MAX_DATE_OVERRIDE_DAYS_AHEAD-1 on load and save.
+let availabilityDateOverrides = {};
+// 'weekly' (default, paints the recurring weekday pattern) or 'date' (paints
+// a one-off exception for the cell's exact date). See setAvailabilityApplyScope.
+let availabilityApplyScope = 'weekly';
 let availabilityTimezone = null;
 let availabilityHasBeenPainted = false;
 // Default brush is Busy, not Free - the grid now starts fully free (see
@@ -750,6 +760,8 @@ function renderGroupAvailabilityView(group) {
         // completion.
         availabilityLoadedForGroupId = group.id;
         availabilityWeekdaySlots = null;
+        availabilityDateOverrides = {};
+        setAvailabilityApplyScope('weekly');
         availabilityHasBeenPainted = false;
         availabilityTimezone = null;
         availabilityFetchFailedForGroupId = null;
@@ -865,6 +877,22 @@ let availabilityFetchFailedForGroupId = null;
 const availabilityLoadError = document.querySelector('.availabilityLoadError');
 const availabilityLoadRetryBtn = document.querySelector('.availabilityLoadRetryBtn');
 
+// Drops past exceptions via availability-timezone.js's pruneDateOverrides,
+// with "today" read in the viewer's saved zone (the zone the keys were
+// written in), then anything MAX_DATE_OVERRIDE_DAYS_AHEAD or more days out
+// and any malformed value, so this client never writes either back.
+function pruneOwnAvailabilityDateOverrides(overrides) {
+    const today = luxon.DateTime.now().setZone(getAvailabilityViewerZone());
+    const firstTooFarKey = today.plus({ days: MAX_DATE_OVERRIDE_DAYS_AHEAD }).toISODate();
+    const pruned = pruneDateOverrides(overrides, today.toISODate());
+    Object.keys(pruned).forEach((dateKey) => {
+        if (dateKey >= firstTooFarKey || !getValidDateOverride(pruned, dateKey)) {
+            delete pruned[dateKey];
+        }
+    });
+    return pruned;
+}
+
 async function fetchMyAvailability(group, attempt = 0) {
     const { doc, getDoc } = fs();
     try {
@@ -878,6 +906,10 @@ async function fetchMyAvailability(group, attempt = 0) {
             availabilityWeekdaySlots = data.weekdaySlots;
             availabilityTimezone = data.timezone;
             availabilityHasBeenPainted = Boolean(data.hasBeenPainted);
+            // Docs from before exceptions existed have no dateOverrides.
+            // Pruned after the zone is set, since "today" is read in it; the
+            // cleaned copy reaches Firestore on the next real save.
+            availabilityDateOverrides = pruneOwnAvailabilityDateOverrides(data.dateOverrides || {});
         } else {
             // Real feedback after actually using this: a separate "pick a
             // starting mode" step before you could even see the grid was
@@ -1070,6 +1102,7 @@ function getScorableGroupMembers(group) {
                 name: resolveMemberName(uid, group.memberNames?.[index], groupTasks),
                 timezone: data.timezone,
                 weekdaySlots: data.weekdaySlots,
+                dateOverrides: data.dateOverrides || {},
                 hasBeenPainted: Boolean(data.hasBeenPainted)
             };
         })
@@ -1395,6 +1428,79 @@ availabilityBrushButtons.forEach((button) => {
 });
 setAvailabilityBrush(availabilityActiveBrush);
 
+// "Apply to: Every week | This day only". Resets to 'weekly' on a group
+// switch, so someone who never touches it paints exactly as before.
+function setAvailabilityApplyScope(scope) {
+    availabilityApplyScope = scope === 'date' ? 'date' : 'weekly';
+    availabilityApplyButtons.forEach((button) => {
+        const isActive = button.dataset.applyScope === availabilityApplyScope;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+}
+
+availabilityApplyButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+        playClickSound();
+        setAvailabilityApplyScope(button.dataset.applyScope);
+    });
+});
+
+// "Reset to weekly" chips, one per visible day that has an exception: every
+// such day in Week mode, just the day on screen in Day mode. Re-rendered after
+// any paint, full repaint or layout change, but the DOM is only rebuilt when
+// the set of dates actually changes, so a drag doesn't churn it per cell.
+let availabilityResetListKey = null;
+
+function renderAvailabilityOverrideResets() {
+    if (!availabilityResetList) {
+        return;
+    }
+    const columns = availabilityWeekdaySlots ? getAvailabilityColumns() : [];
+    const dates = columns
+        .map(({ date }) => date)
+        .filter((date) => availabilityGridLayout !== 'day' || date.toISODate() === availabilityDaySelectedDateKey)
+        .filter((date) => getValidDateOverride(availabilityDateOverrides, date.toISODate()));
+    const key = dates.map((date) => date.toISODate()).join(',');
+    if (key === availabilityResetListKey) {
+        return;
+    }
+    availabilityResetListKey = key;
+    availabilityResetList.innerHTML = '';
+    dates.forEach((date) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'availabilityResetBtn';
+        button.dataset.dateKey = date.toISODate();
+        button.title = `Reset ${date.toFormat('cccc, MMM d')} to your weekly pattern`;
+        button.setAttribute('aria-label', button.title);
+        const icon = document.createElement('i');
+        icon.className = 'fa-solid fa-rotate-left';
+        icon.setAttribute('aria-hidden', 'true');
+        button.appendChild(icon);
+        button.appendChild(document.createTextNode(` ${date.toFormat('ccc, MMM d')}`));
+        availabilityResetList.appendChild(button);
+    });
+}
+
+// Removes just that one date's exception - never the weekly pattern or any
+// other date - then goes through the normal debounced save, which prunes and
+// (with no exceptions left) writes the doc without dateOverrides at all.
+availabilityResetList?.addEventListener('click', (event) => {
+    const button = event.target.closest('.availabilityResetBtn');
+    if (!button || !availabilityWeekdaySlots) {
+        return;
+    }
+    playClickSound();
+    delete availabilityDateOverrides[button.dataset.dateKey];
+    paintAllAvailabilityCellsFromState();
+    scheduleAvailabilitySave();
+    // The clicked chip is gone now - keep keyboard focus in the same row.
+    const nextFocus = availabilityResetList.querySelector('.availabilityResetBtn')
+        || availabilityApplyButtons.find((applyButton) => applyButton.classList.contains('active'));
+    nextFocus?.focus();
+});
+
 // Week | Day layout, one shared state for both the paint grid (My
 // availability) and the heatmap (Team overlap), so switching sub-tabs always
 // shows the same mode and day. Each sub-panel has its own copy of the toggle
@@ -1451,6 +1557,13 @@ function applyAvailabilityGridLayout() {
     availabilityDayNavLabels.forEach((label) => {
         label.textContent = labelText;
     });
+    // In Day mode there's one weekday on screen, so name it; in Week mode
+    // the stroke's weekday varies, so the generic label stays.
+    const weeklyApplyButton = availabilityApplyButtons.find((button) => button.dataset.applyScope === 'weekly');
+    if (weeklyApplyButton) {
+        weeklyApplyButton.textContent = isDayMode ? `Every ${date.toFormat('cccc')}` : 'Every week';
+    }
+    renderAvailabilityOverrideResets();
     availabilityDayNavButtons.forEach((button) => {
         const step = Number(button.dataset.dayStep);
         button.disabled = step < 0 ? dayIndex === 0 : dayIndex === columns.length - 1;
@@ -1519,10 +1632,14 @@ function buildAvailabilityGridDomIfNeeded() {
             availabilityGridEl.appendChild(label);
 
             const slotPairIndex = hourOffset * 2 + half;
-            columns.forEach(({ jsWeekday }) => {
+            columns.forEach(({ jsWeekday, date }) => {
                 const cell = document.createElement('div');
                 cell.className = `availabilityGridCell${isHourStart ? ' hourStart' : ''}`;
                 cell.dataset.weekday = String(jsWeekday);
+                // The column's real date, for one-off exceptions
+                // (availabilityDateOverrides). A day rollover rebuilds the
+                // grid (see getAvailabilityGridRangeKey), so it never goes stale.
+                cell.dataset.dateKey = date.toISODate();
                 cell.dataset.slotPair = String(slotPairIndex);
                 availabilityGridEl.appendChild(cell);
             });
@@ -1544,19 +1661,17 @@ function buildAvailabilityGridDomIfNeeded() {
     applyAvailabilityGridLayout();
 }
 
-function getAvailabilitySlotPairValue(jsWeekday, slotPairIndex) {
-    const packed = availabilityWeekdaySlots[String(jsWeekday)];
-    const [a] = slotPairToStorageIndices(slotPairIndex);
-    return packed[a];
-}
-
+// A one-off exception for the cell's exact date wins over the weekly
+// pattern. Same zone on both sides (keys and column dates are both in the
+// viewer's saved zone), so this is a plain lookup, unlike the heatmap's.
 function applyAvailabilityCellVisual(cell) {
-    const jsWeekday = Number(cell.dataset.weekday);
-    const slotPairIndex = Number(cell.dataset.slotPair);
-    const value = getAvailabilitySlotPairValue(jsWeekday, slotPairIndex);
-    const state = AVAILABILITY_VALUE_TO_STATE[value] || 'busy';
+    const override = getValidDateOverride(availabilityDateOverrides, cell.dataset.dateKey);
+    const packed = override || availabilityWeekdaySlots[cell.dataset.weekday];
+    const [a] = slotPairToStorageIndices(Number(cell.dataset.slotPair));
+    const state = AVAILABILITY_VALUE_TO_STATE[packed[a]] || 'busy';
     cell.classList.remove('state-free', 'state-busy', 'state-ifNeeded');
     cell.classList.add(`state-${state}`);
+    cell.classList.toggle('hasOverride', Boolean(override));
 }
 
 function paintAllAvailabilityCellsFromState() {
@@ -1566,33 +1681,71 @@ function paintAllAvailabilityCellsFromState() {
     availabilityGridEl.querySelectorAll('.availabilityGridCell').forEach((cell) => {
         applyAvailabilityCellVisual(cell);
     });
+    renderAvailabilityOverrideResets();
 }
 
 // Both UI-row halves (the two underlying 15-min slots a single 30-min row
 // represents) are always painted together - the UI never exposes 15-min
 // granularity directly, only storage needs it (see availability-plan.md's
 // Timezone Strategy for why 15-min storage matters even with 30-min rows).
-function paintAvailabilitySlotPair(jsWeekday, slotPairIndex, value) {
-    const key = String(jsWeekday);
-    const packed = availabilityWeekdaySlots[key];
+function writeSlotPair(packed, slotPairIndex, value) {
     const [a, b] = slotPairToStorageIndices(slotPairIndex);
-    if (packed[a] === value && packed[b] === value) {
-        return false;
+    return packed.slice(0, a) + value + value + packed.slice(b + 1);
+}
+
+// 'weekly' scope writes the recurring weekday pattern, exactly as before
+// exceptions existed. If that date already has an exception it gets the same
+// write too, otherwise the stroke would land on the hidden weekly layer and
+// the cell (which shows the exception) wouldn't visibly change. 'date' scope
+// writes only the exception for that date, seeded from the weekly pattern the
+// first time so the rest of the day stays as it was.
+function paintAvailabilitySlotPair(cell, slotPairIndex, value) {
+    const weekdayKey = cell.dataset.weekday;
+    const dateKey = cell.dataset.dateKey;
+    const weekly = availabilityWeekdaySlots[weekdayKey];
+    const override = getValidDateOverride(availabilityDateOverrides, dateKey);
+    const [a, b] = slotPairToStorageIndices(slotPairIndex);
+    let changed = false;
+    if (availabilityApplyScope === 'date') {
+        const base = override || weekly;
+        if (!override || base[a] !== value || base[b] !== value) {
+            availabilityDateOverrides[dateKey] = writeSlotPair(base, slotPairIndex, value);
+            changed = true;
+        }
+    } else {
+        if (weekly[a] !== value || weekly[b] !== value) {
+            availabilityWeekdaySlots[weekdayKey] = writeSlotPair(weekly, slotPairIndex, value);
+            changed = true;
+        }
+        if (override && (override[a] !== value || override[b] !== value)) {
+            availabilityDateOverrides[dateKey] = writeSlotPair(override, slotPairIndex, value);
+            changed = true;
+        }
     }
-    availabilityWeekdaySlots[key] = packed.slice(0, a) + value + value + packed.slice(b + 1);
-    availabilityHasBeenPainted = true;
-    return true;
+    if (changed) {
+        availabilityHasBeenPainted = true;
+    }
+    return changed;
 }
 
 function paintAvailabilityCellFromDom(cell) {
     availabilityLastPaintedCell = cell;
-    const jsWeekday = Number(cell.dataset.weekday);
     const slotPairIndex = Number(cell.dataset.slotPair);
-    const changed = paintAvailabilitySlotPair(jsWeekday, slotPairIndex, availabilityPaintValue);
-    if (changed) {
-        applyAvailabilityCellVisual(cell);
-        scheduleAvailabilitySave();
+    const dateKey = cell.dataset.dateKey;
+    const hadOverride = Boolean(getValidDateOverride(availabilityDateOverrides, dateKey));
+    const changed = paintAvailabilitySlotPair(cell, slotPairIndex, availabilityPaintValue);
+    if (!changed) {
+        return;
     }
+    if (!hadOverride && getValidDateOverride(availabilityDateOverrides, dateKey)) {
+        // This stroke just created the exception, so the whole day is now
+        // governed by it - mark every cell in that column, not just this one.
+        availabilityGridEl.querySelectorAll(`.availabilityGridCell[data-date-key="${dateKey}"]`).forEach(applyAvailabilityCellVisual);
+    } else {
+        applyAvailabilityCellVisual(cell);
+    }
+    renderAvailabilityOverrideResets();
+    scheduleAvailabilitySave();
 }
 
 // Attached to the GRID CONTAINER, not per-cell - pointer capture (explicit
@@ -1906,16 +2059,27 @@ async function saveAvailabilityNow() {
         return;
     }
     const weekdaySlotsToSave = availabilityWeekdaySlots;
+    // Pruned on every save so past exceptions never pile up in the doc
+    // (including one that went past while the tab sat open overnight). Kept
+    // in memory too, so the grid matches what was written.
+    availabilityDateOverrides = pruneOwnAvailabilityDateOverrides(availabilityDateOverrides);
     const timezoneToSave = availabilityTimezone || detectBrowserTimezone();
     const hasBeenPaintedToSave = availabilityHasBeenPainted;
     const { doc, setDoc, serverTimestamp } = fs();
+    const docToSave = {
+        weekdaySlots: weekdaySlotsToSave,
+        timezone: timezoneToSave,
+        hasBeenPainted: hasBeenPaintedToSave,
+        updatedAt: serverTimestamp()
+    };
+    // Only written when there's at least one exception, so someone who never
+    // uses "This day only" saves exactly the same doc as before. setDoc
+    // replaces the whole doc, so leaving it out also clears the last pruned one.
+    if (Object.keys(availabilityDateOverrides).length) {
+        docToSave.dateOverrides = { ...availabilityDateOverrides };
+    }
     try {
-        await setDoc(doc(db(), 'groups', groupId, 'availability', currentUser.uid), {
-            weekdaySlots: weekdaySlotsToSave,
-            timezone: timezoneToSave,
-            hasBeenPainted: hasBeenPaintedToSave,
-            updatedAt: serverTimestamp()
-        });
+        await setDoc(doc(db(), 'groups', groupId, 'availability', currentUser.uid), docToSave);
         if (availabilitySaveStatus) {
             availabilitySaveStatus.textContent = 'Saved';
             setTimeout(() => {
@@ -2494,7 +2658,7 @@ function renderAvailabilityRecommendations(group) {
         viewHourRange.startHour,
         viewHourRange.endHour,
         Math.floor(now.toMillis() / (15 * 60 * 1000)),
-        scoredMembers.map((member) => [member.uid, member.name, member.timezone, member.weekdaySlots]),
+        scoredMembers.map((member) => [member.uid, member.name, member.timezone, member.weekdaySlots, member.dateOverrides]),
         unsetMembers.map((member) => member.name)
     ]);
     if (renderKey === availabilityRecommendRenderKey) {
@@ -8815,7 +8979,7 @@ const GROUP_TOUR_STEPS = [
         // group-wide listener on its own.
         selector: '.availabilitySubTabs',
         title: 'Availability',
-        text: 'Find a time the whole team can meet. Under My availability everything starts out free, so just paint the times you\'re busy (or If needed). Then check Team overlap to see when everyone\'s around, and Best times for the slots that work for the most people. Times show in your own timezone (tap Change if it\'s wrong), Week or Day switches the layout, and teammates only ever see free, busy, or if needed, never why.',
+        text: 'Find a time the whole team can meet. Under My availability everything starts out free, so just paint the times you\'re busy (or If needed). Then check Team overlap to see when everyone\'s around, and Best times for the slots that work for the most people. Times show in your own timezone (tap Change if it\'s wrong), Week or Day switches the layout, This day only paints a one-off change instead of your weekly pattern, and teammates only ever see free, busy, or if needed, never why.',
         beforeShow: () => switchGroupView('availability')
     },
     {
