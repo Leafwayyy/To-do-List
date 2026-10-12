@@ -6413,30 +6413,35 @@ const LEADERBOARD_ORDINALS = { 1: '1st', 2: '2nd', 3: '3rd' };
 // Same {memberId -> completed task list} lookup the leaderboard's own
 // counts are built from, reused by the click-through member modal below so
 // the list it shows always matches the number next to that member's name.
+//
+// All three ranges read from the permanent groupHistoryEntries log (see
+// subscribeToGroupHistory), never the live groupTasks list. Month and All
+// time used to filter groupTasks by task.completed, which undercounted the
+// moment a completed task was later deleted, or a recurring task reset back
+// to incomplete for its next cycle - the task would vanish from those two
+// counts while still correctly showing in Week (which already used history)
+// and in the Activity tab, making the numbers look stuck/wrong. History is
+// capped at 200 docs across the whole group (see subscribeToGroupHistory's
+// own comment), so an "all time" count on a very long-lived, very active
+// group can undercount once total completions pass that cap - accepted,
+// since it's still far more accurate than reading live task state.
 function getMemberCompletedEntriesForRange(memberId, range) {
-    if (range === 'week') {
-        const weekStart = getStartOfCalendarWeek(new Date()).getTime();
-        return groupHistoryEntries
-            .filter((entry) => entry.ownerId === memberId)
-            .map((entry) => ({ text: entry.taskText, completedAt: entry.completedAt }))
-            .filter((entry) => {
-                const completedAtMs = new Date(entry.completedAt).getTime();
-                return !Number.isNaN(completedAtMs) && completedAtMs >= weekStart;
-            });
-    }
+    const startMs = range === 'week'
+        ? getStartOfCalendarWeek(new Date()).getTime()
+        : range === 'month'
+            ? getStartOfCalendarMonth(new Date()).getTime()
+            : null;
 
-    const monthStart = range === 'month' ? getStartOfCalendarMonth(new Date()).getTime() : null;
-    return groupTasks
-        .filter((task) => task.ownerId === memberId && task.completed && task.completedAt)
-        .map((task) => ({ text: task.text, completedAt: task.completedAt }))
+    return groupHistoryEntries
+        .filter((entry) => entry.ownerId === memberId)
+        .map((entry) => ({ text: entry.taskText, completedAt: entry.completedAt }))
         .filter((entry) => {
-            if (monthStart === null) {
+            if (startMs === null) {
                 return true;
             }
             const completedAtMs = new Date(entry.completedAt).getTime();
-            return !Number.isNaN(completedAtMs) && completedAtMs >= monthStart;
-        })
-        .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+            return !Number.isNaN(completedAtMs) && completedAtMs >= startMs;
+        });
 }
 
 function renderGroupLeaderboard(group) {
