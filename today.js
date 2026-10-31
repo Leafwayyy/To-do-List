@@ -79,7 +79,11 @@ const TodayPlan = (() => {
             });
 
         // Waiting tasks (blocked / in review) can't be acted on, so they never lead the list.
-        const focusEntries = [...overdue, ...dueToday, ...inProgress, ...rest].filter((entry) => !isWaiting(entry));
+        // The list is what belongs to today: overdue, due today, and what you've started. Other
+        // open tasks only appear (a few, as ideas to get ahead on) when there is nothing else, so
+        // a task due next week never sits in today's list just to fill it.
+        const todays = [...overdue, ...dueToday, ...inProgress].filter((entry) => !isWaiting(entry));
+        const focusEntries = todays.length > 0 ? todays : rest.slice(0, 3);
         const focus = focusEntries.slice(0, MAX_ITEMS).map((entry) => ({
             id: entry.task.id,
             text: entry.task.text,
