@@ -1,0 +1,25 @@
+name = "todo-email"
+main = "email-worker.js"
+compatibility_date = "2026-08-31"
+
+# Deploy this one with:  npx wrangler deploy -c wrangler-email.toml
+# (the AI worker keeps using plain `npx wrangler deploy`). Full steps: EMAIL-SETUP.md
+
+[vars]
+FIREBASE_PROJECT_ID = "todo-list-507018"
+ALLOWED_ORIGINS = "https://todo-list.co,https://www.todo-list.co,https://leafwayyy.github.io,http://localhost:8000"
+# Where the "Open" links in emails point (no trailing slash).
+APP_URL = "https://todo-list.co"
+# Who the email comes from, e.g.  To-Do List <notifications@yourdomain.com>
+# Left empty on purpose: the worker sends nothing until you set a sender you have
+# verified with Resend. For a first test you can use  onboarding@resend.dev  (Resend only
+# delivers those to the email address of your own Resend account).
+EMAIL_FROM = ""
+
+# Look for unread notifications every 10 minutes.
+[triggers]
+crons = ["*/10 * * * *"]
+
+# Secrets - NEVER put these here. Set them once with:
+#   npx wrangler secret put RESEND_API_KEY -c wrangler-email.toml
+#   npx wrangler secret put FIREBASE_SERVICE_ACCOUNT -c wrangler-email.toml
