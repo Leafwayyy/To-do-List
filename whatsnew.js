@@ -27,7 +27,7 @@
 const WHATS_NEW_RELEASES = [
     {
         id: '2026-11-04',
-        date: 'November 4, 2026',
+        date: 'October 31, 2026',
         title: 'Change a deadline you assigned, and keep copies in step',
         intro: 'When you assign a task, each person gets their own copy. That was fine until plans changed: the deadline moved on your side, but theirs stayed put, and all you could do was leave a comment.',
         sections: [
@@ -52,7 +52,7 @@ const WHATS_NEW_RELEASES = [
     },
     {
         id: '2026-11-03',
-        date: 'November 3, 2026',
+        date: 'October 31, 2026',
         title: 'Tasks that wait for other tasks, and verified email',
         intro: 'Two things teams kept running into: work that can\'t start until somebody else finishes something, and email notifications that only reach people whose address has been confirmed.',
         sections: [
@@ -82,7 +82,7 @@ const WHATS_NEW_RELEASES = [
     },
     {
         id: '2026-11-02',
-        date: 'November 2, 2026',
+        date: 'October 31, 2026',
         title: 'Dusty now speaks team workflow',
         intro: 'Dusty already knew your tasks, folders and groups. Now he understands how a team actually works day to day: what\'s blocked, what\'s waiting for a sign-off, and what you should be doing right now. As always, he only proposes. Nothing happens until you tick it.',
         sections: [
@@ -126,7 +126,7 @@ const WHATS_NEW_RELEASES = [
     },
     {
         id: '2026-11-01',
-        date: 'November 1, 2026',
+        date: 'October 31, 2026',
         title: 'Notifications, a Today view, and a smoother team workflow',
         intro: 'We looked at what a small team actually needs from a to-do list: knowing what to do today, knowing when something is stuck, and finding out when something concerns you without having to keep checking. This update is built around those three things.',
         sections: [
