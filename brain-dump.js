@@ -2029,8 +2029,79 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     // and undoing a wrong save is exactly as easy as the old confirm click
     // was, just after the fact - appendMemorySavedNotice's Forget button
     // deletes the specific doc just written, not just a visual dismiss.
-    async function appendMemoryReview(memoryProposals) {
-        if (!memoryProposals || memoryProposals.length === 0) {
+    // PROVENANCE GATE. A saved memory is fed back into every future chat, so a
+    // wrong one is persistent. Dusty also reads other people's text (teammates'
+    // task titles, names) in the same prompt, and the model can't reliably tell
+    // that apart from what YOU said. So this check lives in code, not in the
+    // prompt: a proposed memory is only saved silently when its substance is
+    // supported by the user's OWN messages in this conversation. Anything else is
+    // offered ("Remember this?") and saved only if the user taps Save.
+    function memoryIsSupportedByUser(memoryText) {
+        const words = Array.from(new Set(String(memoryText || '').toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) || []));
+        if (words.length === 0) {
+            return false;
+        }
+        const userText = history
+            .filter((turn) => turn && turn.role === 'user')
+            .map((turn) => String(turn.text || '').toLowerCase())
+            .join(' ');
+        const found = words.filter((word) => userText.includes(word)).length;
+        return found / words.length >= 0.6;
+    }
+
+    function appendMemoryOfferRow(proposal) {
+        const row = document.createElement('div');
+        row.classList.add('brainDumpMemorySaved', 'offer');
+
+        const icon = document.createElement('span');
+        icon.classList.add('brainDumpMemorySavedIcon');
+        icon.textContent = '\uD83E\uDDE0';
+        row.appendChild(icon);
+
+        const label = document.createElement('span');
+        label.classList.add('brainDumpMemorySavedText');
+        // textContent only: this is model output.
+        label.textContent = `Remember this? "${String(proposal.text || '').trim().slice(0, 300)}"`;
+        row.appendChild(label);
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.classList.add('suggestionAcceptBtn');
+        saveBtn.textContent = 'Save';
+        const dismissBtn = document.createElement('button');
+        dismissBtn.type = 'button';
+        dismissBtn.classList.add('suggestionDismissBtn');
+        dismissBtn.textContent = 'No thanks';
+        row.append(saveBtn, dismissBtn);
+
+        dismissBtn.addEventListener('click', () => row.remove());
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true;
+            dismissBtn.disabled = true;
+            try {
+                const written = await commitMemories([proposal]);
+                row.remove();
+                written.forEach(({ id, text }) => appendMemorySavedNotice(id, text));
+            } catch (error) {
+                console.error('Failed to save memory:', error);
+                row.remove();
+                appendMemorySaveFailedNotice();
+            }
+        });
+
+        messagesEl.appendChild(row);
+        scrollToBottom();
+    }
+
+    async function appendMemoryReview(allProposals) {
+        if (!allProposals || allProposals.length === 0) {
+            return;
+        }
+        const memoryProposals = allProposals.filter((proposal) => memoryIsSupportedByUser(proposal && proposal.text));
+        allProposals
+            .filter((proposal) => !memoryProposals.includes(proposal) && proposal && String(proposal.text || '').trim())
+            .forEach(appendMemoryOfferRow);
+        if (memoryProposals.length === 0) {
             return;
         }
         let written;

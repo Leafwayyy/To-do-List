@@ -12578,3 +12578,25 @@ body.authGateActive .authOverlay{
     max-height: 30vh;
     overflow-y: auto;
 }
+
+/* "Remember this?" - a memory Dusty proposed that the user didn't actually say
+   (see brain-dump.js's memoryIsSupportedByUser), so it waits for a tap. */
+.brainDumpMemorySaved.offer{
+    flex-wrap: wrap;
+    border-style: dashed;
+    border-color: var(--violet-accent, #b58bff);
+}
+
+.brainDumpMemorySaved.offer .brainDumpMemorySavedText{
+    flex-basis: 60%;
+}
+
+.brainDumpMemorySaved.offer .suggestionAcceptBtn,
+.brainDumpMemorySaved.offer .suggestionDismissBtn{
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: var(--text-xs, 11px);
+    font-weight: 700;
+    cursor: pointer;
+}

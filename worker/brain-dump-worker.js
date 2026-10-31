@@ -506,8 +506,21 @@ async function verifyFirebaseToken(request, env) {
 // ever tells the model ids from the CURRENT group are valid comment
 // targets, so there's no need to withhold them elsewhere; keeping it
 // explicit here anyway as a second, defensive layer.
+// Text other people wrote (a teammate's task title, a name) is untrusted input to
+// this prompt. Flatten control characters and newlines so it can't fake the
+// structure around it (a new line that looks like a rule or a "known fact"),
+// and cap it. The model is still only ever a proposer; this just keeps the
+// prompt's own layout intact.
+function oneLine(value, max) {
+    return String(value == null ? '' : value)
+        .replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, max);
+}
+
 function describeContextTask(task, includeId) {
-    const parts = [String(task.text || '').slice(0, 200)];
+    const parts = [oneLine(task.text, 200)];
     if (includeId && task.id) parts.push(`id=${String(task.id).slice(0, 80)}`);
     if (task.dueAt) parts.push(`due ${task.dueAt}`);
     if (task.matrix) {
@@ -516,14 +529,14 @@ function describeContextTask(task, includeId) {
             : `matrix=${task.matrix}`);
     }
     if (task.difficulty) parts.push(`difficulty=${task.difficulty}`);
-    if (task.owner) parts.push(`assigned to ${task.owner}`);
+    if (task.owner) parts.push(`assigned to ${oneLine(task.owner, 80)}`);
     // Needed for the EDITING EXISTING TASKS "subtasks" capability - the
     // model can't sensibly rewrite a step list (carrying forward whatever
     // it has no reason to change, including each step's own dueAt if it
     // has one) if it can't see what's already there.
     if (Array.isArray(task.subtasks) && task.subtasks.length > 0) {
         const stepList = task.subtasks
-            .map((subtask) => `${subtask.completed ? '[done] ' : ''}${String(subtask.text || '').slice(0, 120)}${subtask.dueAt ? ` (due ${subtask.dueAt})` : ''}`)
+            .map((subtask) => `${subtask.completed ? '[done] ' : ''}${oneLine(subtask.text, 120)}${subtask.dueAt ? ` (due ${subtask.dueAt})` : ''}`)
             .join(' | ');
         parts.push(`steps: ${stepList}`);
     }
@@ -594,8 +607,8 @@ function buildTaskContextBlockCore(taskContext, currentGroupId) {
     groups.forEach((group) => {
         const isCurrent = Boolean(currentGroupId) && group.id === currentGroupId;
         const tasks = Array.isArray(group?.tasks) ? group.tasks.slice(0, 150) : [];
-        const roster = Array.isArray(group?.memberNames) ? group.memberNames.filter(Boolean) : [];
-        const label = `\nGroup "${String(group.name || 'Unnamed').slice(0, 80)}"${isCurrent ? ' (currently open - you may suggest tasks or comment on tasks in THIS group only)' : ''}:`;
+        const roster = Array.isArray(group?.memberNames) ? group.memberNames.map((name) => oneLine(name, 80)).filter(Boolean) : [];
+        const label = `\nGroup "${oneLine(group.name || 'Unnamed', 80)}"${isCurrent ? ' (currently open - you may suggest tasks or comment on tasks in THIS group only)' : ''}:`;
         lines.push(label);
         if (isCurrent && roster.length > 0) {
             lines.push(`Members: ${roster.join(', ')}`);
