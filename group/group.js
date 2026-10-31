@@ -8604,7 +8604,8 @@ function isNotifiableGroupUrgency(task, status) {
 // are due soon or overdue.
 if (typeof NotificationCenter !== 'undefined') {
     NotificationCenter.setReminderSource(() => {
-        const groupName = getSelectedGroup()?.name || '';
+        const selected = getSelectedGroup();
+        const groupName = selected?.name || '';
         return groupTasks
             .filter((task) => currentUser && task.ownerId === currentUser.uid)
             .map((task) => {
@@ -8612,10 +8613,10 @@ if (typeof NotificationCenter !== 'undefined') {
                 if (!isNotifiableGroupUrgency(task, status)) {
                     return null;
                 }
-                return { key: task.id, text: task.text, level: status.urgencyLevel, label: status.countdownLabel, where: groupName, timestamp: status.deadlineTimestamp };
+                return { key: (selected?.id || '') + ':' + task.id, text: task.text, level: status.urgencyLevel, label: status.countdownLabel, where: groupName, timestamp: status.deadlineTimestamp, groupId: selected?.id || null, taskId: task.id };
             })
             .filter(Boolean);
-    });
+    }, () => getSelectedGroup()?.id || null);
 }
 
 function pruneGroupStageReminderTimestamps(now = Date.now()) {
@@ -10034,8 +10035,8 @@ const GROUP_TOUR_STEPS = [
     },
     {
         selector: '.folderBar',
-        title: 'Folders, roles, and grouping',
-        text: 'Owners and admins make folders (what the work is about) and, in the Team tab, roles (job titles like Designer, which only label people, they never change what anyone can do). Anyone can file their own tasks into folders. A task shared by several people shows once, as a card with who has finished. Use Group by to section the list by person, role or folder.',
+        title: 'Folders and grouping',
+        text: 'This bar is for folders, which say what the work is about. Owners and admins make them with Manage, and anyone can file their own tasks into one. Use Group by on the right to section the list by person, role or folder. (Roles themselves, the job titles like Designer, are set up in the Team tab.) A task shared by several people shows once, as a card with who has finished.',
         // Plain members of a group with no folders yet have no bar to point
         // at, so fall back to the task box rather than highlighting nothing.
         beforeShow: (step) => {

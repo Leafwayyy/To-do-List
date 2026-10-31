@@ -14190,3 +14190,42 @@ button.notifItem:focus-visible{
     color: var(--violet-muted);
     font-size: var(--text-sm);
 }
+
+/* Where a notification comes from (Personal, or a group), and reminder rows you can click. */
+.notifSource{
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 4px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid rgba(170, 152, 255, 0.34);
+    background: rgba(181, 139, 255, 0.12);
+    color: var(--violet-muted, #d7d0ff);
+    font-size: 0.74rem;
+    font-weight: 600;
+    line-height: 1.5;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.notifSource.isGroup{
+    border-color: rgba(120, 190, 255, 0.4);
+    background: rgba(100, 170, 255, 0.12);
+}
+.notifMeta .notifSource{
+    margin-top: 0;
+    vertical-align: middle;
+}
+button.notifReminder{
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+button.notifReminder:hover,
+button.notifReminder:focus-visible{
+    background: rgba(181, 139, 255, 0.14);
+}

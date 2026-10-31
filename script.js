@@ -5526,9 +5526,9 @@ if (typeof NotificationCenter !== 'undefined') {
             if (!isNotifiableUrgency(task, status)) {
                 return null;
             }
-            return { key: task.id, text: task.text, level: status.urgencyLevel, label: status.countdownLabel, timestamp: status.deadlineTimestamp };
+            return { key: 'solo:' + task.id, text: task.text, level: status.urgencyLevel, label: status.countdownLabel, where: 'Personal', timestamp: status.deadlineTimestamp, groupId: null, taskId: task.id };
         })
-        .filter(Boolean));
+        .filter(Boolean), () => 'solo');
 }
 
 function maybeNotifyTaskUrgency(task, status) {

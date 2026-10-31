@@ -122,6 +122,15 @@ const NotificationCenter = (() => {
     let panelTimer = null;
     let activeFilter = 'all';
     let reminderSource = null;
+    let scopeIdSource = null;
+    // Your open tasks everywhere (personal list + every group), so the bell is the same on
+    // every page. The page you are on is read live; the rest comes from here.
+    const MAX_GROUPS_SCANNED = 15;
+    const SCOPE_REFRESH_MS = 5 * 60 * 1000;
+    let otherScopes = [];
+    let scopesFetchedAt = 0;
+    let scopesFetching = false;
+    let scopesUid = null;
     let lastUid = null;
     let signedInSince = 0;
     let askToast = null;
@@ -400,31 +409,202 @@ const NotificationCenter = (() => {
         return days < 30 ? days + 'd' : Math.round(days / 30) + 'mo';
     }
 
-    function getReminders() {
-        if (typeof reminderSource !== 'function') {
-            return [];
-        }
+    // Which list this page is showing: 'solo', or a group's id.
+    function currentScopeId() {
         try {
-            return (reminderSource() || [])
-                .filter((entry) => entry && LEVEL_RANK[entry.level] !== undefined)
-                .sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || (a.timestamp || 0) - (b.timestamp || 0))
-                .slice(0, MAX_REMINDERS);
-        } catch (error) {
-            console.warn('Could not build reminders:', error);
-            return [];
+            const id = typeof scopeIdSource === 'function' ? scopeIdSource() : null;
+            return id || (/\/group\//.test(window.location.pathname) ? new URLSearchParams(window.location.search).get('g') : 'solo');
+        } catch {
+            return 'solo';
         }
     }
 
+    // Turns one scope's tasks (read from the database) into reminder entries. Urgency is worked
+    // out now, from the task's dates, so a cached task never shows an old countdown.
+    function remindersFromScope(scope) {
+        if (typeof getTaskUrgencyStatus !== 'function') {
+            return [];
+        }
+        const out = [];
+        scope.tasks.forEach((task) => {
+            if (!task || !task.id || task.completed || task.status === 'blocked' || task.status === 'review') {
+                return;
+            }
+            let status;
+            try {
+                status = getTaskUrgencyStatus(task);
+            } catch {
+                return;
+            }
+            if (!status || !status.hasDeadline || LEVEL_RANK[status.urgencyLevel] === undefined) {
+                return;
+            }
+            out.push({
+                key: scope.scope + ':' + task.id,
+                text: task.text,
+                level: status.urgencyLevel,
+                label: status.countdownLabel,
+                where: scope.where,
+                timestamp: status.deadlineTimestamp,
+                scope: scope.scope,
+                groupId: scope.groupId,
+                taskId: task.id
+            });
+        });
+        return out;
+    }
+
+    function getReminders() {
+        const mine = currentScopeId();
+        let live = [];
+        if (typeof reminderSource === 'function') {
+            try {
+                live = (reminderSource() || []).map((entry) => (entry ? { scope: mine, ...entry } : entry));
+            } catch (error) {
+                console.warn('Could not build reminders:', error);
+            }
+        }
+        const elsewhere = otherScopes.filter((scope) => scope.scope !== mine).flatMap(remindersFromScope);
+        return live.concat(elsewhere)
+            .filter((entry) => entry && LEVEL_RANK[entry.level] !== undefined)
+            .sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || (a.timestamp || 0) - (b.timestamp || 0))
+            .slice(0, MAX_REMINDERS);
+    }
+
+    // Reads your personal tasks and your own tasks in each group you belong to. Cheap (a handful
+    // of small reads), cached for five minutes, and failures are quiet: the bell still works.
+    async function refreshScopes(force) {
+        const user = currentUser();
+        const f = fsx();
+        const db = database();
+        if (!user || !f || !db || scopesFetching) {
+            return;
+        }
+        if (scopesUid !== user.uid) {
+            scopesUid = user.uid;
+            otherScopes = [];
+            scopesFetchedAt = 0;
+        }
+        if (!force && Date.now() - scopesFetchedAt < SCOPE_REFRESH_MS) {
+            return;
+        }
+        scopesFetching = true;
+        try {
+            const found = [];
+            const soloSnap = await f.getDocs(f.collection(db, 'users', user.uid, 'tasks'));
+            found.push({ scope: 'solo', groupId: null, where: 'Personal', tasks: soloSnap.docs.map((d) => ({ ...d.data(), id: d.id })) });
+            const groupsSnap = await f.getDocs(f.query(f.collection(db, 'groups'), f.where('memberIds', 'array-contains', user.uid)));
+            for (const groupDoc of groupsSnap.docs.slice(0, MAX_GROUPS_SCANNED)) {
+                try {
+                    const taskSnap = await f.getDocs(f.query(f.collection(db, 'groups', groupDoc.id, 'tasks'), f.where('ownerId', '==', user.uid)));
+                    found.push({ scope: groupDoc.id, groupId: groupDoc.id, where: clip(groupDoc.data().name, 60) || 'Group', tasks: taskSnap.docs.map((d) => ({ ...d.data(), id: d.id })) });
+                } catch (error) {
+                    console.warn('Could not read tasks for a group reminder:', error?.code || error);
+                }
+            }
+            if (currentUser() && currentUser().uid === user.uid) {
+                otherScopes = found;
+                scopesFetchedAt = Date.now();
+                if (panel) {
+                    renderPanel();
+                }
+            }
+        } catch (error) {
+            console.warn('Could not load reminders from your other lists:', error?.code || error);
+            scopesFetchedAt = Date.now() - SCOPE_REFRESH_MS + 60000;
+        } finally {
+            scopesFetching = false;
+        }
+    }
+
+    // A small "where is this from" label: Personal, or the group's name.
+    function sourceChip(where, isGroup) {
+        const chip = el('span', 'notifSource' + (isGroup ? ' isGroup' : ' isPersonal'));
+        chip.appendChild(el('i', 'fa-solid ' + (isGroup ? 'fa-people-group' : 'fa-user')));
+        chip.appendChild(document.createTextNode(' ' + where));
+        return chip;
+    }
+
+    // Scrolls to a task on this page and flashes it. False if it isn't on screen (yet).
+    function focusTask(taskId) {
+        const target = Array.from(document.querySelectorAll('[data-task-id]')).find((node) => node.dataset.taskId === taskId);
+        if (!target) {
+            return false;
+        }
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('todayFlash');
+        setTimeout(() => target.classList.remove('todayFlash'), 1800);
+        return true;
+    }
+
+    // The address of the place something is about: a group's page (or your personal list) with
+    // the task named. Null when you are already there.
+    function targetUrl(groupId, taskId) {
+        const onGroupPage = /\/group\//.test(window.location.pathname);
+        const target = groupId || 'solo';
+        if (currentScopeId() === target && (groupId ? onGroupPage : !onGroupPage)) {
+            return null;
+        }
+        const taskPart = taskId ? (groupId ? '&' : '?') + 'task=' + encodeURIComponent(taskId) : '';
+        if (groupId) {
+            return (onGroupPage ? 'index.html' : 'group/index.html') + '?g=' + encodeURIComponent(groupId) + taskPart;
+        }
+        return (onGroupPage ? '../app.html' : 'app.html') + taskPart;
+    }
+
+    // Takes you there. Same page: it just scrolls to the task.
+    function goTo(groupId, taskId) {
+        const url = targetUrl(groupId, taskId);
+        if (url === null) {
+            if (taskId) {
+                focusTask(taskId);
+            }
+            return;
+        }
+        window.location.href = url;
+    }
+
+    // Arriving from a bell click: wait for the list to draw (it loads from the database), then
+    // jump to the task named in the address.
+    function focusFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        const taskId = params.get('task');
+        if (!taskId) {
+            return;
+        }
+        let tries = 0;
+        const timer = setInterval(() => {
+            tries += 1;
+            if (focusTask(taskId) || tries > 40) {
+                clearInterval(timer);
+                params.delete('task');
+                const rest = params.toString();
+                try {
+                    window.history.replaceState(null, '', window.location.pathname + (rest ? '?' + rest : '') + window.location.hash);
+                } catch {
+                    // Non-fatal.
+                }
+            }
+        }, 400);
+    }
+
     function reminderRow(entry) {
-        const row = el('div', 'notifItem notifReminder level-' + entry.level);
+        const row = el('button', 'notifItem notifReminder level-' + entry.level);
+        row.type = 'button';
         const icon = el('span', 'notifIcon');
         icon.setAttribute('aria-hidden', 'true');
         const glyph = el('i', 'fa-solid ' + LEVEL_ICON[entry.level]);
         icon.appendChild(glyph);
         const body = el('div', 'notifBody');
         body.appendChild(el('p', 'notifTitle', entry.text));
-        body.appendChild(el('p', 'notifText', entry.label + (entry.where ? ' · ' + entry.where : '')));
+        body.appendChild(el('p', 'notifText', entry.label));
+        const isGroup = Boolean(entry.groupId);
+        body.appendChild(sourceChip(entry.where || (isGroup ? 'Group' : 'Personal'), isGroup));
         row.append(icon, body);
+        row.addEventListener('click', () => {
+            closePanel(false);
+            goTo(entry.groupId || null, entry.taskId);
+        });
         return row;
     }
 
@@ -439,11 +619,12 @@ const NotificationCenter = (() => {
         if (item.body) {
             body.appendChild(el('p', 'notifText', item.body));
         }
-        const meta = [timeAgo(item.createdAt)];
+        const metaLine = el('p', 'notifMeta', timeAgo(item.createdAt));
         if (item.groupName) {
-            meta.push(item.groupName);
+            metaLine.appendChild(document.createTextNode(' · '));
+            metaLine.appendChild(sourceChip(item.groupName, true));
         }
-        body.appendChild(el('p', 'notifMeta', meta.join(' · ')));
+        body.appendChild(metaLine);
         row.append(icon, body);
         if (!item.read) {
             const dot = el('span', 'notifDot');
@@ -460,12 +641,7 @@ const NotificationCenter = (() => {
         if (!item.groupId) {
             return;
         }
-        const onGroupPage = /\/group\//.test(window.location.pathname);
-        const here = new URLSearchParams(window.location.search).get('g');
-        if (onGroupPage && here === item.groupId) {
-            return;
-        }
-        window.location.href = (onGroupPage ? 'index.html' : 'group/index.html') + '?g=' + encodeURIComponent(item.groupId);
+        goTo(item.groupId, item.taskId || null);
     }
 
     function renderPanel() {
@@ -572,6 +748,7 @@ const NotificationCenter = (() => {
         button.setAttribute('aria-expanded', 'true');
         renderPanel();
         placePanel();
+        refreshScopes(false);
         document.addEventListener('pointerdown', onOutside, true);
         document.addEventListener('keydown', onKey, true);
         window.addEventListener('resize', placePanel);
@@ -652,6 +829,7 @@ const NotificationCenter = (() => {
             }
             if (subscribedUid !== uid) {
                 startListening(user);
+                setTimeout(() => refreshScopes(true), 2500);
             }
             maybeAsk();
         } else if (!uid) {
@@ -666,14 +844,23 @@ const NotificationCenter = (() => {
     }
 
     // `fn()` returns [{ key, text, level: 'overdue'|'critical'|'soon', label, where?, timestamp }].
-    function setReminderSource(fn) {
+    // `scopeFn()` says which list this page is showing ('solo' or a group's id) so those tasks
+    // are read live, and every other list comes from the database.
+    function setReminderSource(fn, scopeFn) {
         reminderSource = typeof fn === 'function' ? fn : null;
+        scopeIdSource = typeof scopeFn === 'function' ? scopeFn : null;
     }
 
     setInterval(watch, 1500);
+    setInterval(() => {
+        if (currentUser() && !document.hidden) {
+            refreshScopes(false);
+        }
+    }, 60000);
     watch();
+    focusFromUrl();
 
-    return { notify, notifySelf, notifyMany, setReminderSource, open: openPanel, close: closePanel, unreadCount: () => unreadItems().length, markAllRead, items: () => items.slice() };
+    return { notify, notifySelf, notifyMany, setReminderSource, targetUrl, refreshScopes, open: openPanel, close: closePanel, unreadCount: () => unreadItems().length, markAllRead, items: () => items.slice() };
 })();
 
 // Also reachable as window.* for callers that prefer optional chaining.
