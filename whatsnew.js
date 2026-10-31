@@ -51,9 +51,23 @@ const WHATS_NEW_RELEASES = [
                     'When a group list is split by person, role or folder, you can now click any heading to fold that section away. The number next to the name stays put, so you always know what\'s tucked inside.',
                     'Your folds are remembered on this device, separately for each group, and they only affect your own screen. Folding a section never changes what your teammates see.'
                 ]
+            },
+            {
+                icon: 'fa-palette',
+                heading: 'Sections you can tell apart',
+                paragraphs: [
+                    'Each section heading is now a colored banner, and the tasks under it are indented with a stripe in the same color. Every person gets their own color, and folders and roles keep theirs, so it\'s clear where one group ends and the next begins.'
+                ]
+            },
+            {
+                icon: 'fa-id-badge',
+                heading: 'Roles moved to the Team tab',
+                paragraphs: [
+                    'Roles are about people, so the Roles & access button now lives in the Team tab, right above the roster. It used to sit among the task filters, where it didn\'t really belong. Only owners and admins see it.'
+                ]
             }
         ],
-        tip: 'Try it: open a group, set "Group by" to Person, then click a name.',
+        tip: 'Try it: open a group, set "Group by" to Person, then click a name. Owners and admins can find Roles & access in the Team tab.',
         signoff: 'More tidying-up is on the way. Tell us what still feels cluttered.'
     },
     {

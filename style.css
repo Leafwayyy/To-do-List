@@ -13190,3 +13190,125 @@ body.authGateActive .authOverlay{
         transition: none;
     }
 }
+
+/* Group by: the section heading is a solid banner in the section's color, and the tasks
+   under it are indented with a stripe in the same color, so it's clear where one group
+   ends and the next begins. (Needs to beat the generic ".tasks li" card look.) */
+.tasks li.groupSectionHeading{
+    width: 90%;
+    margin: 18px 0 2px;
+    padding: 0;
+    gap: 0;
+    cursor: default;
+    border: 0;
+    border-radius: 12px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--section-color, #94a3b8) 62%, #120b30) 0%, color-mix(in srgb, var(--section-color, #94a3b8) 16%, #120b30) 100%);
+    box-shadow: inset 6px 0 0 var(--section-color, #94a3b8), 0 6px 18px rgba(0, 0, 0, 0.35);
+    color: #ffffff;
+    font-size: var(--text-md);
+    letter-spacing: 0.6px;
+}
+
+.tasks li.groupSectionHeading:first-child{
+    margin-top: 4px;
+}
+
+.tasks li.groupSectionHeading .groupSectionToggle{
+    padding: 12px 16px 12px 22px;
+    border-radius: 12px;
+}
+
+.tasks li.groupSectionHeading .groupSectionToggle:hover{
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.tasks li.groupSectionHeading .groupSectionChevron{
+    color: #ffffff;
+    font-size: 12px;
+}
+
+.tasks li.groupSectionHeading .groupSectionCount{
+    margin-left: auto;
+    padding: 2px 11px;
+    background: rgba(0, 0, 0, 0.32);
+    color: #ffffff;
+    font-size: var(--text-sm);
+    font-weight: 800;
+}
+
+/* Tasks inside a section: indented, with a stripe in the section's color. */
+.tasks li.inSection{
+    align-self: flex-end;
+    width: calc(90% - 22px);
+    margin-right: 5%;
+    border-left: 5px solid var(--section-color, #94a3b8);
+}
+
+@media (max-width: 520px){
+    .tasks li.inSection{
+        width: calc(90% - 12px);
+    }
+}
+
+/* Team tab: the owner/admin "Roles & access" strip above the roster. */
+.teamToolbar{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin: 0 0 14px;
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    border: 1px dashed rgba(202, 167, 255, 0.5);
+    background: rgba(181, 139, 255, 0.1);
+}
+
+.teamToolbar.hidden{
+    display: none;
+}
+
+.teamToolbarText{
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    color: var(--violet-muted);
+    font-size: var(--text-sm);
+}
+
+.teamToolbarText strong{
+    color: var(--violet-text);
+    font-size: var(--text-base);
+}
+
+.teamRolesBtn{
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 10px;
+    background: linear-gradient(120deg, rgba(202, 167, 255, 0.97), rgba(143, 150, 255, 0.98));
+    color: #120b30;
+    font-size: var(--text-base);
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.teamRolesBtn:hover{
+    filter: brightness(1.08);
+}
+
+.teamRolesBtn:focus-visible{
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(174, 148, 255, 0.4);
+}
+
+@media (max-width: 520px){
+    .teamToolbar{
+        flex-direction: column;
+        align-items: stretch;
+    }
+}

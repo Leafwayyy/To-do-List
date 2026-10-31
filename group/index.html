@@ -11,7 +11,7 @@
     <!-- Same stylesheet as the solo app, loaded once, the normal way - no
          second build/bundle for this page, so there's nothing for its rules
          to collide with. -->
-    <link rel="stylesheet" href="../style.css?v=20261031e">
+    <link rel="stylesheet" href="../style.css?v=20261031g">
     <link rel="icon" href="../icon.svg" type="image/svg+xml">
 </head>
 <body class="authChecking">
@@ -435,6 +435,15 @@
                      Activity used to live here too; each is its own tab now so
                      this one does a single thing. -->
                 <div class="viewPanel hidden" data-view-panel="team">
+                    <!-- Owner/admin only (group.js shows it): job titles and per-person access
+                         live with the people, not in the task filters. -->
+                    <div class="teamToolbar hidden">
+                        <div class="teamToolbarText">
+                            <strong>Roles &amp; access</strong>
+                            <span>Give people job titles, and choose who can assign tasks or manage folders.</span>
+                        </div>
+                        <button type="button" class="teamRolesBtn"><i class="fa-solid fa-id-badge" aria-hidden="true"></i> <span>Roles &amp; access</span></button>
+                    </div>
                     <div class="memberRoster"></div>
                     <p class="memberRosterInviteHint hidden">Working alone for now - share the invite code above to add teammates.</p>
                 </div>
@@ -731,9 +740,9 @@
          third-party script on this page is loaded. -->
     <script src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js" integrity="sha384-CU0J6nu6GO5gWB5IqOOhPQsG0LKyjpotF5Gw502R+0zbkzKHjDWc6FKSZsNTJfLX" crossorigin="anonymous"></script>
     <script src="availability-timezone.js?v=20260930a"></script>
-    <script src="group.js?v=20261031e"></script>
+    <script src="group.js?v=20261031g"></script>
     <script src="../quickadd.js?v=20261030h"></script>
-    <script src="../whatsnew.js?v=20261031c"></script>
+    <script src="../whatsnew.js?v=20261031d"></script>
     <script type="module" src="../firebase-init.js?v=20260925a"></script>
     <script src="../settings.js?v=20261031a"></script>
 </body>

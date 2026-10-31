@@ -2848,6 +2848,8 @@ let groupSettingsOverlay = null;
 let groupSettingsGroupId = null;
 initializeGroupSettingsModal();
 const memberRoster = document.querySelector('.memberRoster');
+const teamToolbar = document.querySelector('.teamToolbar');
+const teamRolesBtn = document.querySelector('.teamRolesBtn');
 const leaderboardList = document.querySelector('.leaderboardList');
 const leaderboardTabBtns = Array.from(document.querySelectorAll('.leaderboardTabBtn'));
 const leaderboardTabsEl = document.querySelector('.leaderboardTabs');
@@ -6383,6 +6385,13 @@ function createSharedTaskCard(group, sharedId, copies, visibleTasks) {
     return card;
 }
 
+teamRolesBtn?.addEventListener('click', () => {
+    const current = getSelectedGroup();
+    if (current) {
+        openGroupRolesManager(current);
+    }
+});
+
 function openGroupRolesManager(group) {
     GroupRoles.openManager({
         group,
@@ -6458,7 +6467,8 @@ function buildGroupSections(group, sortedTasks) {
     };
     if (groupByMode === 'person') {
         memberIds.forEach((uid, index) => {
-            take('p:' + uid, memberNames[index] || 'Teammate', null, (task) => task.ownerId === uid);
+            // Each person gets their own color so the sections tell themselves apart at a glance.
+            take('p:' + uid, memberNames[index] || 'Teammate', TodoFolders.COLORS[index % (TodoFolders.COLORS.length - 1)], (task) => task.ownerId === uid);
         });
         take('p:former', 'Former members', null, () => true);
     } else if (groupByMode === 'role') {
@@ -6617,18 +6627,8 @@ function renderGroupFolderBar(group) {
         folderBar.appendChild(manageBtn);
     }
 
+    // Roles & access are managed from the Team tab (next to the people), not here.
     const roles = GroupRoles.getAll(group);
-    // Roles are owner/admin only - a member granted folder rights doesn't get this.
-    if (group && (getMyRoleInGroup(group).isOwner || getMyRoleInGroup(group).isAdmin)) {
-        const rolesBtn = document.createElement('button');
-        rolesBtn.type = 'button';
-        rolesBtn.className = 'folderChip folderManageChip';
-        rolesBtn.innerHTML = '<i class="fa-solid fa-id-badge" aria-hidden="true"></i><span>' + (roles.length > 0 ? 'Roles' : 'Add roles') + '</span>';
-        // getSelectedGroup() at click time: the bar is only rebuilt when something it
-        // shows changes, so `group` here can be stale (roles/access edited elsewhere).
-        rolesBtn.addEventListener('click', () => openGroupRolesManager(getSelectedGroup() || group));
-        folderBar.appendChild(rolesBtn);
-    }
 
     // Sectioning only means something with more than one person's tasks in view.
     const canGroup = group && (group.memberIds || []).length > 1;
@@ -6759,9 +6759,14 @@ function renderGroupTasks() {
     const collapsedSections = readCollapsedSections(group);
     plan.forEach((section) => {
         const isCollapsed = Boolean(section.title) && collapsedSections.has(section.key);
+        // Every section has a color (folder/role color, a per-person color, or slate for
+        // "No folder" / "No role" / "Former members"): the heading is a solid banner in it
+        // and the tasks under it carry a matching stripe, so the grouping is obvious.
+        const sectionColor = section.color || '#94a3b8';
         if (section.title) {
             const heading = document.createElement('li');
             heading.className = 'groupSectionHeading' + (isCollapsed ? ' collapsed' : '');
+            heading.style.setProperty('--section-color', sectionColor);
             // The whole heading is one button: click to fold or open the section. The
             // count stays visible while folded so nothing is hidden without a trace.
             const toggle = document.createElement('button');
@@ -6772,13 +6777,6 @@ function renderGroupTasks() {
             chevron.className = 'fa-solid fa-chevron-down groupSectionChevron';
             chevron.setAttribute('aria-hidden', 'true');
             toggle.appendChild(chevron);
-            if (section.color) {
-                heading.style.setProperty('--folder-color', section.color);
-                const dot = document.createElement('span');
-                dot.className = 'folderDot';
-                dot.setAttribute('aria-hidden', 'true');
-                toggle.appendChild(dot);
-            }
             const title = document.createElement('span');
             title.className = 'groupSectionTitle';
             title.textContent = section.title;
@@ -6797,12 +6795,18 @@ function renderGroupTasks() {
             return;
         }
         section.entries.forEach((entry) => {
+            let item;
             if (entry.shareKey) {
-                groupTasksList.appendChild(createSharedTaskCard(group, entry.shareKey, entry.copies, sorted));
-                return;
+                item = createSharedTaskCard(group, entry.shareKey, entry.copies, sorted);
+            } else {
+                const isOwner = currentUser && entry.task.ownerId === currentUser.uid;
+                item = createGroupTaskItem(group.id, entry.task, isOwner);
             }
-            const isOwner = currentUser && entry.task.ownerId === currentUser.uid;
-            groupTasksList.appendChild(createGroupTaskItem(group.id, entry.task, isOwner));
+            if (section.title) {
+                item.classList.add('inSection');
+                item.style.setProperty('--section-color', sectionColor);
+            }
+            groupTasksList.appendChild(item);
         });
     });
 }
@@ -6893,6 +6897,13 @@ function renderMemberRoster(group, { isOwner = false, isAdmin = false } = {}) {
         return;
     }
     memberRoster.innerHTML = '';
+
+    // Roles & access: owner/admin only - a member granted folder rights doesn't get this.
+    // (The click handler reads the selected group at click time, so it is never stale.)
+    teamToolbar?.classList.toggle('hidden', !(isOwner || isAdmin));
+    if (teamRolesBtn) {
+        teamRolesBtn.querySelector('span').textContent = GroupRoles.getAll(group).length > 0 ? 'Roles & access' : 'Add roles';
+    }
 
     const memberIds = group.memberIds || [];
     const memberNames = group.memberNames || [];
@@ -9773,7 +9784,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.folderBar',
         title: 'Folders, roles, and grouping',
-        text: 'Owners and admins make folders (what the work is about) and roles (job titles like Designer, which only label people, they never change what anyone can do). Anyone can file their own tasks into folders. A task shared by several people shows once, as a card with who has finished. Use Group by to section the list by person, role or folder.',
+        text: 'Owners and admins make folders (what the work is about) and, in the Team tab, roles (job titles like Designer, which only label people, they never change what anyone can do). Anyone can file their own tasks into folders. A task shared by several people shows once, as a card with who has finished. Use Group by to section the list by person, role or folder.',
         // Plain members of a group with no folders yet have no bar to point
         // at, so fall back to the task box rather than highlighting nothing.
         beforeShow: (step) => {
