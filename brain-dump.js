@@ -139,6 +139,12 @@ function brainDumpSummarizeTask(task, userId, openById) {
         blockedReason: typeof task.blockedReason === 'string' ? task.blockedReason.slice(0, 200) : null,
         needsApproval: task.needsApproval === true,
         awaitingMyReview: Boolean(userId) && task.status === 'review' && task.assignedBy === userId && task.ownerId !== userId,
+        // A task the signed-in user assigned to someone else (still open): Dusty may change its deadline/details.
+        assignedByMe: Boolean(userId) && task.assignedBy === userId && task.ownerId !== userId && !task.completed,
+        // How many people's copies of this (my own) task are behind it: a new deadline or steps not yet sent.
+        copiesToUpdate: Boolean(userId) && task.ownerId === userId && !task.completed && typeof GroupWorkflow !== 'undefined' && typeof GroupWorkflow.copiesOutOfStep === 'function'
+            ? GroupWorkflow.copiesOutOfStep(task, () => 'x').length
+            : 0,
         id: task.id, // needed so Dusty can target an exact task when commenting on a teammate's
         text: task.text,
         completed: Boolean(task.completed),

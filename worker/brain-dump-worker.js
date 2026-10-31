@@ -193,6 +193,8 @@ SHARING A TASK: when the user wants the SAME task for themselves and other peopl
 - setStatus (groups only): update the user's OWN tasks. taskIds (exact ids of the user's own tasks, marked "yours" below), status (todo, inprogress, blocked or review) and, for blocked ONLY, statusReason (what is blocking it, in the user's words; if they did not say, ask instead of inventing one). review ONLY works for a task marked "needs approval"; for any other task say it simply gets finished, nothing to approve. todo means not started.
 - setDependency (groups only): make one of the user's OWN tasks wait for other open tasks in the open group ("do the invoice after the contract is signed"). taskIds (exactly one id, marked "yours"), dependsOnIds (the exact ids of the tasks it must wait for, at most 5, taken from the open group's list below; an empty list clears what it waits for). Nothing is locked: the card just shows what it is waiting for and the owner is told when those are done. Never invent an id, and never use a task from another group.
 - reviewTask (groups only): answer a task that is marked "WAITING FOR THIS USER'S REVIEW" below. taskIds (exact ids of those tasks), decision (approve or sendBack) and an optional note (why, for sendBack). Never for any other task, and never for the user's own tasks.
+- editAssigned (groups only): change a task the user ASSIGNED to someone else, marked "ASSIGNED BY THIS USER" below, without waiting for that person. taskIds (exact ids of those tasks) plus only what changes: dueAt, scheduledAt, text, matrix or difficulty. The owner is told. Only for tasks marked ASSIGNED BY THIS USER and still open. For any other teammate task say you cannot change it and offer a comment to that person (teammateComments) instead.
+- syncCopies (groups only): the user changed their OWN copy of a task they also assigned to others (a new deadline, steps added later) and wants those copies brought up to date. taskIds (exactly the ids of the user's own tasks marked "their copies are out of date"). Their ticked steps and any steps they added are kept. Never for tasks without that mark.
 - createRole (groups only): roleName.
 - setRole (groups only): memberName (exact), roleName (exact, or none to remove their role).
 - grantAccess (groups only): memberName (exact), assignRights (all, role, or none) and folderRights (true or false). This decides who may assign tasks or manage folders.
@@ -200,7 +202,21 @@ When one request needs two steps (a new folder, then putting tasks in it), send 
 
 TASK STATUS AND WHAT IS DUE (applies to answers too): each task below may show a status. "blocked" (with its reason) and "in review" tasks are waiting on someone, so do not suggest working on them and do not count them as the user's to-do for today; mention them separately when it helps ("2 are blocked, 1 is waiting for review"). When the user asks what to do today, how their day or week looks, or what is stuck, answer from this list in "reply" in a few plain sentences: overdue first, then due today, then the rest; blocked, in-review and "waiting on:" tasks last (a task that shows "waiting on:" is waiting for those other tasks to be finished first, treat it like a blocked one); name the first thing to start with. Propose no tasks for that.
 
-MENTIONS: in a teammateComments item you can get a person's attention by writing @ followed by their exact name from the roster inside the comment text (for example "@Philip can you check the totals?"). Only do that when the user asked you to ask or tell that person something. Use the full name if two people share a first name.`;
+MENTIONS: in a teammateComments item you can get a person's attention by writing @ followed by their exact name from the roster inside the comment text (for example "@Philip can you check the totals?"). Only do that when the user asked you to ask or tell that person something. Use the full name if two people share a first name.
+
+HOW TO READ WHAT THEY MEAN (decide by who they are and whose task it is, then pick the closest thing they are ALLOWED to do):
+- "move it", "push it to Friday", "change the deadline": a task marked yours = taskEdits. A task marked ASSIGNED BY THIS USER = editAssigned. Any other teammate's task: you cannot change it, so offer a comment to that person asking them to (teammateComments with an @mention). Never silently do something different from what was asked: say which of these you chose and why, in one short sentence.
+- "give it to Sam", "make Sam do it": if they may assign, use assign. If not, use teammateSuggestions (Sam still has to accept) and say so. A role-limited assigner can only reach people in their own role.
+- "tell Sam", "remind Sam", "ask Sam about it": a comment on Sam's task (or a suggestion if no such task exists), with an @mention. Never a change to Sam's task.
+- "update Sam's copy", "send him my changes", "make his match mine": syncCopies on the user's own task, only if marked as out of date.
+- "finish it" or "I'm done with it" on a task that needs approval and is not yet approved: it goes for review (setStatus review), it does not become done. Say that the assigner will approve it.
+- "approve it", "looks good, send it back": only a task marked WAITING FOR THIS USER'S REVIEW. Otherwise explain nobody is waiting on them for that one.
+- "make me and Sam do it": ONE assign action with both names, never two copies.
+- The same title can exist several times (the user's copy and a teammate's copy). If it matters which one, ask. If they say "mine" or "his", use that.
+- Only the open group can be acted on. If they mean another group, tell them to open it first.
+- When they ask for something several people could do differently ("handle it"), do not guess: ask one short question.
+
+WHAT YOU CANNOT DO (say so plainly when asked, and offer the closest thing you can): delete tasks, folders, roles or groups; rename folders or roles; invite, remove or kick people; change a group's name or settings; tick individual steps (you can rewrite a task's step list); change or finish a task that belongs to someone else (you can comment, suggest, or change one the user assigned); hand a task off to someone else; see the leaderboard, the Activity history or the weekly report; read or clear notifications; change email or desktop alerts; manage accounts or sign out; reach any group other than the open one.`;
 
 // Google's free-tier Gemini quotas are documented as resetting around
 // midnight Pacific time (not published as an exact guaranteed instant, so
@@ -571,6 +587,8 @@ function describeContextTask(task, includeId) {
         parts.push(`waiting on: ${task.waitingOn.slice(0, 5).map((title) => oneLine(title, 80)).join(' | ')}`);
     }
     if (task.awaitingMyReview === true) parts.push("WAITING FOR THIS USER'S REVIEW");
+    if (task.assignedByMe === true) parts.push('ASSIGNED BY THIS USER');
+    if (Number.isFinite(task.copiesToUpdate) && task.copiesToUpdate > 0) parts.push(`their copies are out of date (${Math.min(50, task.copiesToUpdate)} to update)`);
     // Needed for the EDITING EXISTING TASKS "subtasks" capability - the
     // model can't sensibly rewrite a step list (carrying forward whatever
     // it has no reason to change, including each step's own dueAt if it
@@ -633,6 +651,7 @@ function buildCapabilitiesBlock(taskContext) {
             lines.push('- Assign tasks directly to other people: NO. They can only SUGGEST (use teammateSuggestions); the person has to accept.');
         }
         lines.push(`- Change roles or who has what access: ${caps.canManageRoles ? 'yes (they are an owner/admin)' : 'NO (only the group owner or an admin)'}.`);
+        lines.push('- Change the deadline or details of a task THEY assigned to someone else (marked ASSIGNED BY THIS USER), and bring the copies they assigned up to date with their own: yes. Changing anyone else\'s task: NO (comment instead).');
         lines.push('- Set the status (in progress, blocked, ready for review) of their OWN tasks, and make their own tasks wait for other open tasks (setDependency): yes. Approve or send back a task: only one marked WAITING FOR THIS USER\'S REVIEW.');
         lines.push(caps.canAssign
             ? '- Ask that an assigned task needs their approval before it is done (needsApproval on assign): yes.'
@@ -975,7 +994,7 @@ function buildGeminiRequest(body) {
                 action: {
                     type: 'STRING',
                     enum: includeTeammateFeatures
-                        ? ['createFolder', 'fileTasks', 'assign', 'setStatus', 'setDependency', 'reviewTask', 'createRole', 'setRole', 'grantAccess']
+                        ? ['createFolder', 'fileTasks', 'assign', 'setStatus', 'setDependency', 'reviewTask', 'editAssigned', 'syncCopies', 'createRole', 'setRole', 'grantAccess']
                         : ['createFolder', 'fileTasks']
                 },
                 folder: { type: 'STRING', nullable: true },

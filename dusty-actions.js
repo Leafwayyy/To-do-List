@@ -14,8 +14,9 @@
 //
 // Actions: createFolder, fileTasks (solo + group); assign (optionally "needs my approval"),
 // setStatus (in progress / blocked / in review on your OWN tasks), reviewTask (approve or
-// send back a task that is waiting for YOUR review), createRole, setRole, grantAccess
-// (group only). Roles and access are owner/admin only, exactly as in the rest of the app;
+// send back a task that is waiting for YOUR review), editAssigned (change the deadline/details of a
+// task YOU assigned), syncCopies (send your changes to the copies you assigned), createRole,
+// setRole, grantAccess (group only). Roles and access are owner/admin only, exactly as in the rest of the app;
 // status and review go through the same code (group/workflow.js) as the buttons on the cards,
 // so the same rules apply.
 //
@@ -128,6 +129,41 @@ const DustyActions = (() => {
         const wanted = new Set((Array.isArray(ids) ? ids : []).map((id) => String(id)));
         return groupTasks.filter((task) => wanted.has(task.id) && !task.completed && task.status === 'review'
             && task.assignedBy === uid && task.ownerId !== uid);
+    }
+
+    // Open tasks of other people that I assigned (so I may change their deadline and details).
+    function assignedByMeTasks(ids, uid) {
+        const wanted = new Set((Array.isArray(ids) ? ids : []).map((id) => String(id)));
+        return groupTasks.filter((task) => wanted.has(task.id) && !task.completed && task.assignedBy === uid && task.ownerId !== uid);
+    }
+
+    // What an editAssigned draft would change, cleaned: only the few fields an assigner may edit.
+    function assignedEditFields(draft) {
+        const fields = {};
+        const isoOrNull = (value) => (value && isValidDateValue(value) ? new Date(value).toISOString() : null);
+        if (draft.dueAt) {
+            const iso = isoOrNull(draft.dueAt);
+            if (iso) {
+                fields.dueAt = iso;
+            }
+        }
+        if (draft.scheduledAt) {
+            const iso = isoOrNull(draft.scheduledAt);
+            if (iso) {
+                fields.scheduledAt = iso;
+            }
+        }
+        const text = clean(draft.text, AI_TASK_TITLE_MAX_LENGTH);
+        if (text) {
+            fields.text = text;
+        }
+        if (draft.matrix) {
+            fields.matrix = getValidMatrixValue(draft.matrix);
+        }
+        if (draft.difficulty) {
+            fields.difficulty = getValidDifficultyLevel(draft.difficulty);
+        }
+        return fields;
     }
 
     const ME_WORDS = ['me', 'myself', 'self', 'i'];
@@ -253,7 +289,7 @@ const DustyActions = (() => {
         }
 
         // Everything below is group-only.
-        if (['assign', 'setStatus', 'setDependency', 'reviewTask', 'createRole', 'setRole', 'grantAccess'].includes(action) && !group) {
+        if (['assign', 'setStatus', 'setDependency', 'reviewTask', 'editAssigned', 'syncCopies', 'createRole', 'setRole', 'grantAccess'].includes(action) && !group) {
             return blocked('That only works inside a group.');
         }
 
@@ -319,6 +355,43 @@ const DustyActions = (() => {
                     ? `Approve ${preview}. It will be finished for them.`
                     : `Send ${preview} back${note ? ` with the note "${note}"` : ''}.`
             };
+        }
+
+        if (action === 'editAssigned') {
+            const targets = assignedByMeTasks(draft.taskIds, ctx.uid);
+            if (targets.length === 0) {
+                return blocked('You can only change tasks you assigned to someone else, and only while they are open. For anyone else\'s task, leave them a comment instead.');
+            }
+            const fields = assignedEditFields(draft);
+            if (Object.keys(fields).length === 0) {
+                return blocked('Nothing to change was given (a new deadline, title or priority).');
+            }
+            const what = [];
+            if (fields.dueAt) {
+                what.push(`the deadline to ${formatFriendlyDateTime(new Date(fields.dueAt))}`);
+            }
+            if (fields.scheduledAt) {
+                what.push(`the scheduled time to ${formatFriendlyDateTime(new Date(fields.scheduledAt))}`);
+            }
+            if (fields.text) {
+                what.push(`the title to "${clean(fields.text, 50)}"`);
+            }
+            if (fields.matrix || fields.difficulty) {
+                what.push('the priority');
+            }
+            const preview = targets.slice(0, 3).map((task) => `"${clean(task.text, 40)}" (${clean(task.ownerName || 'a teammate', 30)})`).join(', ') + (targets.length > 3 ? ` and ${targets.length - 3} more` : '');
+            return { allowed: true, text: `Change ${what.join(' and ')} on ${preview}. They will be told.` };
+        }
+
+        if (action === 'syncCopies') {
+            const mine = myTasksByIds(draft.taskIds).filter((task) => !task.completed);
+            const behind = mine.filter((task) => GroupWorkflow.copiesOutOfStep(task, generateSubtaskId).length > 0);
+            if (behind.length === 0) {
+                return blocked('There are no copies of those tasks that need updating.');
+            }
+            const names = new Set();
+            behind.forEach((task) => GroupWorkflow.copiesOutOfStep(task, generateSubtaskId).forEach((copy) => names.add(clean(copy.ownerName || 'a teammate', 30))));
+            return { allowed: true, text: `Send your changes on ${behind.slice(0, 3).map((task) => `"${clean(task.text, 40)}"`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''} to ${Array.from(names).join(', ')}. Steps they ticked or added are kept, and they will be told.` };
         }
 
         if (action === 'assign') {
@@ -537,6 +610,44 @@ const DustyActions = (() => {
             }
             await GroupWorkflow.setDependencies(group.id, plan.task, plan.deps.map((dep) => dep.id));
             return { applied: true };
+        }
+
+        if (action === 'editAssigned' || action === 'syncCopies') {
+            const { group, uid } = groupContext();
+            let failures = 0;
+            let count = 0;
+            if (action === 'editAssigned') {
+                const fields = assignedEditFields(draft);
+                const targets = assignedByMeTasks(draft.taskIds, uid);
+                const changes = [];
+                if (fields.dueAt) { changes.push('the deadline'); }
+                if (fields.scheduledAt) { changes.push('the scheduled time'); }
+                if (fields.text) { changes.push('the title'); }
+                if (fields.matrix || fields.difficulty) { changes.push('the priority'); }
+                const { doc, updateDoc } = fs();
+                for (const task of targets) {
+                    count += 1;
+                    try {
+                        await updateDoc(doc(db(), 'groups', group.id, 'tasks', task.id), { ...fields, updatedAt: new Date().toISOString() });
+                        GroupWorkflow.tellOwnerOfEdit(group.id, { ...task, text: fields.text || task.text }, changes);
+                    } catch (error) {
+                        console.error('Dusty could not change an assigned task:', error);
+                        failures += 1;
+                    }
+                }
+            } else {
+                const behind = myTasksByIds(draft.taskIds).filter((task) => !task.completed && GroupWorkflow.copiesOutOfStep(task, generateSubtaskId).length > 0);
+                for (const task of behind) {
+                    count += 1;
+                    try {
+                        await GroupWorkflow.pushToCopies(group.id, task, generateSubtaskId);
+                    } catch (error) {
+                        console.error('Dusty could not update the copies:', error);
+                        failures += 1;
+                    }
+                }
+            }
+            return failures === 0 ? { applied: true } : { applied: false, reason: `${failures} of ${count} could not be updated.` };
         }
 
         if (action === 'setStatus' || action === 'reviewTask') {
