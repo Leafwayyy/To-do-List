@@ -11,6 +11,8 @@ const durationInput = document.querySelector('.durationInput');
 const difficultySelect = document.querySelector('.difficultySelect');
 const deadlineInput = document.querySelector('.deadlineInput');
 const recurrenceSelect = document.querySelector('.recurrenceSelect');
+const folderSelect = document.querySelector('.folderSelect');
+const folderBar = document.querySelector('.folderBar');
 const deadlineContainer = document.querySelector('.deadlineContainer');
 const calendarBtn = document.querySelector('.calendarBtn');
 const addBtn = document.querySelector('.addBtn');
@@ -143,6 +145,12 @@ let activeView = 'all';
 // switchSoloView sets this; nothing needed it before Calendar existed,
 // since Tasks/Activity never had to know about each other.
 let currentTopView = 'tasks';
+// Folder filter, stacked on top of the deadline view (activeView): 'all',
+// 'none' (tasks with no folder, or whose folder was deleted), or a folder id.
+// Declared up here, not beside renderFolderBar, so startup can never reach it
+// before it's initialized.
+let activeFolderFilter = 'all';
+let foldersListenerRegistered = false;
 // 'month' | 'week'; calendarAnchorDate is whichever date the currently
 // shown month/week is built around - Prev/Next/Today move it, the month
 // grid always shows the month CONTAINING it, the week strip always shows
@@ -300,6 +308,12 @@ const TOUR_STEPS = [
         beforeShow: () => { switchSoloView('tasks'); setDetailsPanelOpen(true); setDetailsMoreOptionsOpen(true); }
     },
     {
+        selector: '.inputContainer',
+        title: 'Quick options, no codes to learn',
+        text: 'You don\'t have to open Prioritize every time. Tap the / button (or type / in the box) to pick a due date, folder, priority, difficulty or repeat from plain-word lists. As you type, I\'ll also notice things, like a repeat ("every friday") or a folder name, and offer them as chips you can tap, nothing is applied until you do. Shortcut: press N to jump to this box, or Ctrl+K from anywhere.',
+        beforeShow: () => switchSoloView('tasks')
+    },
+    {
         selector: '.addBtn',
         title: 'Now, add it for real',
         text: 'You\'ve set it up exactly how you want it. Go ahead, tap + and let\'s actually put this task on your list.',
@@ -376,6 +390,12 @@ const TOUR_STEPS = [
         title: 'Switch views',
         text: 'Jump straight to what\'s overdue, due today, due this week, or already done. Go ahead and try one, you should even see the task you just added.',
         action: { event: 'click' },
+        beforeShow: () => switchSoloView('tasks')
+    },
+    {
+        selector: '.folderBar',
+        title: 'Folders keep a long list tidy',
+        text: 'Priority and deadlines tell me what to do first, folders say what it\'s about. Add a few, like School or Work, then file tasks from the Prioritize panel, the Edit dialog, or the / menu. Already have a pile of tasks? "Sort into folders" files lots of them at once. Tap a folder to see only its tasks.',
         beforeShow: () => switchSoloView('tasks')
     },
     {
@@ -658,6 +678,23 @@ function startApp() {
     renderActivityHeatmap();
     startRealtimeUpdates();
     initializeTaskEditor();
+    // Folders: any change (load, add, rename, delete) refreshes the chip
+    // bar, both folder pickers, and the list's folder badges.
+    // startApp runs again after every sign-out/sign-in in the same tab, so the
+    // listener is added only once, and the previous account's folders are
+    // cleared before the new account's are read.
+    if (!foldersListenerRegistered) {
+        foldersListenerRegistered = true;
+        TodoFolders.onChange(() => {
+            syncFolderSelectToFilter();
+            const editorFolderSelect = taskEditorOverlay?.querySelector('.editorFolderSelect');
+            const editingTask = activeEditorTaskId ? findTaskById(activeEditorTaskId) : null;
+            TodoFolders.fillSelect(editorFolderSelect, editingTask?.folderId);
+            renderTasks();
+        });
+    }
+    TodoFolders.attach({ folders: [], canEdit: false, write: async () => {} });
+    TodoFolders.init(TodoFolders.soloAdapter());
     // Reads (and, for a pre-existing account with no summary fields yet,
     // one-time backfills) the streak/badge summary - after
     // loadActivityCounts()/loadActivityHistory() above, since the backfill
@@ -880,6 +917,12 @@ function addTaskFromInputs() {
         subtasksExpanded: pendingSteps.length > 0
     };
 
+    // Only set when a real folder is picked: tasks without a folder keep
+    // exactly the document shape they always had.
+    if (TodoFolders.resolve(folderSelect?.value)) {
+        newTask.folderId = folderSelect.value;
+    }
+
     tasks.push(newTask);
 
     taskInput.value = '';
@@ -901,6 +944,7 @@ function addTaskFromInputs() {
     hideDeadlinePresets();
     hideQuickAddHint();
     updateDurationInputVisibility();
+    syncFolderSelectToFilter();
 
     applyOrdering();
     renderTasks();
@@ -964,6 +1008,8 @@ function commitAiTasksSolo(draftTasks) {
             dueAt,
             scheduledAt,
             recurrence,
+            // Validated against the real folder list (never trust the AI/draft id).
+            ...(TodoFolders.resolve(draft.folderId) ? { folderId: draft.folderId } : {}),
             createdAt: timestamp,
             updatedAt: timestamp,
             manualOrder: nextManualOrder,
@@ -1394,14 +1440,134 @@ function renderTaskListSkeleton() {
     }
 }
 
+function matchesFolderFilter(task) {
+    if (activeFolderFilter === 'all') {
+        return true;
+    }
+    const folder = TodoFolders.resolve(task.folderId);
+    return activeFolderFilter === 'none' ? !folder : folder?.id === activeFolderFilter;
+}
+
+function syncFolderSelectToFilter() {
+    // New tasks default to the folder you're looking at.
+    const defaultId = TodoFolders.resolve(activeFolderFilter) ? activeFolderFilter : '';
+    TodoFolders.fillSelect(folderSelect, defaultId);
+    // quickadd.js (loaded after this file) owns the chips under the input.
+    if (typeof renderQuickChips === 'function') {
+        renderQuickChips();
+    }
+}
+
+// Bulk "Sort into folders" result. Only touches tasks whose folder really
+// changed, so syncTasksToCloud writes just those documents.
+function applyFolderAssignments(assignments) {
+    let changed = 0;
+    const stamp = new Date().toISOString();
+    tasks.forEach((task) => {
+        const folderId = assignments[task.id];
+        if (folderId && TodoFolders.resolve(folderId) && task.folderId !== folderId) {
+            task.folderId = folderId;
+            task.updatedAt = stamp;
+            changed += 1;
+        }
+    });
+    if (changed > 0) {
+        renderTasks();
+        saveTasks();
+    }
+}
+
+function renderFolderBar() {
+    if (!folderBar) {
+        return;
+    }
+    const folders = TodoFolders.getAll();
+    if (activeFolderFilter !== 'all' && activeFolderFilter !== 'none' && !TodoFolders.resolve(activeFolderFilter)) {
+        activeFolderFilter = 'all';
+    }
+    if (folders.length === 0) {
+        activeFolderFilter = 'all';
+    }
+
+    folderBar.innerHTML = '';
+    const countOpen = (predicate) => tasks.filter((task) => !task.completed && predicate(task)).length;
+
+    const addChip = (label, filterValue, color, count) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'folderChip' + (activeFolderFilter === filterValue ? ' active' : '');
+        button.setAttribute('aria-pressed', String(activeFolderFilter === filterValue));
+        if (color) {
+            button.style.setProperty('--folder-color', color);
+            const dot = document.createElement('span');
+            dot.className = 'folderDot';
+            dot.setAttribute('aria-hidden', 'true');
+            button.appendChild(dot);
+        }
+        const text = document.createElement('span');
+        text.textContent = label;
+        button.appendChild(text);
+        if (count > 0) {
+            const badge = document.createElement('span');
+            badge.className = 'folderChipCount';
+            badge.textContent = String(count);
+            button.appendChild(badge);
+        }
+        button.addEventListener('click', () => {
+            activeFolderFilter = filterValue;
+            renderFolderBar();
+            renderTasks();
+            syncFolderSelectToFilter();
+        });
+        folderBar.appendChild(button);
+    };
+
+    if (folders.length > 0) {
+        addChip('All folders', 'all', null, 0);
+        folders.forEach((folder) => {
+            addChip(folder.name, folder.id, folder.color, countOpen((task) => task.folderId === folder.id));
+        });
+        addChip('No folder', 'none', null, countOpen((task) => !TodoFolders.resolve(task.folderId)));
+    }
+
+    const unfiledOpen = tasks.filter((task) => !task.completed && !TodoFolders.resolve(task.folderId));
+    if (folders.length > 0 && unfiledOpen.length > 0) {
+        const sortBtn = document.createElement('button');
+        sortBtn.type = 'button';
+        sortBtn.className = 'folderChip folderSortChip';
+        sortBtn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i><span>Sort ${unfiledOpen.length} into folders</span>`;
+        sortBtn.addEventListener('click', () => {
+            TodoFolders.openSorter({
+                getTasks: () => tasks
+                    .filter((task) => !task.completed && !TodoFolders.resolve(task.folderId))
+                    .map((task) => ({ id: task.id, text: task.text })),
+                apply: applyFolderAssignments
+            });
+        });
+        folderBar.appendChild(sortBtn);
+    }
+
+    const manageBtn = document.createElement('button');
+    manageBtn.type = 'button';
+    manageBtn.className = 'folderChip folderManageChip';
+    manageBtn.innerHTML = folders.length > 0
+        ? '<i class="fa-solid fa-gear" aria-hidden="true"></i><span>Manage</span>'
+        : '<i class="fa-solid fa-plus" aria-hidden="true"></i><span>Add a folder</span>';
+    manageBtn.addEventListener('click', () => TodoFolders.openManager());
+    folderBar.appendChild(manageBtn);
+}
+
 function renderTasks() {
     tasksList.innerHTML = '';
-    const visibleTasks = getVisibleTasks();
+    const visibleTasks = getVisibleTasks().filter(matchesFolderFilter);
+    renderFolderBar();
 
     if (visibleTasks.length === 0) {
         const emptyMessage = document.createElement('li');
         emptyMessage.className = 'emptyTasksMsg';
-        emptyMessage.textContent = VIEW_CONFIG[activeView].emptyMessage;
+        emptyMessage.textContent = activeFolderFilter !== 'all'
+            ? 'Nothing here. Try another folder or filter.'
+            : VIEW_CONFIG[activeView].emptyMessage;
         tasksList.appendChild(emptyMessage);
     } else {
         visibleTasks.forEach((task) => {
@@ -1458,7 +1624,7 @@ function getVisibleTasks() {
                     // even if the task's own deadline is weeks out.
                     const status = getTaskUrgencyStatus(task);
                     const dueSoon = status.hasDeadline && status.deadlineTimestamp <= in24Hours;
-                    const urgentMatrix = getValidMatrixValue(task.matrix) === 'do';
+                    const urgentMatrix = getEffectiveMatrix(task).matrix === 'do';
                     const shortTimeboxed = getValidTaskType(task.taskType) === 'timeboxed' && (task.estimateMinutes || 0) > 0 && (task.estimateMinutes || 0) <= 60;
                     const scheduledSoon = task.scheduledAt && isValidDateValue(task.scheduledAt)
                         && Math.abs(new Date(task.scheduledAt).getTime() - now) <= (4 * 60 * 60 * 1000);
@@ -1546,13 +1712,10 @@ function createTaskItem(task) {
     taskMeta.classList.add('taskMeta');
 
     const isMobile = MOBILE_LAYOUT_QUERY.matches;
-    const matrixValue = getValidMatrixValue(task.matrix);
+    const matrixValue = getEffectiveMatrix(task).matrix;
     const taskType = getValidTaskType(task.taskType);
 
-    const matrixBadge = document.createElement('span');
-    const matrixData = MATRIX_CONFIG[matrixValue];
-    matrixBadge.classList.add('matrixBadge', matrixData.className);
-    matrixBadge.textContent = matrixData.label;
+    const matrixBadge = createMatrixBadge(task);
 
     const difficultyBadge = document.createElement('span');
     const difficultyLevel = getValidDifficultyLevel(task.difficulty);
@@ -1614,6 +1777,11 @@ function createTaskItem(task) {
         recurrenceBadge.classList.add('recurrenceBadge');
         recurrenceBadge.innerHTML = `<i class="fa-solid fa-repeat"></i> ${getRecurrenceLabel(task.recurrence)}`;
         taskMeta.appendChild(recurrenceBadge);
+    }
+
+    const folderBadge = TodoFolders.createBadge(task.folderId);
+    if (folderBadge) {
+        taskMeta.appendChild(folderBadge);
     }
 
     if (!(isMobile && matrixValue === 'schedule')) {
@@ -2104,7 +2272,7 @@ function getPriorityReasons(task) {
     // through to the generic "Best overall priority score" line, leaving
     // no real explanation for why it was actually picked.
     const status = getTaskUrgencyStatus(task);
-    const matrix = getValidMatrixValue(task.matrix);
+    const { matrix, escalated: matrixEscalated } = getEffectiveMatrix(task);
     const difficulty = getValidDifficultyLevel(task.difficulty);
     const drivingSubtask = status.fromStep
         ? (task.subtasks || []).find((subtask) => subtask.id === status.fromStep)
@@ -2135,7 +2303,9 @@ function getPriorityReasons(task) {
         }
     }
 
-    if (matrix === 'do') {
+    if (matrix === 'do' && matrixEscalated) {
+        reasons.push('Important, and now urgent since the deadline is close.');
+    } else if (matrix === 'do') {
         reasons.push('Marked as Important and Urgent.');
     } else if (matrix === 'schedule') {
         reasons.push('Marked as Important in your matrix.');
@@ -2888,6 +3058,7 @@ function editTask(taskId) {
     if (editorRecurrenceSelect) {
         editorRecurrenceSelect.value = getValidRecurrenceValue(task.recurrence) || '';
     }
+    TodoFolders.fillSelect(taskEditorOverlay.querySelector('.editorFolderSelect'), task.folderId);
 
     updateEditorDurationInputVisibility();
 
@@ -2976,6 +3147,11 @@ function initializeTaskEditor() {
                     <option value="weekly">Repeats weekly</option>
                     <option value="monthly">Repeats monthly</option>
                 </select>
+            </label>
+
+            <label class="detailsFieldGroup detailsFolderPrimary hidden" data-folder-field>
+                Folder
+                <select class="editorFolderSelect"></select>
             </label>
 
             <button type="button" class="detailsMoreToggleBtn editorMoreToggleBtn" aria-expanded="false" aria-controls="editorMoreOptions">
@@ -3223,6 +3399,14 @@ function saveTaskEditorChanges() {
     // clearing the deadline on an existing recurring task also clears the
     // repeat, rather than leaving a recurrence with nothing to anchor to.
     task.recurrence = updatedDueAt && editorRecurrenceSelect ? getValidRecurrenceValue(editorRecurrenceSelect.value) : null;
+    // delete, not = '' / undefined: Firestore rejects undefined, and an
+    // unfiled task should have no folderId field at all.
+    const editorFolderSelect = taskEditorOverlay.querySelector('.editorFolderSelect');
+    if (editorFolderSelect && TodoFolders.resolve(editorFolderSelect.value)) {
+        task.folderId = editorFolderSelect.value;
+    } else if (editorFolderSelect) {
+        delete task.folderId;
+    }
     task.updatedAt = new Date().toISOString();
 
     applyOrdering();
@@ -3287,7 +3471,7 @@ function getPriorityScore(task) {
     // step's own deadline counts too, whichever is sooner (see
     // getTaskUrgencyStatus/getEffectiveDueAt in task-shared.js).
     const status = getTaskUrgencyStatus(task);
-    const matrixRank = MATRIX_CONFIG[getValidMatrixValue(task.matrix)].rank;
+    const matrixRank = MATRIX_CONFIG[getEffectiveMatrix(task).matrix].rank;
     const typeRank = TASK_TYPE_CONFIG[getValidTaskType(task.taskType)].rank;
     const difficultyRank = DIFFICULTY_CONFIG[getValidDifficultyLevel(task.difficulty)].rank;
 
@@ -5112,6 +5296,7 @@ function normalizeTask(task, fallbackManualOrder) {
         : null;
 
     return {
+        ...(typeof task.folderId === 'string' && task.folderId !== '' ? { folderId: task.folderId.slice(0, 40) } : {}),
         id: typeof task.id === 'string' && task.id.trim() !== '' ? task.id : generateTaskId(),
         text: typeof task.text === 'string' ? task.text.trim() : '',
         completed: Boolean(task.completed),

@@ -1494,6 +1494,13 @@
                     } catch (error) {
                         console.warn('Could not delete suggestions for an owned group (continuing account deletion):', error);
                     }
+                    // Assignment records (best-effort, same reasoning as suggestions).
+                    try {
+                        const assignmentsSnapshot = await getDocs(collection(db, 'groups', groupDoc.id, 'assignments'));
+                        await Promise.all(assignmentsSnapshot.docs.map((assignmentDoc) => deleteDoc(assignmentDoc.ref)));
+                    } catch (error) {
+                        console.warn('Could not delete assignments for an owned group (continuing account deletion):', error);
+                    }
                     await deleteDoc(groupDoc.ref);
                 } else {
                     // Everything of this account's own in the group goes
@@ -1543,6 +1550,20 @@
                         await deleteDoc(doc(db, 'groups', groupDoc.id, 'availability', uid));
                     } catch (error) {
                         console.warn('Could not delete your availability grid in a group (continuing account deletion):', error);
+                    }
+                    // Assignment records this account created (who it assigned a
+                    // task to, and who declined). The creator may delete their own
+                    // (firestore.rules /assignments), and doing it before leaving
+                    // keeps the membership check satisfied. Best-effort, same as
+                    // the other cleanups in this branch.
+                    try {
+                        const ownAssignmentsSnapshot = await getDocs(query(
+                            collection(db, 'groups', groupDoc.id, 'assignments'),
+                            where('createdBy', '==', uid)
+                        ));
+                        await Promise.all(ownAssignmentsSnapshot.docs.map((assignmentDoc) => deleteDoc(assignmentDoc.ref)));
+                    } catch (error) {
+                        console.warn('Could not delete your assignment records in a group (continuing account deletion):', error);
                     }
                     const memberIds = group.memberIds || [];
                     const memberNames = group.memberNames || [];

@@ -131,6 +131,11 @@ function brainDumpSummarizeTask(task) {
         text: task.text,
         completed: Boolean(task.completed),
         matrix: task.matrix || null,
+        // True when the deadline is close enough that the app now treats
+        // this task as urgent regardless of its stored matrix (see
+        // getEffectiveMatrix in task-shared.js) - so Dusty's prioritization
+        // matches what the list actually shows.
+        matrixEscalated: getEffectiveMatrix(task).escalated,
         difficulty: task.difficulty || null,
         dueAt: task.dueAt || null,
         scheduledAt: task.scheduledAt || null,
@@ -406,7 +411,14 @@ async function gatherTaskContext(user, currentGroupId) {
         console.error('Brain Dump: failed to load groups for context:', error);
     }
 
-    return { soloTasks, groups: groupsContext, signals: { solo: soloSignals, group: groupSignals } };
+    // Folder NAMES only (never ids), for wherever a new task from this chat
+    // will land: your own list on the solo page, the open group's list on
+    // the group page - whichever TodoFolders currently holds.
+    const folders = typeof TodoFolders !== 'undefined'
+        ? TodoFolders.getAll().map((folder) => folder.name).slice(0, 30)
+        : [];
+
+    return { soloTasks, groups: groupsContext, folders, signals: { solo: soloSignals, group: groupSignals } };
 }
 
 // A fresh, one-time, read-only snapshot of users/{uid}/dustyMemory - the
@@ -1253,6 +1265,23 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         });
         recurrenceSelectEl.value = getValidRecurrenceValue(draft.recurrence) || '';
         row.appendChild(recurrenceSelectEl);
+
+        // Folder: only when this list has folders. Dusty proposes a NAME; it is
+        // matched against the real folders here (unknown names are dropped, so
+        // a made-up folder can never be created) and you confirm it like every
+        // other field on this card.
+        let folderSelectEl = null;
+        if (typeof TodoFolders !== 'undefined' && TodoFolders.getAll().length > 0) {
+            folderSelectEl = document.createElement('select');
+            folderSelectEl.classList.add('brainDumpTaskCardFolder');
+            folderSelectEl.setAttribute('aria-label', 'Folder');
+            const proposedName = typeof draft.folder === 'string' ? draft.folder.trim().toLowerCase() : '';
+            const proposed = proposedName
+                ? TodoFolders.getAll().find((folder) => folder.name.toLowerCase() === proposedName)
+                : null;
+            TodoFolders.fillSelect(folderSelectEl, proposed?.id || null);
+            row.appendChild(folderSelectEl);
+        }
         fields.appendChild(row);
 
         const subtasksEditor = createSubtaskRowsEditor(draft.subtasks);
@@ -1275,6 +1304,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             // recurrence picked here with the deadline field left empty
             // would otherwise silently do nothing once committed.
             recurrence: dueAtInputEl.value ? (getValidRecurrenceValue(recurrenceSelectEl.value) || null) : null,
+            folderId: folderSelectEl && TodoFolders.resolve(folderSelectEl.value) ? folderSelectEl.value : null,
             subtasks: subtasksEditor.read()
         });
 
@@ -1999,8 +2029,79 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
     // and undoing a wrong save is exactly as easy as the old confirm click
     // was, just after the fact - appendMemorySavedNotice's Forget button
     // deletes the specific doc just written, not just a visual dismiss.
-    async function appendMemoryReview(memoryProposals) {
-        if (!memoryProposals || memoryProposals.length === 0) {
+    // PROVENANCE GATE. A saved memory is fed back into every future chat, so a
+    // wrong one is persistent. Dusty also reads other people's text (teammates'
+    // task titles, names) in the same prompt, and the model can't reliably tell
+    // that apart from what YOU said. So this check lives in code, not in the
+    // prompt: a proposed memory is only saved silently when its substance is
+    // supported by the user's OWN messages in this conversation. Anything else is
+    // offered ("Remember this?") and saved only if the user taps Save.
+    function memoryIsSupportedByUser(memoryText) {
+        const words = Array.from(new Set(String(memoryText || '').toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) || []));
+        if (words.length === 0) {
+            return false;
+        }
+        const userText = history
+            .filter((turn) => turn && turn.role === 'user')
+            .map((turn) => String(turn.text || '').toLowerCase())
+            .join(' ');
+        const found = words.filter((word) => userText.includes(word)).length;
+        return found / words.length >= 0.6;
+    }
+
+    function appendMemoryOfferRow(proposal) {
+        const row = document.createElement('div');
+        row.classList.add('brainDumpMemorySaved', 'offer');
+
+        const icon = document.createElement('span');
+        icon.classList.add('brainDumpMemorySavedIcon');
+        icon.textContent = '\uD83E\uDDE0';
+        row.appendChild(icon);
+
+        const label = document.createElement('span');
+        label.classList.add('brainDumpMemorySavedText');
+        // textContent only: this is model output.
+        label.textContent = `Remember this? "${String(proposal.text || '').trim().slice(0, 300)}"`;
+        row.appendChild(label);
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.classList.add('suggestionAcceptBtn');
+        saveBtn.textContent = 'Save';
+        const dismissBtn = document.createElement('button');
+        dismissBtn.type = 'button';
+        dismissBtn.classList.add('suggestionDismissBtn');
+        dismissBtn.textContent = 'No thanks';
+        row.append(saveBtn, dismissBtn);
+
+        dismissBtn.addEventListener('click', () => row.remove());
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true;
+            dismissBtn.disabled = true;
+            try {
+                const written = await commitMemories([proposal]);
+                row.remove();
+                written.forEach(({ id, text }) => appendMemorySavedNotice(id, text));
+            } catch (error) {
+                console.error('Failed to save memory:', error);
+                row.remove();
+                appendMemorySaveFailedNotice();
+            }
+        });
+
+        messagesEl.appendChild(row);
+        scrollToBottom();
+    }
+
+    async function appendMemoryReview(allProposals) {
+        if (!allProposals || allProposals.length === 0) {
+            return;
+        }
+        const memoryProposals = allProposals.filter((proposal) => memoryIsSupportedByUser(proposal && proposal.text));
+        allProposals
+            .filter((proposal) => !memoryProposals.includes(proposal) && proposal && String(proposal.text || '').trim())
+            .forEach(appendMemoryOfferRow);
+        if (memoryProposals.length === 0) {
             return;
         }
         let written;

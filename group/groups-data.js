@@ -561,6 +561,14 @@ async function deleteGroupCompletely(groupId, user) {
         console.warn('Could not delete suggestions (continuing group deletion):', error);
     }
 
+    // Assignment records too (best-effort, same deploy-order reasoning).
+    try {
+        const assignmentsSnapshot = await getDocs(collection(db(), 'groups', groupId, 'assignments'));
+        await Promise.all(assignmentsSnapshot.docs.map((assignmentDoc) => deleteDoc(assignmentDoc.ref)));
+    } catch (error) {
+        console.warn('Could not delete assignments (continuing group deletion):', error);
+    }
+
     await deleteDoc(groupRef);
 }
 
@@ -671,6 +679,7 @@ function normalizeGroupTaskDoc(id, data) {
     task.createdAt = normalizeGroupDateField(task.createdAt);
     task.dueAt = normalizeGroupDateField(task.dueAt);
     task.scheduledAt = normalizeGroupDateField(task.scheduledAt);
+    task.assignedAt = normalizeGroupDateField(task.assignedAt);
     task.subtasks = Array.isArray(task.subtasks)
         ? task.subtasks.filter(isPlainDataObject).map((subtask) => ({
             ...subtask,
