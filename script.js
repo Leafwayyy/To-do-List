@@ -150,6 +150,7 @@ let currentTopView = 'tasks';
 // Declared up here, not beside renderFolderBar, so startup can never reach it
 // before it's initialized.
 let activeFolderFilter = 'all';
+let foldersListenerRegistered = false;
 // 'month' | 'week'; calendarAnchorDate is whichever date the currently
 // shown month/week is built around - Prev/Next/Today move it, the month
 // grid always shows the month CONTAINING it, the week strip always shows
@@ -679,13 +680,20 @@ function startApp() {
     initializeTaskEditor();
     // Folders: any change (load, add, rename, delete) refreshes the chip
     // bar, both folder pickers, and the list's folder badges.
-    TodoFolders.onChange(() => {
-        syncFolderSelectToFilter();
-        const editorFolderSelect = taskEditorOverlay?.querySelector('.editorFolderSelect');
-        const editingTask = activeEditorTaskId ? findTaskById(activeEditorTaskId) : null;
-        TodoFolders.fillSelect(editorFolderSelect, editingTask?.folderId);
-        renderTasks();
-    });
+    // startApp runs again after every sign-out/sign-in in the same tab, so the
+    // listener is added only once, and the previous account's folders are
+    // cleared before the new account's are read.
+    if (!foldersListenerRegistered) {
+        foldersListenerRegistered = true;
+        TodoFolders.onChange(() => {
+            syncFolderSelectToFilter();
+            const editorFolderSelect = taskEditorOverlay?.querySelector('.editorFolderSelect');
+            const editingTask = activeEditorTaskId ? findTaskById(activeEditorTaskId) : null;
+            TodoFolders.fillSelect(editorFolderSelect, editingTask?.folderId);
+            renderTasks();
+        });
+    }
+    TodoFolders.attach({ folders: [], canEdit: false, write: async () => {} });
     TodoFolders.init(TodoFolders.soloAdapter());
     // Reads (and, for a pre-existing account with no summary fields yet,
     // one-time backfills) the streak/badge summary - after

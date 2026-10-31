@@ -3119,7 +3119,7 @@ function createGroupTaskItem(groupId, task, isOwner) {
     checkBtn.title = task.completed ? 'Mark as incomplete' : 'Mark as complete';
     if (!isOwner) {
         checkBtn.disabled = true;
-        checkBtn.title = `Only ${task.ownerName || 'the owner'} can update this task`;
+        checkBtn.title = `Only ${rosterNameFor(task.ownerId, task.ownerName) || 'the owner'} can update this task`;
     }
 
     const taskContent = document.createElement('div');
@@ -3136,7 +3136,7 @@ function createGroupTaskItem(groupId, task, isOwner) {
         const ownerBadge = document.createElement('span');
         ownerBadge.classList.add('ownerBadge');
         const ownerJobRole = GroupRoles.getRole(getSelectedGroup(), task.ownerId);
-        ownerBadge.textContent = (task.ownerName || 'Teammate') + (ownerJobRole ? ` \u00B7 ${ownerJobRole.name}` : '');
+        ownerBadge.textContent = (rosterNameFor(task.ownerId, task.ownerName) || 'Teammate') + (ownerJobRole ? ` \u00B7 ${ownerJobRole.name}` : '');
         taskMeta.appendChild(ownerBadge);
     }
 
@@ -4743,7 +4743,10 @@ function getMyRoleInGroup(group) {
 function getMyAccess(group) {
     const { isOwner, isAdmin } = getMyRoleInGroup(group);
     const full = isOwner || isAdmin;
-    const perms = (group.memberPerms && typeof group.memberPerms === 'object' && group.memberPerms[currentUser?.uid]) || {};
+    const rawPerms = (group.memberPerms && typeof group.memberPerms === 'object' && group.memberPerms[currentUser?.uid]) || {};
+    // A grant from before you last left and rejoined no longer counts (the rules
+    // ignore it too), so don't offer powers the server would refuse.
+    const perms = GroupRoles.grantIsCurrent(rawPerms, (group.memberJoinedAt || {})[currentUser?.uid]) ? rawPerms : {};
     const assignScope = full ? 'all' : ((perms.assign === 'all' || perms.assign === 'role') ? perms.assign : null);
     return {
         isOwner,
@@ -5131,11 +5134,7 @@ function renderHandoffRequestsForYou(groupId) {
 
         const badges = document.createElement('div');
         badges.classList.add('suggestionRowBadges');
-        const matrixValue = getValidMatrixValue(task.matrix);
-        const matrixBadge = document.createElement('span');
-        matrixBadge.classList.add('matrixBadge', MATRIX_CONFIG[matrixValue].className);
-        matrixBadge.textContent = MATRIX_CONFIG[matrixValue].label;
-        badges.appendChild(matrixBadge);
+        badges.appendChild(createMatrixBadge(task));
         row.appendChild(badges);
 
         const actions = document.createElement('div');
@@ -6035,7 +6034,7 @@ function createGroupCalendarChip(entry, group) {
     // task.ownerName is re-stamped on every write by its owner (see
     // groups-data.js's resolveMemberName comment) - reading it straight off
     // this task is simpler and just as fresh as looking it up again.
-    const ownerName = isMine ? 'You' : (task.ownerName || 'Teammate');
+    const ownerName = isMine ? 'You' : (rosterNameFor(task.ownerId, task.ownerName) || 'Teammate');
     const kindLabel = type === 'step' ? 'Step due' : type === 'planned' ? 'Planned' : type === 'projected' ? 'Repeats' : 'Due';
     chip.setAttribute('aria-label', `${kindLabel}: ${task.text} (${ownerName})`);
     chip.title = type === 'step' ? `${ownerName} · ${kindLabel}: ${subtask.text}` : `${ownerName} · ${kindLabel}`;
@@ -6192,7 +6191,12 @@ async function runGroupAssignment(group, choice, fields) {
         choice,
         fields
     });
-    if (result.total > 0 && result.created === 0) {
+    if (result.total === 0) {
+        // The chosen person/role is no longer available (they left, or the role
+        // emptied). Say so instead of clearing the form and dropping the task.
+        throw new Error('That choice is no longer available. Pick who to assign it to again.');
+    }
+    if (result.created === 0) {
         throw new Error('Nobody received the task. Check your connection and try again.');
     }
     if (result.failedNames.length > 0) {
@@ -6247,6 +6251,16 @@ function renderAssignmentOutcomes(group) {
         row.appendChild(actions);
         assignmentOutcomesPanel.appendChild(row);
     });
+}
+
+// The copies that really belong to a shared task. When the assignment record is
+// loaded it names the participants, and a task that merely CLAIMS the same
+// sharedId but belongs to someone else is not one of them (the rules also stop
+// plain members setting a sharedId, this covers anything older).
+function getSharedCopies(sharedId) {
+    const bundle = groupAssignments.find((assignment) => assignment.id === sharedId);
+    const participants = bundle && Array.isArray(bundle.participantIds) ? bundle.participantIds : null;
+    return groupTasks.filter((other) => other.sharedId === sharedId && (!participants || participants.includes(other.ownerId)));
 }
 
 // One card for a task several people share: the title, how many have
@@ -6385,10 +6399,14 @@ function matchesGroupFolderFilter(task) {
     return activeFolderFilter === 'none' ? !folder : folder?.id === activeFolderFilter;
 }
 
-function syncGroupFolderSelect() {
+// keepPick: called from renders (every snapshot), where a folder the person already
+// chose for the task they're typing must survive. Called without it, the select goes
+// back to the folder being viewed (a filter click, or right after a task is added).
+function syncGroupFolderSelect(keepPick = false) {
     // New tasks default to the folder you're looking at.
     const defaultId = TodoFolders.resolve(activeFolderFilter) ? activeFolderFilter : '';
-    TodoFolders.fillSelect(folderSelect, defaultId);
+    const picked = keepPick && TodoFolders.resolve(folderSelect?.value) ? folderSelect.value : defaultId;
+    TodoFolders.fillSelect(folderSelect, picked);
     // quickadd.js (loaded after this file) owns the chips under the input.
     if (typeof renderQuickChips === 'function') {
         renderQuickChips();
@@ -6447,6 +6465,26 @@ function renderGroupFolderBar(group) {
     if (folders.length === 0) {
         activeFolderFilter = 'all';
     }
+
+    // renderGroupTasks runs on every snapshot. Rebuilding the bar each time closed
+    // an open Group by dropdown and dropped keyboard focus, so skip the rebuild
+    // unless something the bar shows has changed.
+    const barSignature = JSON.stringify([
+        folders,
+        activeFolderFilter,
+        activeMemberScope,
+        groupByMode,
+        TodoFolders.isEditable(),
+        GroupRoles.getAll(group),
+        (group?.memberIds || []).length,
+        group ? getMyRoleInGroup(group) : null,
+        currentUser?.uid || null,
+        groupTasks.map((task) => [task.ownerId, task.completed ? 1 : 0, task.folderId || ''])
+    ]);
+    if (folderBar.dataset.signature === barSignature) {
+        return;
+    }
+    folderBar.dataset.signature = barSignature;
 
     folderBar.innerHTML = '';
     const canEditFolders = TodoFolders.isEditable();
@@ -6526,7 +6564,9 @@ function renderGroupFolderBar(group) {
         rolesBtn.type = 'button';
         rolesBtn.className = 'folderChip folderManageChip';
         rolesBtn.innerHTML = '<i class="fa-solid fa-id-badge" aria-hidden="true"></i><span>' + (roles.length > 0 ? 'Roles' : 'Add roles') + '</span>';
-        rolesBtn.addEventListener('click', () => openGroupRolesManager(group));
+        // getSelectedGroup() at click time: the bar is only rebuilt when something it
+        // shows changes, so `group` here can be stale (roles/access edited elsewhere).
+        rolesBtn.addEventListener('click', () => openGroupRolesManager(getSelectedGroup() || group));
         folderBar.appendChild(rolesBtn);
     }
 
@@ -6655,8 +6695,8 @@ function renderGroupTasks() {
             // combined view. Not when looking at one person (their copy shows
             // normally) or when grouped by person (each copy sits under its owner).
             if (collapseShared && task.sharedId) {
-                const copies = groupTasks.filter((other) => other.sharedId === task.sharedId);
-                if (copies.length > 1) {
+                const copies = getSharedCopies(task.sharedId);
+                if (copies.length > 1 && copies.some((copy) => copy.id === task.id)) {
                     if (!emittedShared.has(task.sharedId)) {
                         emittedShared.add(task.sharedId);
                         groupTasksList.appendChild(createSharedTaskCard(group, task.sharedId, copies, sorted));
@@ -6674,7 +6714,7 @@ function renderGroupTasks() {
 // both pickers and the list. Registered once at load; attachGroupFolders only
 // notifies when the list really changed, so this can't loop with renderApp.
 TodoFolders.onChange(() => {
-    syncGroupFolderSelect();
+    syncGroupFolderSelect(true);
     const editorFolderSelect = taskEditorOverlay?.querySelector('.editorFolderSelect');
     const editingTask = activeEditorTaskId ? groupTasks.find((task) => task.id === activeEditorTaskId) : null;
     TodoFolders.fillSelect(editorFolderSelect, editingTask?.folderId);
@@ -7412,7 +7452,7 @@ function renderApp() {
         renderSuggestionOutcomes(group.id);
         renderHandoffRequestsForYou(group.id);
         attachGroupFolders(group);
-        syncGroupFolderSelect();
+        syncGroupFolderSelect(true);
         renderAssignSelect(group);
         renderAssignmentOutcomes(group);
         renderGroupTasks();
@@ -7736,7 +7776,7 @@ function updateGroupUrgencyAlert() {
             ? '1 task across the group is overdue.'
             : `${overdueCount} tasks across the group are overdue.`;
     } else {
-        const ownerLabel = top.task.ownerId === currentUser?.uid ? 'you' : (top.task.ownerName || 'a teammate');
+        const ownerLabel = top.task.ownerId === currentUser?.uid ? 'you' : (rosterNameFor(top.task.ownerId, top.task.ownerName) || 'a teammate');
         const soonLabel = top.status.urgencyLevel === 'critical' ? 'Due very soon' : 'Due soon';
         groupUrgencyAlertText.textContent = `${soonLabel}: ${top.task.text} (${ownerLabel}, ${top.status.countdownLabel}).`;
     }

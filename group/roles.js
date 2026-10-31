@@ -14,11 +14,7 @@ const GroupRoles = (() => {
     const NAME_MAX = 30;
     let overlay = null;
 
-    function newId() {
-        const bytes = new Uint8Array(6);
-        crypto.getRandomValues(bytes);
-        return 'r_' + Array.from(bytes, (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 8);
-    }
+    const newId = () => makeShortId('r_');
 
     function sanitizeRoles(list) {
         if (!Array.isArray(list)) {
@@ -31,7 +27,7 @@ const GroupRoles = (() => {
                 return;
             }
             const id = entry.id.slice(0, 40);
-            const name = entry.name.trim().slice(0, NAME_MAX);
+            const name = entry.name.replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
             if (!id || !name || seen.has(id) || clean.length >= MAX_ROLES) {
                 return;
             }
@@ -44,7 +40,12 @@ const GroupRoles = (() => {
     // Per-person access: { uid: { assign: 'all' | 'role', folders: true } }.
     // Only the exact known values survive; owners/admins are left out (they
     // already can do everything, so a grant on them would only be noise).
-    function sanitizeMemberPerms(map, memberIds, fullAccessIds) {
+    //
+    // Each kept grant is stamped with `since` = that member's CURRENT
+    // memberJoinedAt (see grantIsCurrent in firestore.rules), so a grant given
+    // before someone left and came back stops counting. `joinedAt` is
+    // group.memberJoinedAt.
+    function sanitizeMemberPerms(map, memberIds, fullAccessIds, joinedAt) {
         const clean = {};
         if (!map || typeof map !== 'object') {
             return clean;
@@ -62,10 +63,26 @@ const GroupRoles = (() => {
                 perms.folders = true;
             }
             if (Object.keys(perms).length > 0) {
+                if (joinedAt && joinedAt[uid]) {
+                    perms.since = joinedAt[uid];
+                }
                 clean[uid] = perms;
             }
         });
         return clean;
+    }
+
+    // True when a stored grant still matches the member's current membership:
+    // both stamps equal, or neither exists (a member from before join times
+    // were recorded). Mirrors grantIsCurrent in firestore.rules exactly.
+    function grantIsCurrent(grant, joinedAt) {
+        const stamp = (value) => (value && typeof value.toMillis === 'function' ? value.toMillis() : null);
+        const since = stamp(grant && grant.since);
+        const joined = stamp(joinedAt);
+        if (joined === null) {
+            return since === null;
+        }
+        return since === joined;
     }
 
     // Keeps only current members pointing at a role that still exists. Run on
@@ -127,7 +144,15 @@ const GroupRoles = (() => {
         const memberNames = group.memberNames || [];
         let draftMemberRoles = sanitizeMemberRoles(group.memberRoles, memberIds, draftRoles);
         const fullAccessIds = [group.ownerId, ...(group.adminIds || [])];
-        const draftMemberPerms = sanitizeMemberPerms(group.memberPerms, memberIds, fullAccessIds);
+        // Stale grants (given before the person left and rejoined) are NOT
+        // shown or kept: saving this dialog must never quietly bring one back.
+        const currentPerms = {};
+        Object.keys(group.memberPerms || {}).forEach((uid) => {
+            if (grantIsCurrent(group.memberPerms[uid], (group.memberJoinedAt || {})[uid])) {
+                currentPerms[uid] = group.memberPerms[uid];
+            }
+        });
+        const draftMemberPerms = sanitizeMemberPerms(currentPerms, memberIds, fullAccessIds, null);
 
         overlay = document.createElement('div');
         overlay.className = 'folderManagerOverlay';
@@ -365,7 +390,7 @@ const GroupRoles = (() => {
             const message = await onSave({
                 roles,
                 memberRoles: sanitizeMemberRoles(draftMemberRoles, memberIds, roles),
-                memberPerms: sanitizeMemberPerms(draftMemberPerms, memberIds, fullAccessIds)
+                memberPerms: sanitizeMemberPerms(draftMemberPerms, memberIds, fullAccessIds, group.memberJoinedAt || {})
             });
             if (message) {
                 errorEl.textContent = message;
@@ -381,5 +406,5 @@ const GroupRoles = (() => {
         addInput.focus();
     }
 
-    return { MAX_ROLES, getAll, getRole, createTag, openManager, sanitizeRoles, sanitizeMemberRoles, sanitizeMemberPerms };
+    return { MAX_ROLES, getAll, getRole, createTag, openManager, sanitizeRoles, sanitizeMemberRoles, sanitizeMemberPerms, grantIsCurrent };
 })();

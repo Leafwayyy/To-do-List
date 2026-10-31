@@ -73,10 +73,7 @@ function quickFormChanged() {
 // ---- Chips ----------------------------------------------------------------
 
 function quickFindFolderInText(text) {
-    const matches = TodoFolders.getAll().filter((folder) => {
-        const escaped = folder.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'iu').test(text);
-    });
+    const matches = TodoFolders.getAll().filter((folder) => wholeWordRegex(folder.name).test(text));
     // Two folders named in one task is ambiguous - suggest nothing.
     return matches.length === 1 ? matches[0] : null;
 }
@@ -94,9 +91,7 @@ function quickFindTeammateInText(text) {
     })).filter((member) => member.uid !== currentUser?.uid && member.name.length >= 3);
     const matches = firstNames.filter((member) => {
         const sameFirstName = firstNames.filter((other) => other.name.toLowerCase() === member.name.toLowerCase());
-        const escaped = member.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        return sameFirstName.length === 1
-            && new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'iu').test(text);
+        return sameFirstName.length === 1 && wholeWordRegex(member.name).test(text);
     });
     return matches.length === 1 ? matches[0] : null;
 }
@@ -288,7 +283,10 @@ function slashItemsFor(level, filterText) {
         if (!group) {
             return [];
         }
-        return GroupAssign.getChoiceOptions(group, currentUser?.uid).map((option) => ({
+        // Same scope the dropdown uses: a role-limited assigner is only offered
+        // their own role's people, never Everyone.
+        const access = getMyAccess(group);
+        return GroupAssign.getChoiceOptions(group, currentUser?.uid, access.canAssign ? access.assignScope : 'all').map((option) => ({
             label: option.value === '' ? 'Just me' : option.label,
             run: () => setFormValue(assignSelect, option.value)
         }));

@@ -9,6 +9,21 @@
 // later, the group dashboard (groups/{id}.folders) share this one file.
 // Classic script, loaded before script.js.
 
+// Small helpers shared by folders.js, roles.js, assign.js and quickadd.js (all
+// load after this file on both pages).
+function makeShortId(prefix, byteCount = 6, length = 8) {
+    const bytes = new Uint8Array(byteCount);
+    crypto.getRandomValues(bytes);
+    return prefix + Array.from(bytes, (b) => b.toString(36).padStart(2, '0')).join('').slice(0, length);
+}
+
+// A case-insensitive whole-word matcher for a user-typed name. The name is
+// escaped first, so it can only ever match literally (no regex injection).
+function wholeWordRegex(name) {
+    const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'iu');
+}
+
 const TodoFolders = (() => {
     const MAX_FOLDERS = 30;
     const NAME_MAX = 30;
@@ -22,11 +37,7 @@ const TodoFolders = (() => {
     const listeners = new Set();
     let managerOverlay = null;
 
-    function newId() {
-        const bytes = new Uint8Array(6);
-        crypto.getRandomValues(bytes);
-        return 'f_' + Array.from(bytes, (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 8);
-    }
+    const newId = () => makeShortId('f_');
 
     // Never trust stored data: cap, de-dupe by id, force a palette color.
     function sanitize(list) {
@@ -40,7 +51,7 @@ const TodoFolders = (() => {
                 return;
             }
             const id = entry.id.slice(0, 40);
-            const name = entry.name.trim().slice(0, NAME_MAX);
+            const name = entry.name.replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
             if (!id || !name || seen.has(id) || clean.length >= MAX_FOLDERS) {
                 return;
             }
@@ -122,7 +133,7 @@ const TodoFolders = (() => {
     }
 
     function add(name, color) {
-        const trimmed = String(name || '').trim().slice(0, NAME_MAX);
+        const trimmed = String(name || '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
         if (!trimmed) {
             return Promise.resolve('Give the folder a name.');
         }
@@ -138,7 +149,7 @@ const TodoFolders = (() => {
     }
 
     function update(id, changes) {
-        const trimmedName = changes.name === undefined ? undefined : String(changes.name).trim().slice(0, NAME_MAX);
+        const trimmedName = changes.name === undefined ? undefined : String(changes.name).replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
         if (trimmedName === '') {
             return Promise.resolve('Folder name cannot be empty.');
         }
@@ -161,17 +172,23 @@ const TodoFolders = (() => {
         if (!selectEl) {
             return;
         }
-        selectEl.innerHTML = '';
-        const none = document.createElement('option');
-        none.value = '';
-        none.textContent = 'No folder';
-        selectEl.appendChild(none);
-        folders.forEach((folder) => {
-            const option = document.createElement('option');
-            option.value = folder.id;
-            option.textContent = folder.name;
-            selectEl.appendChild(option);
-        });
+        // Rebuilding an open <select> snaps its list shut, and this is called
+        // on every render, so only rebuild when the options actually changed.
+        const signature = folders.map((folder) => folder.id + '\u0000' + folder.name).join('\u0001');
+        if (selectEl.dataset.optionsSig !== signature) {
+            selectEl.innerHTML = '';
+            const none = document.createElement('option');
+            none.value = '';
+            none.textContent = 'No folder';
+            selectEl.appendChild(none);
+            folders.forEach((folder) => {
+                const option = document.createElement('option');
+                option.value = folder.id;
+                option.textContent = folder.name;
+                selectEl.appendChild(option);
+            });
+            selectEl.dataset.optionsSig = signature;
+        }
         selectEl.value = resolve(selectedId) ? selectedId : '';
         const wrapper = selectEl.closest('[data-folder-field]');
         wrapper?.classList.toggle('hidden', folders.length === 0);
@@ -348,10 +365,7 @@ const TodoFolders = (() => {
     }
 
     function guessFolderId(text) {
-        const matches = folders.filter((folder) => {
-            const escaped = folder.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'iu').test(text);
-        });
+        const matches = folders.filter((folder) => wholeWordRegex(folder.name).test(text));
         return matches.length === 1 ? matches[0].id : '';
     }
 

@@ -28,11 +28,7 @@ const GroupAssign = (() => {
         return Number.isFinite(assignedAt) && (Date.now() - assignedAt) <= DECLINE_WINDOW_MS;
     }
 
-    function newSharedId() {
-        const bytes = new Uint8Array(8);
-        crypto.getRandomValues(bytes);
-        return 'sh_' + Array.from(bytes, (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 12);
-    }
+    const newSharedId = () => makeShortId('sh_', 8, 12);
 
     function nameAt(group, index) {
         const name = (group.memberNames || [])[index];
@@ -112,6 +108,13 @@ const GroupAssign = (() => {
         await batch.commit();
     }
 
+    // Entries from `chunk` whose task doc does NOT exist yet (see the retry note in assign()).
+    async function filterMissing(chunk) {
+        const { getDoc } = fs();
+        const snapshots = await Promise.all(chunk.map((entry) => getDoc(entry.ref).catch(() => null)));
+        return chunk.filter((_, index) => !(snapshots[index] && snapshots[index].exists()));
+    }
+
     // Returns { mode, created, total, failedNames }. Never throws for a
     // partial result: the caller decides how to tell the user.
     async function assign({ group, user, canAssign, assignScope = 'all', choice, fields }) {
@@ -143,27 +146,15 @@ const GroupAssign = (() => {
             return { mode: 'suggested', created, total: targets.length, failedNames };
         }
 
-        const { doc, setDoc, deleteDoc, writeBatch, serverTimestamp } = fs();
+        const { doc, setDoc, writeBatch, serverTimestamp } = fs();
         const sharedId = newSharedId();
-        const stamp = new Date().toISOString();
-
-        // The record first: it carries who was assigned and, later, who
-        // declined. If it can't be written nothing else is.
-        const bundleRef = doc(db(), 'groups', group.id, 'assignments', sharedId);
-        await setDoc(bundleRef, {
-            createdBy: user.uid,
-            createdByName: displayNameFor(user),
-            text: text.slice(0, 2000),
-            participantIds: targets.map((target) => target.uid),
-            participantNames: targets.map((target) => target.name),
-            createdAt: serverTimestamp(),
-            declined: {}
-        });
 
         const entries = targets.map((target) => {
             const extra = { ownerId: target.uid, ownerName: target.name, sharedId, sharedBy: user.uid };
             if (target.uid !== user.uid) {
-                Object.assign(extra, { assignedBy: user.uid, assignedByName: displayNameFor(user), assignedAt: stamp });
+                // assignedAt is the SERVER's clock (the rules require exactly that), because
+                // the 15-minute decline window runs from it.
+                Object.assign(extra, { assignedBy: user.uid, assignedByName: displayNameFor(user), assignedAt: serverTimestamp() });
             }
             return {
                 target,
@@ -176,27 +167,54 @@ const GroupAssign = (() => {
 
         let created = 0;
         const failedNames = [];
+        const createdTargets = [];
         for (let i = 0; i < entries.length; i += FAN_OUT_CHUNK) {
             const chunk = entries.slice(i, i + FAN_OUT_CHUNK);
+            let remaining = chunk;
             let done = false;
             for (let attempt = 0; attempt < 2 && !done; attempt += 1) {
                 try {
-                    await commitChunk(() => writeBatch(db()), chunk);
+                    await commitChunk(() => writeBatch(db()), remaining);
                     done = true;
                 } catch (error) {
                     console.error('Failed to assign a batch of tasks:', error);
+                    if (attempt === 0) {
+                        // An error doesn't prove nothing was written (a dropped
+                        // acknowledgement looks the same). Re-sending onto a
+                        // copy that landed would be an UPDATE of someone else's
+                        // task, which the rules rightly deny, so look first and
+                        // only resend what's genuinely missing.
+                        remaining = await filterMissing(remaining);
+                        done = remaining.length === 0;
+                    }
                 }
             }
-            if (done) {
-                created += chunk.length;
-            } else {
-                chunk.forEach((entry) => failedNames.push(entry.target.name));
+            const landed = done ? chunk : chunk.filter((entry) => !remaining.includes(entry));
+            landed.forEach((entry) => createdTargets.push(entry.target));
+            created += landed.length;
+            if (!done) {
+                remaining.forEach((entry) => failedNames.push(entry.target.name));
             }
         }
 
-        // Nothing landed: don't leave an empty record behind.
-        if (created === 0) {
-            await deleteDoc(bundleRef).catch(() => {});
+        // The record is written AFTER the copies and lists only the people who
+        // actually got one, so it can never name someone who never received the
+        // task. If this write fails the tasks still exist and work normally; the
+        // only loss is the assigner's "declined" notification for this one.
+        if (created > 0) {
+            try {
+                await setDoc(doc(db(), 'groups', group.id, 'assignments', sharedId), {
+                    createdBy: user.uid,
+                    createdByName: displayNameFor(user),
+                    text: text.slice(0, 2000),
+                    participantIds: createdTargets.map((target) => target.uid),
+                    participantNames: createdTargets.map((target) => target.name),
+                    createdAt: serverTimestamp(),
+                    declined: {}
+                });
+            } catch (error) {
+                console.warn('Tasks were assigned, but the assignment record could not be saved:', error);
+            }
         }
         return { mode: 'assigned', created, total: targets.length, failedNames, sharedId };
     }

@@ -25,8 +25,22 @@ service cloud.firestore {
   //
   // 'role' scope = may only assign to someone who has the SAME role as them;
   // both people must actually have a role set, and it must match.
+  //
+  // A grant only counts while it matches the member's CURRENT membership: each
+  // grant records `since` = that member's memberJoinedAt at the time it was
+  // given, and every join (including a re-join after being removed) writes a
+  // fresh memberJoinedAt, so a stale grant stops working the moment its holder
+  // leaves and comes back. Fails closed: anything that doesn't line up simply
+  // grants nothing.
+  function grantIsCurrent(groupData, grant) {
+    return (('memberJoinedAt' in groupData) && (request.auth.uid in groupData.memberJoinedAt))
+      ? (('since' in grant) && grant.since == groupData.memberJoinedAt[request.auth.uid])
+      : !('since' in grant);
+  }
   function myPerms(groupData) {
-    return (('memberPerms' in groupData) && (request.auth.uid in groupData.memberPerms))
+    return (('memberPerms' in groupData)
+      && (request.auth.uid in groupData.memberPerms)
+      && grantIsCurrent(groupData, groupData.memberPerms[request.auth.uid]))
       ? groupData.memberPerms[request.auth.uid]
       : {};
   }
@@ -59,7 +73,13 @@ service cloud.firestore {
     return canAssignTo(groupData, data.ownerId)
       && data.ownerId != request.auth.uid
       && data.ownerId in groupData.memberIds
+      // A member who was only GRANTED assign rights can't assign to the owner
+      // or an admin (that would invert the hierarchy). Owner/admin can.
+      && (isOwnerOrAdmin(groupData) || (data.ownerId != groupData.ownerId && !(data.ownerId in adminIdsOf(groupData))))
       && data.assignedBy == request.auth.uid
+      // The decline window runs from this, so it must be the real server time,
+      // not something the assigner can backdate or push into the future.
+      && data.assignedAt == request.time
       && (!('assignedByName' in data) || (data.assignedByName is string && data.assignedByName.size() <= 80))
       && !('handoffRequest' in data)
       && (!('completed' in data) || data.completed == false);
@@ -265,12 +285,15 @@ service cloud.firestore {
             && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1] is string
             && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1].size() > 0
             && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1].size() <= 80
-            && (
-              !('memberJoinedAt' in request.resource.data)
-              || request.resource.data.memberJoinedAt
-                  .diff(('memberJoinedAt' in resource.data) ? resource.data.memberJoinedAt : {})
-                  .affectedKeys().hasOnly([request.auth.uid])
-            )
+            // The join time is now REQUIRED, and must be this write's own server
+            // time. Optional/any-value let a removed member rejoin without it (or
+            // with their old value) and keep the stamp an old access grant is
+            // bound to (see grantIsCurrent). joinGroup always writes it.
+            && ('memberJoinedAt' in request.resource.data)
+            && request.resource.data.memberJoinedAt
+                .diff(('memberJoinedAt' in resource.data) ? resource.data.memberJoinedAt : {})
+                .affectedKeys().hasOnly([request.auth.uid])
+            && request.resource.data.memberJoinedAt[request.auth.uid] == request.time
           )
           || (
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames', 'adminIds'])
@@ -383,12 +406,14 @@ service cloud.firestore {
             && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1] is string
             && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1].size() > 0
             && request.resource.data.memberNames[request.resource.data.memberNames.size() - 1].size() <= 80
-            && (
-              !('memberJoinedAt' in request.resource.data)
-              || request.resource.data.memberJoinedAt
-                  .diff(('memberJoinedAt' in resource.data) ? resource.data.memberJoinedAt : {})
-                  .affectedKeys().hasOnly([newlyAddedMemberId(request.resource.data.memberIds)])
-            )
+            // Same requirement as the direct join above: a fresh, server-stamped
+            // join time for exactly the member being approved (approveJoinRequest
+            // always writes it).
+            && ('memberJoinedAt' in request.resource.data)
+            && request.resource.data.memberJoinedAt
+                .diff(('memberJoinedAt' in resource.data) ? resource.data.memberJoinedAt : {})
+                .affectedKeys().hasOnly([newlyAddedMemberId(request.resource.data.memberIds)])
+            && request.resource.data.memberJoinedAt[newlyAddedMemberId(request.resource.data.memberIds)] == request.time
           )
           // Kicking: the owner may remove anyone but themselves; an admin
           // may only remove a plain member (never another admin, never the
@@ -447,12 +472,14 @@ service cloud.firestore {
             && request.resource.data.folders.size() <= 30
           )
           // Roles (organization-plan.md 5.2): a job title that groups
-          // people. Owner or admin only, only these two fields change, at most
-          // 20 roles, and memberRoles may only name current members (so a
-          // departed member's entry can never linger or be forged for a
-          // stranger). It grants NO permissions - nothing in this file reads
-          // roles/memberRoles. Role ids in memberRoles that don't exist are
-          // harmless: every reader treats them as "no role".
+          // people. Owner or admin only, at most 20 roles, and memberRoles may
+          // only name current members. A role grants no permission BY ITSELF,
+          // but canAssignTo (top of this file) DOES read memberRoles to decide
+          // whether a 'role'-scoped grantee may assign to someone: both must hold
+          // the same role. So this branch must stay owner/admin-only, or a member
+          // could set their own role to match a target's and widen their reach.
+          // Role ids in memberRoles that don't exist are harmless: every reader
+          // treats them as "no role".
           || (
             isOwnerOrAdmin(resource.data)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['roles', 'memberRoles', 'memberPerms'])
@@ -580,6 +607,13 @@ service cloud.firestore {
               && !('assignedBy' in request.resource.data)
               && !('assignedByName' in request.resource.data)
               && !('assignedAt' in request.resource.data)
+              // Only someone who may assign can attach their own task to a shared
+              // card; otherwise any member could slip a task into someone else's
+              // card and inflate its "done" count. Lookups: this + the membership
+              // check above = 2 per task (the assign branch below is also 2, and
+              // short-circuits past this one).
+              && (!('sharedId' in request.resource.data)
+                || hasAnyAssignRight(get(/databases/$(database)/documents/groups/$(groupId)).data))
             )
             // Assigning: ONLY the owner, an admin, or a member the owner/admin
             // granted assign rights (limited to their role if so scoped) may
@@ -588,7 +622,8 @@ service cloud.firestore {
             // by" can never be forged. No handoff request may ride along.
             || canCreateAssigned(get(/databases/$(database)/documents/groups/$(groupId)).data, request.resource.data)
           )
-          && (!('sharedId' in request.resource.data) || (request.resource.data.sharedId is string && request.resource.data.sharedId.size() <= 80))
+          && (!('sharedId' in request.resource.data)
+            || (request.resource.data.sharedId is string && request.resource.data.sharedId.size() <= 80))
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 2000

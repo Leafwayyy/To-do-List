@@ -679,6 +679,7 @@ function normalizeGroupTaskDoc(id, data) {
     task.createdAt = normalizeGroupDateField(task.createdAt);
     task.dueAt = normalizeGroupDateField(task.dueAt);
     task.scheduledAt = normalizeGroupDateField(task.scheduledAt);
+    task.assignedAt = normalizeGroupDateField(task.assignedAt);
     task.subtasks = Array.isArray(task.subtasks)
         ? task.subtasks.filter(isPlainDataObject).map((subtask) => ({
             ...subtask,
