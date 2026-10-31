@@ -1207,7 +1207,7 @@
 
     // The email worker (worker/email-worker.js) is set up separately; until its address is
     // filled in here the test button just says email isn't switched on yet.
-    const EMAIL_WORKER_URL = '';
+    const EMAIL_WORKER_URL = 'https://todo-email.leafwayyy.workers.dev';
 
     // Only email-and-password accounts can be unverified (Google sign-in always is verified).
     function needsVerification() {
