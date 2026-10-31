@@ -12857,3 +12857,35 @@ body.authGateActive .authOverlay{
         padding: 0 var(--space-2);
     }
 }
+
+/* Dusty's action cards (dusty-actions.js): plain-words description of what would happen,
+   and a clear "can't do this" state (unticked, disabled, with the reason) when the user
+   isn't permitted. */
+.brainDumpActionText{
+    margin: 0;
+    color: var(--violet-text, #f6f4ff);
+    font-size: var(--text-sm, 12px);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.brainDumpActionCard.blocked{
+    border-style: dashed;
+    border-color: rgba(255, 159, 159, 0.5);
+    background: rgba(255, 107, 107, 0.06);
+}
+
+.brainDumpActionCard.blocked .brainDumpActionText{
+    color: #ffb3b3;
+}
+
+.brainDumpActionCard.blocked .brainDumpTaskCardTarget{
+    opacity: 0.7;
+}
+
+.brainDumpActionNote{
+    margin: 4px 0 0;
+    color: var(--color-warning, #ffb84d);
+    font-size: var(--text-xs, 11px);
+    font-weight: 600;
+}

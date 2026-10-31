@@ -9135,7 +9135,8 @@ const brainDumpController = createBrainDumpController({
     commitSuggestions: commitAiSuggestionsGroup,
     commitComments: commitAiCommentsGroup,
     commitTaskEdits: commitAiTaskEditsGroup,
-    getCurrentGroupId: () => getSelectedGroup()?.id || null
+    getCurrentGroupId: () => getSelectedGroup()?.id || null,
+    actionTools: DustyActions
 });
 if (brainDumpToggleBtn) {
     brainDumpToggleBtn.addEventListener('click', () => {

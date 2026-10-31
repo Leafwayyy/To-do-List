@@ -565,7 +565,10 @@ function buildDustyAvatarMarkup(size) {
 // exactly as the AI (or the user's own edit) left it - NOTHING here is
 // trusted or sanitized; that's commitTasks' job, same as it would be for
 // any other task-creation entry point.
-function createBrainDumpController({ context, commitTasks, commitSuggestions, commitComments, commitTaskEdits, getCurrentGroupId }) {
+// actionTools (dusty-actions.js): { capabilities(), describe(draft), prepare(actions), commit(drafts) } -
+// lets Dusty propose folder / assign / role / access actions, limited to what the signed-in
+// user is allowed to do. Optional: a page that passes none simply never shows action cards.
+function createBrainDumpController({ context, commitTasks, commitSuggestions, commitComments, commitTaskEdits, getCurrentGroupId, actionTools }) {
     let overlay = null;
     let messagesEl = null;
     let attachmentsRowEl = null;
@@ -2006,6 +2009,98 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         });
     }
 
+    // ---- Actions (folders, assigning, roles, access) -------------------------
+    // One card per proposed action, saying in plain words exactly what would happen. An
+    // action the user isn't permitted to do is still shown, but unticked and disabled with the
+    // reason, so a "no" is explained rather than silently dropped. The permission check is
+    // actionTools.describe (live data, real permissions) - never the model's say-so.
+    const ACTION_KIND_LABELS = {
+        createFolder: 'New folder',
+        fileTasks: 'File tasks',
+        assign: 'Assign a task',
+        createRole: 'New role',
+        setRole: 'Change a role',
+        grantAccess: 'Change access'
+    };
+
+    function createActionReviewCard(draft) {
+        const verdict = actionTools.describe(draft);
+        // Only fields Dusty actually filled in: a null text would trip the shared review
+        // scaffold's text check, and an unfilled field means nothing anyway.
+        const cleaned = {};
+        Object.keys(draft || {}).forEach((key) => {
+            if (draft[key] !== null && draft[key] !== undefined) {
+                cleaned[key] = draft[key];
+            }
+        });
+
+        const card = document.createElement('div');
+        card.classList.add('brainDumpTaskCard', 'brainDumpActionCard');
+        if (!verdict.allowed) {
+            card.classList.add('blocked');
+        }
+
+        const header = document.createElement('div');
+        header.classList.add('brainDumpTaskCardHeader');
+        const checkboxLabel = document.createElement('label');
+        checkboxLabel.classList.add('brainDumpTaskCardCheck');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        // Changing who can do what is the one kind that starts UNTICKED: if anything Dusty read
+        // ever steered it into proposing one, a quick "Do checked" must not be enough, the user
+        // has to tick it on purpose.
+        const changesPermissions = ['grantAccess', 'setRole', 'createRole'].includes(draft && draft.action);
+        checkbox.checked = verdict.allowed && !changesPermissions;
+        checkbox.disabled = !verdict.allowed;
+        checkbox.setAttribute('aria-label', 'Do this');
+        checkboxLabel.appendChild(checkbox);
+        header.appendChild(checkboxLabel);
+        card.appendChild(header);
+
+        const fields = document.createElement('div');
+        fields.classList.add('brainDumpTaskCardFields');
+        const kind = document.createElement('p');
+        kind.classList.add('brainDumpTaskCardTarget');
+        kind.textContent = ACTION_KIND_LABELS[draft && draft.action] || 'Action';
+        fields.appendChild(kind);
+        const body = document.createElement('p');
+        body.classList.add('brainDumpActionText');
+        // textContent only: both strings contain names other people typed.
+        body.textContent = verdict.allowed ? verdict.text : `Can't do this: ${verdict.reason}`;
+        fields.appendChild(body);
+        if (verdict.allowed && changesPermissions) {
+            const note = document.createElement('p');
+            note.classList.add('brainDumpActionNote');
+            note.textContent = 'This changes who can do what in the group. Tick the box to confirm it.';
+            fields.appendChild(note);
+        }
+        card.appendChild(fields);
+
+        return {
+            element: card,
+            read: () => ({ ...cleaned, included: checkbox.checked && verdict.allowed })
+        };
+    }
+
+    function appendActionReview(actions, typeLabel) {
+        if (!actionTools || typeof actionTools.describe !== 'function' || typeof actionTools.commit !== 'function'
+            || !Array.isArray(actions) || actions.length === 0) {
+            return;
+        }
+        if (typeof actionTools.prepare === 'function') {
+            actionTools.prepare(actions);
+        }
+        appendReviewSection({
+            drafts: actions,
+            buildCard: createActionReviewCard,
+            commit: actionTools.commit,
+            sectionClass: 'brainDumpActionReview',
+            addBtnLabel: 'Do checked',
+            doneLabel: 'Applied',
+            typeLabel
+        });
+    }
+
     function appendCommentReview(comments, typeLabel) {
         if (!commitComments || !comments || comments.length === 0) {
             return;
@@ -2358,6 +2453,17 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             // than just incrementing locally forever, but still not load-
             // bearing for anything beyond "stop offering to save more".
             knownMemoryCount = memories.length;
+            // What this user may do right now, from their real permissions (see
+            // dusty-actions.js). Only used to keep the chat sensible: the actual checks
+            // happen again when an action card is shown and when it is applied.
+            try {
+                const capabilities = actionTools && typeof actionTools.capabilities === 'function' ? actionTools.capabilities() : null;
+                if (capabilities) {
+                    taskContext.capabilities = capabilities;
+                }
+            } catch (error) {
+                console.warn('Brain Dump: could not read your permissions for Dusty:', error);
+            }
             const response = await fetch(BRAIN_DUMP_WORKER_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
@@ -2401,7 +2507,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             // to parse at once (Miller's Law), but a plain single-type
             // reply (the common case) doesn't need a label pointing out
             // what it obviously already is.
-            const presentTypeCount = [data.tasks, data.teammateSuggestions, data.teammateComments, data.memoryProposals, data.taskEdits]
+            const presentTypeCount = [data.tasks, data.teammateSuggestions, data.teammateComments, data.memoryProposals, data.taskEdits, data.actions]
                 .filter((list) => Array.isArray(list) && list.length > 0).length;
             const labelFor = (label) => (presentTypeCount > 1 ? label : undefined);
 
@@ -2409,6 +2515,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             appendTaskEditReview(data.taskEdits, labelFor('Task changes'));
             appendSuggestionReview(data.teammateSuggestions, labelFor('Suggestions for teammates'));
             appendCommentReview(data.teammateComments, labelFor('Comments'));
+            appendActionReview(data.actions, labelFor('Actions'));
             appendMemoryReview(data.memoryProposals);
         } catch (error) {
             console.error('Brain dump request failed:', error);

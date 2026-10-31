@@ -1190,7 +1190,8 @@ const tourController = createTourController({
 const brainDumpController = createBrainDumpController({
     context: 'solo',
     commitTasks: commitAiTasksSolo,
-    commitTaskEdits: commitAiTaskEditsSolo
+    commitTaskEdits: commitAiTaskEditsSolo,
+    actionTools: DustyActions
 });
 const brainDumpToggleBtn = document.querySelector('.brainDumpToggleBtn');
 if (brainDumpToggleBtn) {

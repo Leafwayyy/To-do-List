@@ -22,6 +22,38 @@
 
 const WHATS_NEW_RELEASES = [
     {
+        id: '2026-10-31',
+        date: 'October 31, 2026',
+        title: 'Dusty can do more for you',
+        items: [
+            {
+                icon: 'fa-folder-plus',
+                title: 'Folders by chat',
+                text: 'Ask Dusty to make a folder and put your tasks in it. He shows you what he\'ll do first.'
+            },
+            {
+                icon: 'fa-user-check',
+                title: 'Assign by asking',
+                text: 'In a group, say "give this to Sam" and Dusty drafts it. Nothing is sent until you tick it.'
+            },
+            {
+                icon: 'fa-id-badge',
+                title: 'Roles and access (owners and admins)',
+                text: 'Ask Dusty to create a role or change who can assign tasks. These start unticked, so you choose on purpose.'
+            },
+            {
+                icon: 'fa-lock',
+                title: 'Only what you\'re allowed to do',
+                text: 'Dusty only offers what your role lets you do. If you can\'t, he says so and suggests what you can do instead.'
+            },
+            {
+                icon: 'fa-pen',
+                title: 'Name changes work in groups',
+                text: 'Changing your name now updates it in every group you\'re in.'
+            }
+        ]
+    },
+    {
         id: '2026-10-30',
         date: 'October 30, 2026',
         title: 'Folders, faster adding, and teamwork tools',
