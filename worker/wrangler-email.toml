@@ -14,7 +14,7 @@ APP_URL = "https://todo-list.co"
 # Left empty on purpose: the worker sends nothing until you set a sender you have
 # verified with Resend. For a first test you can use  onboarding@resend.dev  (Resend only
 # delivers those to the email address of your own Resend account).
-EMAIL_FROM = ""
+EMAIL_FROM = "To-Do List <notifications@mail.todo-list.co>"
 
 # Look for unread notifications every 10 minutes.
 [triggers]
