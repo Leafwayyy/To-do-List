@@ -57,26 +57,28 @@ const app = initializeApp(firebaseConfig);
 // App Check: proves requests are coming from this real web app (via an
 // invisible reCAPTCHA Enterprise score check), not a script hitting the
 // Firebase project directly. Must run before any Auth/Firestore calls so
-// every request carries a token. Enforcement is ON for Authentication in
-// the Firebase Console right now (confirmed live - a signInWithPassword
-// call gets a flat 403 without a valid App Check token), not "Monitor
-// mode with no real effect" as an earlier version of this comment claimed -
-// correct that assumption before touching this again.
+// every request carries a token.
 //
-// The reCAPTCHA Enterprise site key below is scoped to the real production
-// domain, so it can't be satisfied from a local static server - the
-// reCAPTCHA call itself gets rejected, which fails the App Check token
-// exchange, which then makes Authentication reject every request outright.
-// Firebase's own documented fix for local dev is the App Check debug
-// provider: setting FIREBASE_APPCHECK_DEBUG_TOKEN before initializeAppCheck
-// makes the SDK generate (and persist via IndexedDB - not regenerated every
-// reload) a random debug token, printed to the browser console the first
-// time. That token still has to be registered ONCE in Firebase Console ->
-// Project Settings -> App Check -> this app -> Manage debug tokens before
-// local sign-in actually works - this alone doesn't skip that step, it
-// just gets you to the point of having a token to register. Gated to
-// localhost/127.0.0.1 only, so this never touches production's real
-// reCAPTCHA flow.
+// Current real state (verified 2026-09-25, not assumed): App Check is NOT
+// enforced for Authentication or Firestore - a fresh localhost sign-up,
+// sign-in and Firestore read/write all succeeded with every token exchange
+// failing. And no token exchange succeeds anywhere, production included:
+// the browser API key's API restrictions (Google Cloud Console -> APIs &
+// Services -> Credentials) don't allow the "Firebase App Check API", so
+// both exchangeRecaptchaEnterpriseToken (live site) and exchangeDebugToken
+// (localhost) get a 403 API_KEY_SERVICE_BLOCKED before reCAPTCHA or the
+// debug token is even looked at. That's why the App Check console shows
+// 100% unverified traffic. Allow that API on the key BEFORE ever turning
+// enforcement on, or every real user gets locked out.
+//
+// Once the key allows it: on localhost the reCAPTCHA Enterprise site key
+// (scoped to the production domain) can't produce a valid token, so local
+// dev uses the debug provider instead. Setting FIREBASE_APPCHECK_DEBUG_TOKEN
+// before initializeAppCheck makes the SDK generate (and persist in
+// IndexedDB) a debug token, printed to the console once; it must be
+// registered in Firebase Console -> Project Settings -> App Check -> this
+// app -> Manage debug tokens. Gated to localhost/127.0.0.1 only, so this
+// never touches production's real reCAPTCHA flow.
 if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
     self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
 }

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" integrity="sha512-2SwdPD6INVrV/lHTZbO2nodKhrnDdJK9/kg2XD1r9uGqPo1cUbujc+IYdlYdEErWNu69gVcYgdxlmVmzTWnetw==" crossorigin="anonymous" referrerpolicy="no-referrer">
-    <link rel="stylesheet" href="style.css?v=20260930e">
+    <link rel="stylesheet" href="style.css?v=20261030g">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#030204">
@@ -123,7 +123,8 @@
 
                 <div class="inputContainer">
 
-                    <input type="text" class="taskInput" placeholder="Type your task...">
+                    <input type="text" class="taskInput" placeholder="Type your task..." role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="slashMenu" autocomplete="off">
+                    <button class="slashBtn" type="button" aria-label="Quick options: due date, folder, priority, repeat" title="Quick options (or type /). Shortcuts: N, Ctrl+K">/</button>
                     <button class="detailsToggleBtn" type="button" aria-expanded="false" aria-controls="taskDetailsPanel" title="Set priority, difficulty, effort, and deadline for smarter task order">
                         Prioritize
                     </button>
@@ -134,6 +135,10 @@
                     </button>
 
                 </div>
+
+                <!-- Chips under the input (quickadd.js): what's set for the new
+                     task so far (removable) plus suggestions you can tap. -->
+                <div class="quickChips" aria-live="polite"></div>
 
                 <!-- Steps at creation time - always visible right under the
                      main input (not behind Prioritize), per direct request.
@@ -219,6 +224,14 @@
                             <option value="weekly">Repeats weekly</option>
                             <option value="monthly">Repeats monthly</option>
                         </select>
+                    </div>
+
+                    <!-- Hidden until at least one folder exists (folders.js
+                         fillSelect), so people who never use folders see
+                         no extra field. -->
+                    <div class="detailsFieldGroup detailsFolderPrimary hidden" data-folder-field>
+                        <select class="folderSelect" aria-label="Folder"></select>
+                        <p class="detailsFieldSubtitle">Where this task lives</p>
                     </div>
 
                     <button type="button" class="detailsMoreToggleBtn" aria-expanded="false" aria-controls="detailsMoreOptions">
@@ -307,6 +320,9 @@
                     <button class="taskViewBtn" data-view="week">This Week</button>
                     <button class="taskViewBtn" data-view="completed">Completed</button>
                 </div>
+
+                <p class="taskViewsLabel">Folders</p>
+                <div class="folderBar" aria-label="Task folders"></div>
 
                 <ul class="tasks">
 
@@ -526,10 +542,12 @@
         </div>
     </div>
 
-    <script src="task-shared.js?v=20260925a"></script>
-    <script src="brain-dump.js?v=20260926f"></script>
+    <script src="task-shared.js?v=20261015a"></script>
+    <script src="folders.js?v=20261030a"></script>
+    <script src="brain-dump.js?v=20261015a"></script>
     <script src="auth-gate.js?v=20260925a"></script>
-    <script src="script.js?v=20260928a"></script>
+    <script src="script.js?v=20261030a"></script>
+    <script src="quickadd.js?v=20261030a"></script>
     <script type="module" src="firebase-init.js?v=20260925a"></script>
     <script src="settings.js?v=20260930a"></script>
 

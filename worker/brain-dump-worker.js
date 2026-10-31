@@ -105,7 +105,7 @@ EXAMPLE (forward planning with a real fallback) - message: "what should I do thi
 
 For each proposed task, fill in:
 - text: a short, clear task description (not a copy of the whole message)
-- matrix: 'do' (important AND urgent), 'schedule' (important, not urgent), 'delegate' (urgent, not important to them personally), or 'eliminate' (neither) - your best judgment of the Eisenhower quadrant
+- matrix: the Eisenhower quadrant, decided ANALYTICALLY as two separate yes/no questions, never by gut feel or by how stressed the message sounds (see MATRIX RULES below): 'do' (important AND urgent), 'schedule' (important, not urgent), 'delegate' (urgent, not important), or 'eliminate' (neither)
 - taskType: 'timeboxed' if a duration is stated or clearly implied, otherwise 'open'
 - difficulty: your best guess, 1 (very easy) to 5 (very hard), as a string
 - estimateMinutes: a number of minutes as a string if taskType is 'timeboxed' and a duration is inferable, otherwise null
@@ -113,6 +113,18 @@ For each proposed task, fill in:
 - scheduledAt: an ISO 8601 datetime string only if the user said specifically when they plan to work on it, otherwise null
 - recurrence: 'daily', 'weekly', 'monthly', or null. Set this whenever the user's own words describe the task as repeating or ongoing, not a one-time thing - "every day", "every morning", "each week", "workout routine", "daily habit", "every Monday" (weekly), "once a month" all count, even without the word "repeat" itself. A recurring task NEEDS a dueAt to repeat from (the first occurrence) - if the user describes something as repeating but gave no anchoring time at all, treat the timing as under-specified per STEP 2/3 (ask, don't guess a time just to force a recurrence through) rather than setting recurrence with dueAt left null, since it would silently do nothing.
 - subtasks: array of {"text", "dueAt"} objects per the guidance above, or [] only for genuinely single-step tasks
+
+MATRIX RULES - over-marking 'do' has been a real, repeated problem (direct feedback): when nearly everything is 'do', the matrix stops meaning anything. Answer these two questions independently for every task, then combine them:
+
+1. IMPORTANT? Yes only if skipping it, or doing it badly, has a real and lasting consequence for the user's own goals, grades, career, health, money, relationships, or a commitment someone else is counting on. Routine chores, errands, small admin, and nice-to-haves are NOT important just because they need doing eventually ("buy paper towels", "clean my desk", "reply to a group chat"). Importance does not change with time - a deadline being close never makes something important.
+
+2. URGENT? Yes only if, RIGHT NOW, it must be done (or meaningfully started, for a long task) within roughly the next 24 hours: its dueAt is within about a day, it's already overdue, or its estimated effort leaves under about 12 hours of slack before the deadline. A deadline 2+ days away is NOT urgent yet. No deadline at all is NOT urgent. The user saying "I need to" or "I have to" is not urgency - only timing is.
+
+Then: yes/yes = 'do', yes/no = 'schedule', no/yes = 'delegate' (low-stakes but time-bound, or something someone else could reasonably handle), no/no = 'eliminate' (optional, could be dropped with no real loss).
+
+The app ESCALATES AUTOMATICALLY: once a task's deadline gets within about 24 hours, it shows an important 'schedule' task as 'do' and an unimportant 'eliminate' task as 'delegate', all on its own. So judge urgency as of the current time only, never pre-emptively - an important exam next Friday is correctly 'schedule' today and will turn into 'do' by itself when it gets close. Marking it 'do' now is the mistake this rule exists to prevent.
+
+Calibration check before you finalize: in a typical brain dump most real tasks land in 'schedule', and 'do' is the minority, usually only the things genuinely due today or tomorrow that also matter. If more than about half of what you're proposing is 'do', go back and re-answer both questions for each one. These same rules apply to a matrix in taskEdits and teammateSuggestions. In the workload list below, a task marked "auto-escalated" is already being treated as urgent by the app - prioritize it as such, but never propose an edit just to change its stored matrix.
 
 EDITING EXISTING TASKS - a separate capability from proposing new ones. You may propose "taskEdits" (changes to a task that ALREADY EXISTS, from the workload list below) when the user's CURRENT message clearly asks to change something about a specific existing task (e.g. "push my dentist appointment to Friday", "mark the grocery run as done", "that report is actually pretty hard, bump the difficulty up", "clear the deadline on the laundry task"). Never propose one as a side effect of a general planning/brain-dump message, never because you think a task's priority looks off, never unprompted - only when the user is clearly asking to change that specific task right now.
 
@@ -498,7 +510,11 @@ function describeContextTask(task, includeId) {
     const parts = [String(task.text || '').slice(0, 200)];
     if (includeId && task.id) parts.push(`id=${String(task.id).slice(0, 80)}`);
     if (task.dueAt) parts.push(`due ${task.dueAt}`);
-    if (task.matrix) parts.push(`matrix=${task.matrix}`);
+    if (task.matrix) {
+        parts.push(task.matrixEscalated === true
+            ? `matrix=${task.matrix} (auto-escalated: now urgent, deadline is close)`
+            : `matrix=${task.matrix}`);
+    }
     if (task.difficulty) parts.push(`difficulty=${task.difficulty}`);
     if (task.owner) parts.push(`assigned to ${task.owner}`);
     // Needed for the EDITING EXISTING TASKS "subtasks" capability - the
@@ -521,7 +537,24 @@ function describeContextTask(task, includeId) {
 // is capped again here, defensively, regardless of what the client sent.
 // currentGroupId (from the client's currentGroupId field) marks which one
 // group, if any, teammateSuggestions/teammateComments may target.
+// The user's folder names for wherever a new task will land, plus the rule
+// for using them. Names only; the client matches them to real folders and
+// drops anything unknown, so this can never create a folder.
+function buildFoldersBlock(taskContext) {
+    const names = Array.isArray(taskContext?.folders)
+        ? taskContext.folders.map((name) => String(name || '').trim().slice(0, 30)).filter(Boolean).slice(0, 30)
+        : [];
+    if (names.length === 0) {
+        return '';
+    }
+    return `\n\nFolders where new tasks will be filed (exact names): ${names.join(', ')}. For each NEW task in "tasks", set "folder" to exactly one of these names ONLY when the task clearly belongs there, otherwise null. Never invent a folder name.`;
+}
+
 function buildTaskContextBlock(taskContext, currentGroupId) {
+    return buildTaskContextBlockCore(taskContext, currentGroupId) + buildFoldersBlock(taskContext);
+}
+
+function buildTaskContextBlockCore(taskContext, currentGroupId) {
     if (!taskContext || typeof taskContext !== 'object') {
         return '';
     }
@@ -761,6 +794,9 @@ function buildGeminiRequest(body) {
                     dueAt: { type: 'STRING', nullable: true },
                     scheduledAt: { type: 'STRING', nullable: true },
                     recurrence: { type: 'STRING', enum: ['daily', 'weekly', 'monthly'], nullable: true },
+                    // Optional (not in `required`): only meaningful when the user has
+                    // folders - see buildFoldersBlock.
+                    folder: { type: 'STRING', nullable: true },
                     subtasks: { type: 'ARRAY', items: SUBTASK_ITEM_SCHEMA }
                 },
                 // dueAt/subtasks required (not just optional) so the model

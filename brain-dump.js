@@ -131,6 +131,11 @@ function brainDumpSummarizeTask(task) {
         text: task.text,
         completed: Boolean(task.completed),
         matrix: task.matrix || null,
+        // True when the deadline is close enough that the app now treats
+        // this task as urgent regardless of its stored matrix (see
+        // getEffectiveMatrix in task-shared.js) - so Dusty's prioritization
+        // matches what the list actually shows.
+        matrixEscalated: getEffectiveMatrix(task).escalated,
         difficulty: task.difficulty || null,
         dueAt: task.dueAt || null,
         scheduledAt: task.scheduledAt || null,
@@ -406,7 +411,14 @@ async function gatherTaskContext(user, currentGroupId) {
         console.error('Brain Dump: failed to load groups for context:', error);
     }
 
-    return { soloTasks, groups: groupsContext, signals: { solo: soloSignals, group: groupSignals } };
+    // Folder NAMES only (never ids), for wherever a new task from this chat
+    // will land: your own list on the solo page, the open group's list on
+    // the group page - whichever TodoFolders currently holds.
+    const folders = typeof TodoFolders !== 'undefined'
+        ? TodoFolders.getAll().map((folder) => folder.name).slice(0, 30)
+        : [];
+
+    return { soloTasks, groups: groupsContext, folders, signals: { solo: soloSignals, group: groupSignals } };
 }
 
 // A fresh, one-time, read-only snapshot of users/{uid}/dustyMemory - the
@@ -1253,6 +1265,23 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         });
         recurrenceSelectEl.value = getValidRecurrenceValue(draft.recurrence) || '';
         row.appendChild(recurrenceSelectEl);
+
+        // Folder: only when this list has folders. Dusty proposes a NAME; it is
+        // matched against the real folders here (unknown names are dropped, so
+        // a made-up folder can never be created) and you confirm it like every
+        // other field on this card.
+        let folderSelectEl = null;
+        if (typeof TodoFolders !== 'undefined' && TodoFolders.getAll().length > 0) {
+            folderSelectEl = document.createElement('select');
+            folderSelectEl.classList.add('brainDumpTaskCardFolder');
+            folderSelectEl.setAttribute('aria-label', 'Folder');
+            const proposedName = typeof draft.folder === 'string' ? draft.folder.trim().toLowerCase() : '';
+            const proposed = proposedName
+                ? TodoFolders.getAll().find((folder) => folder.name.toLowerCase() === proposedName)
+                : null;
+            TodoFolders.fillSelect(folderSelectEl, proposed?.id || null);
+            row.appendChild(folderSelectEl);
+        }
         fields.appendChild(row);
 
         const subtasksEditor = createSubtaskRowsEditor(draft.subtasks);
@@ -1275,6 +1304,7 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             // recurrence picked here with the deadline field left empty
             // would otherwise silently do nothing once committed.
             recurrence: dueAtInputEl.value ? (getValidRecurrenceValue(recurrenceSelectEl.value) || null) : null,
+            folderId: folderSelectEl && TodoFolders.resolve(folderSelectEl.value) ? folderSelectEl.value : null,
             subtasks: subtasksEditor.read()
         });
 

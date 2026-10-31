@@ -17,6 +17,67 @@ service cloud.firestore {
   function isOwnerOrAdmin(groupData) {
     return request.auth.uid == groupData.ownerId || isAdmin(groupData);
   }
+  // Per-person grants (organization-plan.md "access"): the owner or an admin
+  // can give a specific member the right to assign tasks and/or manage the
+  // group's folders. memberPerms is { uid: { assign: 'all' | 'role',
+  // folders: true } }, written only by the owner/admin (branch below).
+  // Owner and admins always have every one of these powers.
+  //
+  // 'role' scope = may only assign to someone who has the SAME role as them;
+  // both people must actually have a role set, and it must match.
+  function myPerms(groupData) {
+    return (('memberPerms' in groupData) && (request.auth.uid in groupData.memberPerms))
+      ? groupData.memberPerms[request.auth.uid]
+      : {};
+  }
+  function hasAnyAssignRight(groupData) {
+    return isOwnerOrAdmin(groupData)
+      || (('assign' in myPerms(groupData)) && myPerms(groupData).assign in ['all', 'role']);
+  }
+  function canAssignTo(groupData, targetUid) {
+    return isOwnerOrAdmin(groupData)
+      || (
+        ('assign' in myPerms(groupData))
+        && (
+          myPerms(groupData).assign == 'all'
+          || (
+            myPerms(groupData).assign == 'role'
+            && ('memberRoles' in groupData)
+            && (request.auth.uid in groupData.memberRoles)
+            && (targetUid in groupData.memberRoles)
+            && groupData.memberRoles[targetUid] == groupData.memberRoles[request.auth.uid]
+          )
+        )
+      );
+  }
+  // Everything the "assign a task to someone else" create branch requires,
+  // taking the group doc ONCE as an argument. Doing the lookups inline cost 3
+  // get() calls per task, and a batched write may only make ~20 lookups in
+  // total, so a fan-out of 8 would have been 24. This keeps it at 2 per task
+  // (this plus the membership check) so a chunk of 8 stays at 16.
+  function canCreateAssigned(groupData, data) {
+    return canAssignTo(groupData, data.ownerId)
+      && data.ownerId != request.auth.uid
+      && data.ownerId in groupData.memberIds
+      && data.assignedBy == request.auth.uid
+      && (!('assignedByName' in data) || (data.assignedByName is string && data.assignedByName.size() <= 80))
+      && !('handoffRequest' in data)
+      && (!('completed' in data) || data.completed == false);
+  }
+  function canManageFolders(groupData) {
+    return isOwnerOrAdmin(groupData)
+      || (('folders' in myPerms(groupData)) && myPerms(groupData).folders == true);
+  }
+  // Used to freeze fields an ordinary edit must never change (who assigned a
+  // task, and which shared task it belongs to): the field is either missing
+  // on both sides, or present and identical. Stops a recipient erasing or
+  // forging "Assigned by", and stops anyone attaching an assignedBy to a
+  // task that never had one.
+  function fieldUnchanged(oldData, newData, field) {
+    return (field in oldData)
+      ? ((field in newData) && newData[field] == oldData[field])
+      : !(field in newData);
+  }
   // The single uid that arrayUnion just appended, for the "approve a join
   // request" branch below - relies on approveJoinRequest() always using
   // arrayUnion (which lands a not-already-present value at the end of the
@@ -33,7 +94,13 @@ service cloud.firestore {
 
     // Feature 2: each signed-in user can only read/write their own profile doc.
     match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      // Task folders (organization-plan.md 5.1): at most 30, each entry is
+      // a small map. Split from delete on purpose - request.resource is null
+      // on delete, so a data check there would block account deletion.
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && (!('folders' in request.resource.data)
+          || (request.resource.data.folders is list && request.resource.data.folders.size() <= 30));
     }
 
     // Feature 3: each signed-in user can only read/write their own tasks.
@@ -47,7 +114,9 @@ service cloud.firestore {
         && request.resource.data.text is string
         && request.resource.data.text.size() > 0
         && request.resource.data.text.size() <= 2000
-        && (!('subtasks' in request.resource.data) || request.resource.data.subtasks.size() <= 200);
+        && (!('subtasks' in request.resource.data) || request.resource.data.subtasks.size() <= 200)
+        && (!('folderId' in request.resource.data)
+          || (request.resource.data.folderId is string && request.resource.data.folderId.size() <= 40));
     }
 
     // Dusty's memory - short, user-visible facts Dusty asked to remember
@@ -367,6 +436,50 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['privacy'])
             && request.resource.data.privacy in ['open', 'invite-only', 'closed']
           )
+          // Task folders (organization-plan.md 5.1): the owner or any admin
+          // may replace the folder list, and nothing else changes in the same
+          // write. At most 30 folders. Tasks only ever hold a folder's id, so
+          // deleting a folder never needs to touch anyone's tasks.
+          || (
+            canManageFolders(resource.data)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['folders'])
+            && request.resource.data.folders is list
+            && request.resource.data.folders.size() <= 30
+          )
+          // Roles (organization-plan.md 5.2): a job title that groups
+          // people. Owner or admin only, only these two fields change, at most
+          // 20 roles, and memberRoles may only name current members (so a
+          // departed member's entry can never linger or be forged for a
+          // stranger). It grants NO permissions - nothing in this file reads
+          // roles/memberRoles. Role ids in memberRoles that don't exist are
+          // harmless: every reader treats them as "no role".
+          || (
+            isOwnerOrAdmin(resource.data)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['roles', 'memberRoles', 'memberPerms'])
+            && request.resource.data.roles is list
+            && request.resource.data.roles.size() <= 20
+            && request.resource.data.memberRoles is map
+            && request.resource.data.memberRoles.keys().hasOnly(resource.data.memberIds)
+            // The dialog saves per-person access (see myPerms) in the same
+            // atomic write; same limits as the standalone memberPerms branch.
+            && (!('memberPerms' in request.resource.data)
+              || (request.resource.data.memberPerms is map
+                && request.resource.data.memberPerms.size() <= 50
+                && request.resource.data.memberPerms.keys().hasOnly(resource.data.memberIds)))
+          )
+          // Per-person access (see myPerms above): ONLY the owner or an admin
+          // may change who can assign tasks or manage folders, and only this
+          // field changes. Keys must be current members. Rules can't check each
+          // grant's inner shape, but it doesn't matter: a right only exists when
+          // the value is EXACTLY 'all' / 'role' / true (see myPerms users above),
+          // so any other stored value grants nothing.
+          || (
+            isOwnerOrAdmin(resource.data)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberPerms'])
+            && request.resource.data.memberPerms is map
+            && request.resource.data.memberPerms.size() <= 50
+            && request.resource.data.memberPerms.keys().hasOnly(resource.data.memberIds)
+          )
           // Dismissing your own new-member catch-up card: any member may
           // update ONLY catchUpDismissed, and only ever set their OWN uid's
           // entry (never anyone else's, never someone else's card) to true.
@@ -459,12 +572,29 @@ service cloud.firestore {
         // malformed payload either.
         allow create: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
-          && request.resource.data.ownerId == request.auth.uid
+          && (
+            // Your own task: it may never claim to have been assigned by
+            // anyone (assignedBy is only ever set by the branch below).
+            (
+              request.resource.data.ownerId == request.auth.uid
+              && !('assignedBy' in request.resource.data)
+              && !('assignedByName' in request.resource.data)
+              && !('assignedAt' in request.resource.data)
+            )
+            // Assigning: ONLY the owner, an admin, or a member the owner/admin
+            // granted assign rights (limited to their role if so scoped) may
+            // create a task that belongs to someone else, it must belong to a current
+            // member, and it must carry the assigner's own uid so "Assigned
+            // by" can never be forged. No handoff request may ride along.
+            || canCreateAssigned(get(/databases/$(database)/documents/groups/$(groupId)).data, request.resource.data)
+          )
+          && (!('sharedId' in request.resource.data) || (request.resource.data.sharedId is string && request.resource.data.sharedId.size() <= 80))
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 2000
           && (!('subtasks' in request.resource.data) || (request.resource.data.subtasks is list && request.resource.data.subtasks.size() <= 200))
           && (!('commentCount' in request.resource.data) || request.resource.data.commentCount is int)
+          && (!('folderId' in request.resource.data) || (request.resource.data.folderId is string && request.resource.data.folderId.size() <= 40))
           && (!('ownerName' in request.resource.data) || (request.resource.data.ownerName is string && request.resource.data.ownerName.size() <= 80));
         // The task's own owner can change anything about it (subject to the
         // same size caps). Any other group member may ONLY bump the two
@@ -517,6 +647,11 @@ service cloud.firestore {
               // also kept a stored-markup path into a group they'd left.
               && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
               && request.resource.data.ownerId == resource.data.ownerId
+              && fieldUnchanged(resource.data, request.resource.data, 'assignedBy')
+              && fieldUnchanged(resource.data, request.resource.data, 'assignedByName')
+              && fieldUnchanged(resource.data, request.resource.data, 'assignedAt')
+              && fieldUnchanged(resource.data, request.resource.data, 'sharedId')
+              && fieldUnchanged(resource.data, request.resource.data, 'sharedBy')
               && request.resource.data.text is string
               && request.resource.data.text.size() > 0
               && request.resource.data.text.size() <= 2000
@@ -525,6 +660,7 @@ service cloud.firestore {
               // untyped, and group.js rendered it as HTML (stored XSS). The
               // other-member branches below already require an int.
               && (!('commentCount' in request.resource.data) || request.resource.data.commentCount is int)
+              && (!('folderId' in request.resource.data) || (request.resource.data.folderId is string && request.resource.data.folderId.size() <= 40))
               // The owner may set handoffRequest to null (no request / just
               // cancelled one) or to a well-formed request naming a real
               // teammate other than themself - never anyone else's field.
@@ -728,6 +864,51 @@ service cloud.firestore {
               resource.data.status == 'pending'
               && (request.auth.uid == resource.data.fromUserId || request.auth.uid == resource.data.forUserId)
             )
+            || request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId
+          );
+      }
+
+      // Assignments (organization-plan.md 5.4/5.5): one record per "assign this
+      // to several people" action. It is what lets the assigner be told when
+      // someone declines, and it keeps the participant list even if copies are
+      // later deleted. The task copies themselves live in /tasks and carry the
+      // same sharedId. Doc id = that sharedId.
+      match /assignments/{sharedId} {
+        allow read: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
+        // Only someone with an assign right records one, as themself, naming
+        // current members. (The per-person scope is enforced where it matters,
+        // on each task created - rules can't loop over participantIds here.)
+        allow create: if request.auth != null
+          && hasAnyAssignRight(get(/databases/$(database)/documents/groups/$(groupId)).data)
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000
+          && request.resource.data.participantIds is list
+          && request.resource.data.participantIds.size() > 0
+          && request.resource.data.participantIds.size() <= 50
+          && get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds.hasAll(request.resource.data.participantIds)
+          && request.resource.data.participantNames is list
+          && request.resource.data.participantNames.size() == request.resource.data.participantIds.size()
+          && (!('createdByName' in request.resource.data) || (request.resource.data.createdByName is string && request.resource.data.createdByName.size() <= 80))
+          && request.resource.data.declined == {};
+        // A participant declining: may touch ONLY the declined map, and ONLY
+        // their own key in it, set to the real server time. Same one-key map
+        // diff technique as memberJoinedAt/catchUpDismissed on the group doc.
+        allow update: if request.auth != null
+          && request.auth.uid in resource.data.participantIds
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['declined'])
+          && request.resource.data.declined[request.auth.uid] == request.time
+          && request.resource.data.declined
+              .diff(resource.data.declined)
+              .affectedKeys().hasOnly([request.auth.uid]);
+        // The assigner (to cancel an assignment) or the group's owner (so
+        // deleting the group can clean these up).
+        allow delete: if request.auth != null
+          && (
+            request.auth.uid == resource.data.createdBy
             || request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId
           );
       }

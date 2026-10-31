@@ -432,6 +432,55 @@ function getTaskUrgencyStatus(task) {
     return { ...status, fromStep: null };
 }
 
+// Eisenhower urgency is time-relative, importance isn't - so a task's stored
+// matrix is the user's (or Dusty's) call as of when it was set, and this
+// layers live urgency on top without ever rewriting the stored value. Once
+// the effective deadline (step-aware, same as getTaskUrgencyStatus) is
+// within MATRIX_ESCALATION_HOURS, overdue, or the slack left after the
+// estimated effort is that thin, the urgent half flips on: an important
+// 'schedule' task reads as 'do', an unimportant 'eliminate' one as
+// 'delegate'. Importance itself is never promoted - a near deadline makes a
+// chore urgent, not important. Computed, not written back, so moving the
+// deadline later quietly undoes it and group tasks need no extra writes.
+// Dusty's prompt (worker/brain-dump-worker.js) relies on this same window
+// so it can judge urgency as of "now" instead of pre-emptively marking Do.
+const MATRIX_ESCALATION_HOURS = 24;
+
+function getEffectiveMatrix(task) {
+    const matrix = getValidMatrixValue(task.matrix);
+    if (matrix === 'do' || matrix === 'delegate') {
+        return { matrix, escalated: false };
+    }
+
+    const status = getTaskUrgencyStatus(task);
+    if (!status.hasDeadline && !status.isOverdue) {
+        return { matrix, escalated: false };
+    }
+
+    const hoursLeft = status.timeUntilMs / 3600000;
+    const slackHours = hoursLeft - getEstimatedEffortHours(task);
+    const isUrgentNow = status.isOverdue || hoursLeft <= MATRIX_ESCALATION_HOURS || slackHours <= MATRIX_ESCALATION_HOURS / 2;
+    if (!isUrgentNow) {
+        return { matrix, escalated: false };
+    }
+
+    return { matrix: matrix === 'schedule' ? 'do' : 'delegate', escalated: true };
+}
+
+// Shared badge builder so solo and group show an escalated matrix the same
+// way: the effective quadrant's colors, plus a tooltip naming what it was.
+function createMatrixBadge(task) {
+    const { matrix, escalated } = getEffectiveMatrix(task);
+    const badge = document.createElement('span');
+    badge.classList.add('matrixBadge', MATRIX_CONFIG[matrix].className);
+    badge.textContent = MATRIX_CONFIG[matrix].label;
+    if (escalated) {
+        badge.classList.add('matrixEscalated');
+        badge.title = `Was ${MATRIX_CONFIG[getValidMatrixValue(task.matrix)].label}, now urgent because the deadline is close`;
+    }
+    return badge;
+}
+
 // Deadline/schedule preset shortcuts ("in 2 hours", "end of day", "tomorrow
 // morning"...) - shared by the deadline preset chips, the schedule preset
 // chips, and quick-add parsing below.

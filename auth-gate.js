@@ -192,6 +192,9 @@
             try {
                 await window.ToDoAuth.signInWithGoogle();
             } catch (error) {
+                // The generic message hides the real code (unauthorized-domain,
+                // popup-blocked, ...), which is what actually diagnoses this.
+                console.error('Google sign-in failed:', error?.code, error?.message);
                 showAuthError(getAuthErrorMessage(error));
             }
         });

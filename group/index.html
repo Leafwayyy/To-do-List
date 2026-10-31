@@ -11,7 +11,7 @@
     <!-- Same stylesheet as the solo app, loaded once, the normal way - no
          second build/bundle for this page, so there's nothing for its rules
          to collide with. -->
-    <link rel="stylesheet" href="../style.css?v=20260930f">
+    <link rel="stylesheet" href="../style.css?v=20261030g">
     <link rel="icon" href="../icon.svg" type="image/svg+xml">
 </head>
 <body class="authChecking">
@@ -263,8 +263,12 @@
                              is "here's what happened", different purposes. -->
                         <div class="suggestionOutcomesPanel hidden" aria-live="polite"></div>
 
+                        <!-- Declines of tasks YOU assigned (group.js renderAssignmentOutcomes). -->
+                        <div class="assignmentOutcomesPanel hidden" aria-live="polite"></div>
+
                         <div class="inputContainer">
-                            <input type="text" class="taskInput" placeholder="Type your task...">
+                            <input type="text" class="taskInput" placeholder="Type your task..." role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="slashMenu" autocomplete="off">
+                            <button class="slashBtn" type="button" aria-label="Quick options: due date, folder, priority, repeat, assign" title="Quick options (or type /). Shortcuts: N, Ctrl+K">/</button>
                             <button class="detailsToggleBtn" type="button" aria-expanded="false" aria-controls="groupTaskDetailsPanel" title="Set priority, difficulty, and deadline for smarter task order">
                                 Prioritize
                             </button>
@@ -272,6 +276,10 @@
                                 <i class="fa-solid fa-plus"></i>
                             </button>
                         </div>
+
+                        <!-- Chips under the input (../quickadd.js): what is set for the new
+                             task so far (removable) plus suggestions you can tap. -->
+                        <div class="quickChips" aria-live="polite"></div>
 
                         <!-- Steps at creation time - always visible right under the
                              main input (not behind More options), mirroring solo's
@@ -345,6 +353,23 @@
                                 </select>
                             </div>
 
+                            <!-- Hidden until the group has at least one folder
+                                 (folders.js fillSelect). Folders are made by the
+                                 owner/admins; anyone can file their own tasks. -->
+                            <div class="detailsFieldGroup detailsFolderPrimary hidden" data-folder-field>
+                                <select class="folderSelect" aria-label="Folder"></select>
+                                <p class="detailsFieldSubtitle">Where this task lives</p>
+                            </div>
+
+                            <!-- Owners/admins ASSIGN (lands on the person's list right
+                                 away, they can decline); everyone else SUGGESTS. Options
+                                 and wording are filled by group.js renderAssignSelect, and
+                                 the field stays hidden in a group of one. -->
+                            <div class="detailsFieldGroup detailsAssignPrimary hidden" data-assign-field>
+                                <select class="assignSelect" aria-label="Assign to"></select>
+                                <p class="detailsFieldSubtitle assignFieldHint"></p>
+                            </div>
+
                             <button type="button" class="detailsMoreToggleBtn" aria-expanded="false" aria-controls="groupDetailsMoreOptions">
                                 <span>More options: estimate, schedule</span>
                                 <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
@@ -397,6 +422,9 @@
                             <button class="taskViewBtn" data-view="week">This Week</button>
                             <button class="taskViewBtn" data-view="completed">Completed</button>
                         </div>
+
+                        <p class="taskViewsLabel">Organize</p>
+                        <div class="folderBar" aria-label="Task folders"></div>
 
                         <ul class="tasks groupTasksList"></ul>
                     </section>
@@ -690,16 +718,20 @@
         </div>
     </div>
 
-    <script src="../task-shared.js?v=20260925a"></script>
-    <script src="../brain-dump.js?v=20260926f"></script>
+    <script src="../task-shared.js?v=20261015a"></script>
+    <script src="../brain-dump.js?v=20261015a"></script>
     <script src="../auth-gate.js?v=20260925a"></script>
+    <script src="../folders.js?v=20261030a"></script>
+    <script src="roles.js?v=20261030a"></script>
+    <script src="assign.js?v=20261030a"></script>
     <script src="groups-data.js?v=20260926f"></script>
     <!-- Availability feature only - see availability-plan.md. Global,
          classic-script build (no module wrapper), matching how every other
          third-party script on this page is loaded. -->
     <script src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js" integrity="sha384-CU0J6nu6GO5gWB5IqOOhPQsG0LKyjpotF5Gw502R+0zbkzKHjDWc6FKSZsNTJfLX" crossorigin="anonymous"></script>
     <script src="availability-timezone.js?v=20260930a"></script>
-    <script src="group.js?v=20261011a"></script>
+    <script src="group.js?v=20261030a"></script>
+    <script src="../quickadd.js?v=20261030b"></script>
     <script type="module" src="../firebase-init.js?v=20260925a"></script>
     <script src="../settings.js?v=20260930a"></script>
 </body>

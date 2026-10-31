@@ -561,6 +561,14 @@ async function deleteGroupCompletely(groupId, user) {
         console.warn('Could not delete suggestions (continuing group deletion):', error);
     }
 
+    // Assignment records too (best-effort, same deploy-order reasoning).
+    try {
+        const assignmentsSnapshot = await getDocs(collection(db(), 'groups', groupId, 'assignments'));
+        await Promise.all(assignmentsSnapshot.docs.map((assignmentDoc) => deleteDoc(assignmentDoc.ref)));
+    } catch (error) {
+        console.warn('Could not delete assignments (continuing group deletion):', error);
+    }
+
     await deleteDoc(groupRef);
 }
 
