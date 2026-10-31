@@ -2978,6 +2978,10 @@ let groupCalendarAnchorDate = new Date();
 let groupSuggestions = [];
 // Assignment records (see group/assign.js): who was assigned what, and who declined.
 let groupAssignments = [];
+// Rename bookkeeping (see maybeHealMyNameInGroups). Declared up here, with the other
+// state, because the sign-out reset also touches them.
+let profileNameReady = false;
+let nameHealedForUid = null;
 let groupHistoryEntries = [];
 let groupHistoryLoadError = null; // set on a failed history load (e.g. rules not published yet) - see watchSelectedGroupTasks
 // Pending join requests for the selected group - only ever populated while
@@ -9197,6 +9201,8 @@ function resetGroupState() {
     if (yourNameInput) {
         yourNameInput.value = '';
     }
+    profileNameReady = false;
+    nameHealedForUid = null;
     // So a different account signing in during the same page load (sign out,
     // then sign in as someone else) gets its own welcome/tour check, not
     // whatever the previous account already resolved this session.
@@ -9392,6 +9398,33 @@ function watchSelectedGroupTasks() {
     }
 }
 
+// Groups you joined before renames worked still show the name you joined with.
+// Once per sign-in, when both your profile name and your groups have loaded, quietly
+// bring any stale one up to date. Two safeguards: wait for the profile name (before
+// it loads, displayNameFor would fall back to your Google name and overwrite a
+// custom one), and skip a group where someone else already uses your name (the
+// join step adds a "(2)" to keep names distinguishable, and this must not undo it).
+function maybeHealMyNameInGroups() {
+    if (!currentUser || !profileNameReady || !Array.isArray(groups) || nameHealedForUid === currentUser.uid) {
+        return;
+    }
+    nameHealedForUid = currentUser.uid;
+    const myName = displayNameFor(currentUser);
+    const stale = groups.filter((group) => {
+        const index = (group.memberIds || []).indexOf(currentUser.uid);
+        if (index === -1 || (group.memberNames || [])[index] === myName) {
+            return false;
+        }
+        return !(group.memberNames || []).some((other, otherIndex) => otherIndex !== index
+            && String(other).toLowerCase() === myName.toLowerCase());
+    });
+    if (stale.length > 0) {
+        syncMyNameToGroups(currentUser, myName, stale).catch((error) => {
+            console.warn('Could not refresh your name in your groups:', error);
+        });
+    }
+}
+
 if (yourNameSaveBtn && yourNameInput) {
     yourNameSaveBtn.addEventListener('click', async () => {
         playClickSound();
@@ -9400,6 +9433,12 @@ if (yourNameSaveBtn && yourNameInput) {
         }
         try {
             await saveProfileName(currentUser, yourNameInput.value);
+            // Also carry the new name into every group you're already in.
+            const sync = await syncMyNameToGroups(currentUser, yourNameInput.value, groups || []);
+            if (sync.failed > 0) {
+                alert(`Your name was saved, but it could not be updated in ${sync.failed} of your groups yet. `
+                    + 'That usually means the latest security rules still need to be published.');
+            }
             if (yourNameSavedMsg) {
                 yourNameSavedMsg.classList.remove('hidden');
                 setTimeout(() => yourNameSavedMsg.classList.add('hidden'), 2000);
@@ -10026,11 +10065,14 @@ AuthGate.init({
                 yourNameInput.value = name;
             }
             maybeShowGroupWelcome(user, name);
+            profileNameReady = true;
+            maybeHealMyNameInGroups();
         });
 
         unsubscribeGroups = subscribeToMyGroups(user.uid, (nextGroups) => {
             groups = nextGroups;
             groupsLoadError = null;
+            maybeHealMyNameInGroups();
             if (!groups.some((group) => group.id === selectedGroupId)) {
                 selectedGroupId = groups[0]?.id || null;
             }

@@ -79,11 +79,8 @@ async function loadProfileName(user, onLoaded) {
     onLoaded?.(displayNameFor(user));
 }
 
-// Saving only changes your name for groups you create or join from now on -
-// it does not rename you in memberNames on groups you already joined, since
-// the security rule for joining only allows appending a new member, not
-// editing an existing one's name in place (a narrower "rename yourself"
-// rule is possible later if this turns out to matter).
+// Saving updates your profile name. Callers also run syncMyNameToGroups so the
+// new name reaches groups you're already in (see applyMemberNicknames below).
 async function saveProfileName(user, name) {
     const trimmed = name.trim();
     if (!trimmed) {
@@ -94,6 +91,47 @@ async function saveProfileName(user, name) {
     profileDisplayName = trimmed;
 }
 
+// === member names (start) ===
+// A group's memberNames array is written when someone creates/joins and the rules
+// don't allow editing it in place afterwards. So a rename is stored separately,
+// in memberNicknames ({ uid: name }, each person may only write their OWN key -
+// see firestore.rules), and laid over memberNames the moment groups arrive, so
+// every screen that reads group.memberNames[i] shows the current name with no
+// per-screen changes. Anything that WRITES memberNames (leave, kick, approve)
+// re-reads the raw document first, so the overlay never gets saved back.
+function applyMemberNicknames(group) {
+    const nicknames = group && group.memberNicknames && typeof group.memberNicknames === 'object' ? group.memberNicknames : null;
+    if (!nicknames || !Array.isArray(group.memberIds) || !Array.isArray(group.memberNames)) {
+        return group;
+    }
+    return {
+        ...group,
+        memberNames: group.memberNames.map((name, index) => {
+            const nickname = nicknames[group.memberIds[index]];
+            return typeof nickname === 'string' && nickname.trim() ? nickname.trim().slice(0, 80) : name;
+        })
+    };
+}
+
+// Pushes your current name into every group you're in. Best-effort per group; the
+// caller decides what to tell the user about any that failed.
+async function syncMyNameToGroups(user, name, groupList) {
+    const trimmed = String(name || '').trim().slice(0, 80);
+    if (!trimmed) {
+        return { updated: 0, failed: 0 };
+    }
+    const { doc, updateDoc } = fs();
+    const mine = (groupList || []).filter((group) => (group.memberIds || []).includes(user.uid));
+    const results = await Promise.allSettled(mine.map((group) => updateDoc(
+        doc(db(), 'groups', group.id),
+        { [`memberNicknames.${user.uid}`]: trimmed }
+    )));
+    return {
+        updated: results.filter((result) => result.status === 'fulfilled').length,
+        failed: results.filter((result) => result.status === 'rejected').length
+    };
+}
+// === member names (end) ===
 // IANA timezone (e.g. "America/Edmonton") for the Availability feature - a
 // personal, global attribute, not scoped to any one group (see
 // availability-plan.md's Data Model). Same load/save shape as
@@ -142,6 +180,11 @@ async function saveProfileTimezone(user, timezone) {
 // generic label, only if they have no tasks yet (or the caller has no task
 // list handy, like the groups browse page).
 function resolveMemberName(memberId, storedName, tasksForFreshness = []) {
+    // The roster name now carries renames (applyMemberNicknames), so it wins. A
+    // task's ownerName is only the fallback for someone no longer in the roster.
+    if (storedName) {
+        return storedName;
+    }
     const theirTasks = tasksForFreshness.filter((task) => task.ownerId === memberId && task.ownerName);
     if (theirTasks.length > 0) {
         const freshest = [...theirTasks].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))[0];
@@ -626,7 +669,7 @@ function subscribeToMyGroups(uid, callback, onError) {
             return;
         }
         lastVisibleIdsKey = visibleIdsKey;
-        callback(visibleDocs.map((groupDoc) => ({ id: groupDoc.id, ...groupDoc.data() })));
+        callback(visibleDocs.map((groupDoc) => applyMemberNicknames({ id: groupDoc.id, ...groupDoc.data() })));
     }, onError);
 }
 

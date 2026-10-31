@@ -507,6 +507,24 @@ service cloud.firestore {
             && request.resource.data.memberPerms.size() <= 50
             && request.resource.data.memberPerms.keys().hasOnly(resource.data.memberIds)
           )
+          // Renaming yourself: any member may set THEIR OWN display name in this
+          // group (memberNicknames, a { uid: name } map the client lays over the
+          // join-time memberNames), and nothing else changes in the write. Same
+          // one-key map-diff technique as catchUpDismissed below. memberNames
+          // itself can't be edited in place (it's a parallel array, and rules
+          // can't find your index in it), which is why renames never worked
+          // before. The name must be a real, capped string.
+          || (
+            request.auth.uid in resource.data.memberIds
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberNicknames'])
+            && request.resource.data.memberNicknames is map
+            && request.resource.data.memberNicknames[request.auth.uid] is string
+            && request.resource.data.memberNicknames[request.auth.uid].size() > 0
+            && request.resource.data.memberNicknames[request.auth.uid].size() <= 80
+            && request.resource.data.memberNicknames
+                .diff(('memberNicknames' in resource.data) ? resource.data.memberNicknames : {})
+                .affectedKeys().hasOnly([request.auth.uid])
+          )
           // Dismissing your own new-member catch-up card: any member may
           // update ONLY catchUpDismissed, and only ever set their OWN uid's
           // entry (never anyone else's, never someone else's card) to true.

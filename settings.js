@@ -1329,7 +1329,25 @@
         try {
             const { doc, setDoc } = window.ToDoAuth.firestore;
             await setDoc(doc(window.ToDoAuth.db, 'users', currentUser.uid), { displayName: trimmed }, { merge: true });
-            saveNameStatus.textContent = 'Saved.';
+            // Also update the name teammates see in every group you're in (the rules let
+            // each member change only their own). The profile save above already
+            // succeeded, so a failure here is reported but never undoes it.
+            let groupsFailed = 0;
+            try {
+                const { collection, query, where, getDocs, updateDoc } = window.ToDoAuth.firestore;
+                const mine = await getDocs(query(collection(window.ToDoAuth.db, 'groups'), where('memberIds', 'array-contains', currentUser.uid)));
+                const results = await Promise.allSettled(mine.docs.map((groupDoc) => updateDoc(
+                    groupDoc.ref,
+                    { [`memberNicknames.${currentUser.uid}`]: trimmed.slice(0, 80) }
+                )));
+                groupsFailed = results.filter((result) => result.status === 'rejected').length;
+            } catch (groupError) {
+                console.warn('Could not update your name in your groups:', groupError);
+                groupsFailed = -1;
+            }
+            saveNameStatus.textContent = groupsFailed === 0
+                ? 'Saved.'
+                : 'Saved, but your groups could not be updated yet. Try again in a moment.';
         } catch (error) {
             console.error('Failed to save display name:', error);
             saveNameStatus.textContent = 'Could not save. Try again.';
