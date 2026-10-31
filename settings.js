@@ -149,7 +149,7 @@
                 padding: 8px 10px;
                 font: inherit;
             }
-            .settingsSaveNameBtn, .settingsSignOutBtn, .settingsExportBtn, .settingsLinkBtn, .settingsDeleteBtn, .settingsMemoryManageBtn, .settingsMemoryAddBtn {
+            .settingsSaveNameBtn, .settingsSignOutBtn, .settingsExportBtn, .settingsLinkBtn, .settingsDeleteBtn, .settingsMemoryManageBtn, .settingsMemoryAddBtn, .settingsVerifySendBtn, .settingsVerifyCheckBtn, .settingsEmailTestBtn {
                 background: rgba(181, 139, 255, 0.16);
                 border: 1px solid rgba(170, 152, 255, 0.44);
                 color: var(--violet-text, #f6f4ff);
@@ -162,6 +162,13 @@
                 display: inline-block;
             }
             .settingsSignOutBtn { margin-top: 12px; }
+            .settingsEmailSection .settingsHint { margin-top: 10px; }
+            .settingsVerifyRow { margin-bottom: 4px; }
+            .settingsVerifyRow.hidden { display: none; }
+            .settingsVerifyRow .settingsInlineRow { flex-wrap: wrap; }
+            .settingsEmailTestBtn { margin-top: 12px; }
+            .settingsVerifySendBtn:hover, .settingsVerifyCheckBtn:hover, .settingsEmailTestBtn:hover { background: rgba(181, 139, 255, 0.28); }
+            .settingsVerifySendBtn:focus-visible, .settingsVerifyCheckBtn:focus-visible, .settingsEmailTestBtn:focus-visible { outline: 2px solid var(--violet-accent, #b58bff); outline-offset: 2px; }
             .settingsSaveNameStatus, .settingsDeleteStatus { min-height: 1.1em; font-size: 0.82rem; color: #7f86ff; margin: 8px 0 0; }
             .settingsToggleRow { display: flex; align-items: center; gap: 10px; font-size: 0.92rem; cursor: pointer; }
             .settingsDangerSection h3 { color: #e08a8a; }
