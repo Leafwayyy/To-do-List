@@ -1,99 +1,159 @@
-// "What's new" - a short patch-notes popup the first time someone opens the app
-// after an update, plus a button in the header to read every past update.
+// "What's new" - patch notes. A post pops up the first time someone opens the app after an
+// update, and a button in the header opens the whole archive (a list of updates on the
+// left, the selected post on the right).
 //
-// TO ANNOUNCE AN UPDATE: add ONE entry at the TOP of WHATS_NEW_RELEASES below
-// (newest first) with a new unique `id`, then bump the ?v= on the whatsnew.js
-// script tags so browsers fetch the new list. That's all - the popup shows once
-// per person per new id.
+// TO ANNOUNCE AN UPDATE: add ONE entry at the TOP of WHATS_NEW_RELEASES below (newest
+// first) with a new unique `id`, then bump the ?v= on the whatsnew.js script tags so
+// browsers fetch the new list. That's all - the popup shows once per person per new id.
 //
-// Write entries like patch notes in a game: plain words, what you can DO now,
-// one short line each. Keep an update to ~3-6 items; anything bigger is a
-// sign it should be two updates.
+// Write each entry like a short blog post, in a human voice:
+//  - `intro`: a sentence or two on why this update exists, as if talking to a friend.
+//  - `sections`: one per topic, each with an icon, a heading, and either `paragraphs`
+//    (plain prose), `points` (a short list), or both. Say what you can DO now, and why.
+//  - `tip` (optional): one "try it" line, shown as a callout.
+//  - `signoff` (optional): a closing line.
+// Keep a post to ~2-5 sections; anything bigger should be two updates.
 //
 // Rules this follows:
 //  - Shown once per update per account (remembered on this device only).
-//  - Never shown to a brand-new account: they're getting the tutorial instead,
-//    so the current update is quietly marked as seen for them.
-//  - Never opens on top of the tutorial, the weekly recap, or another dialog;
-//    it waits (a few tries) and then gives up until next visit.
-//  - All text here is static, written by us, and rendered with textContent.
+//  - Never shown to a brand-new account: they're getting the tutorial instead, so the
+//    current update is quietly marked as seen for them.
+//  - Never opens on top of the tutorial, the weekly recap, or another dialog; it waits (a
+//    few tries) and then gives up until next visit.
+//  - All text here is static, written by us, and rendered with textContent (never HTML).
 //
 // Classic script, loaded on both the solo page and the group dashboard.
 
 const WHATS_NEW_RELEASES = [
     {
+        id: '2026-10-31b',
+        date: 'October 31, 2026',
+        title: 'A tidier folder bar, and sections you can fold',
+        intro: 'Once you start using folders, it\'s easy to end up with a lot of them, and the row of folder buttons turned into a wall that pushed your tasks down the page. This update keeps things neat however many folders you have, and does the same for long lists in groups.',
+        sections: [
+            {
+                icon: 'fa-folder-tree',
+                heading: 'Folders that stay in one row',
+                paragraphs: [
+                    'The folder bar now shows just the folders that matter right now: the one you\'re looking at, plus the ones with the most open tasks. Everything else lives behind a "More folders" button.'
+                ],
+                points: [
+                    'The More folders panel floats over the page, so opening it never shoves your tasks around.',
+                    'It has a search box. Type a few letters and press Enter to jump straight to a folder.',
+                    'If you have seven folders or fewer, nothing changes. You still see them all.',
+                    'On a phone, the whole row becomes one button, "Folder: Legal", that opens the same panel.'
+                ]
+            },
+            {
+                icon: 'fa-layer-group',
+                heading: 'Fold sections shut in groups',
+                paragraphs: [
+                    'When a group list is split by person, role or folder, you can now click any heading to fold that section away. The number next to the name stays put, so you always know what\'s tucked inside.',
+                    'Your folds are remembered on this device, separately for each group, and they only affect your own screen. Folding a section never changes what your teammates see.'
+                ]
+            }
+        ],
+        tip: 'Try it: open a group, set "Group by" to Person, then click a name.',
+        signoff: 'More tidying-up is on the way. Tell us what still feels cluttered.'
+    },
+    {
         id: '2026-10-31',
         date: 'October 31, 2026',
         title: 'Dusty can do more for you',
-        items: [
+        intro: 'Until now, Dusty could turn a ramble into tasks and that was about it. We wanted him to actually help you run your lists and your groups, without ever doing something behind your back. So he can do more, but only what you\'re allowed to do, and always with a card for you to look over first.',
+        sections: [
             {
                 icon: 'fa-folder-plus',
-                title: 'Folders by chat',
-                text: 'Ask Dusty to make a folder and put your tasks in it. He shows you what he\'ll do first.'
+                heading: 'Folders, by chat',
+                paragraphs: [
+                    'Ask Dusty to make a folder, or to sort your tasks into the folders you already have. He lays out what he\'s about to do, and nothing happens until you tick it.'
+                ]
             },
             {
                 icon: 'fa-user-check',
-                title: 'Assign by asking',
-                text: 'In a group, say "give this to Sam" and Dusty drafts it. Nothing is sent until you tick it.'
+                heading: 'Assigning, by asking',
+                paragraphs: [
+                    'In a group, you can say "give this to Sam" or "me and Philip need to finish the slides by Friday" and Dusty drafts it for you. A task for several people is one shared task, with the steps and due date included for everyone, not a stack of copies.'
+                ],
+                points: [
+                    'Say "me" to include yourself, or "everyone" for the whole group.',
+                    'If a teammate can\'t be found, Dusty tells you instead of guessing.'
+                ]
             },
             {
                 icon: 'fa-id-badge',
-                title: 'Roles and access (owners and admins)',
-                text: 'Ask Dusty to create a role or change who can assign tasks. These start unticked, so you choose on purpose.'
+                heading: 'Roles and access, for owners and admins',
+                paragraphs: [
+                    'Owners and admins can ask Dusty to create a role, give someone a role, or change who is allowed to assign tasks. Because these change who can do what, they start unticked. You have to tick them on purpose.'
+                ]
             },
             {
                 icon: 'fa-lock',
-                title: 'Only what you\'re allowed to do',
-                text: 'Dusty only offers what your role lets you do. If you can\'t, he says so and suggests what you can do instead.'
+                heading: 'Only what you\'re allowed to do',
+                paragraphs: [
+                    'Dusty only offers what your role lets you do. If you ask for something you can\'t do, he says so, and suggests the closest thing you can. The app checks your permissions again when you confirm, and the database checks them a third time.'
+                ]
             },
             {
-                icon: 'fa-pen',
-                title: 'Name changes work in groups',
-                text: 'Changing your name now updates it in every group you\'re in.'
+                icon: 'fa-wrench',
+                heading: 'Fixes',
+                points: [
+                    'Changing your name now updates it in every group you\'re in.',
+                    'A task shared with several people shows up once in every view, including Group by Person.'
+                ]
             }
-        ]
+        ],
+        tip: 'Try it: open Dusty and type "make a folder called School and put my homework tasks in it".',
+        signoff: 'Dusty is still learning your way of talking. If he gets something wrong, just fix the card and carry on.'
     },
     {
         id: '2026-10-30',
         date: 'October 30, 2026',
         title: 'Folders, faster adding, and teamwork tools',
-        items: [
+        intro: 'This is our biggest update so far. It\'s about getting a growing pile of tasks under control, and about making groups work like a real team, with jobs, folders and tasks you can hand to each other.',
+        sections: [
             {
                 icon: 'fa-folder',
-                title: 'Folders',
-                text: 'Sort your tasks into colored folders like School or Work. Got a big pile? Tap "Sort into folders" to file a whole bunch at once.'
+                heading: 'Folders',
+                paragraphs: [
+                    'Sort your tasks into colored folders like School or Work. Each task lives in one folder, and you can filter the whole list by it.',
+                    'Got a big pile already? Tap "Sort into folders" and file a whole bunch at once, instead of one by one.'
+                ]
             },
             {
                 icon: 'fa-bolt',
-                title: 'Add tasks faster',
-                text: 'Tap the / button (or type /) to set a due date, folder or priority. Press N to jump to the task box from anywhere.'
-            },
-            {
-                icon: 'fa-wand-magic-sparkles',
-                title: 'Smart suggestions',
-                text: 'Type something like "every friday" or a folder name and a chip pops up. Nothing changes until you tap it.'
-            },
-            {
-                icon: 'fa-id-badge',
-                title: 'Teams: roles and folders',
-                text: 'Group owners and admins can make folders and job roles, and group the list by person, role or folder.'
-            },
-            {
-                icon: 'fa-user-check',
-                title: 'Assign tasks to people',
-                text: 'In a group, owners and admins can put a task straight onto someone\'s list, or everyone\'s. You get 15 minutes to decline one you don\'t want.'
+                heading: 'Adding tasks, faster',
+                paragraphs: [
+                    'You no longer need to remember any symbols. Just write the task in plain words.'
+                ],
+                points: [
+                    'Type something like "every Friday" or a folder name, and a small suggestion pops up. Nothing changes until you tap it.',
+                    'Tap the / button (or type /) to set a due date, folder or priority.',
+                    'Press N from anywhere to jump to the task box.'
+                ]
             },
             {
                 icon: 'fa-people-group',
-                title: 'One card for shared tasks',
-                text: 'When a task goes to several people it shows up once, with who has finished it, instead of piling up copies.'
+                heading: 'Teams: roles, folders and assigning',
+                paragraphs: [
+                    'Group owners and admins can now give people job roles (like Designer or Cashier) and make folders for the whole group. Roles are just labels on their own. They don\'t give anyone extra powers.',
+                    'Owners and admins can also put a task straight onto someone\'s list, or everyone\'s. The person gets 15 minutes to decline it if it\'s not right, and you\'re told if they do.'
+                ],
+                points: [
+                    'Group the list by person, role or folder.',
+                    'Owners and admins can let a specific person assign tasks or manage folders too.',
+                    'When a task goes to several people it shows up once, with who has finished it.'
+                ]
             },
             {
                 icon: 'fa-shield-halved',
-                title: 'Safer Dusty',
-                text: 'Dusty now asks "Remember this?" before saving anything you didn\'t say yourself.'
+                heading: 'A safer Dusty',
+                paragraphs: [
+                    'Dusty now asks "Remember this?" before saving anything to his memory that you didn\'t say yourself.'
+                ]
             }
-        ]
+        ],
+        signoff: 'Thanks for building up your lists with us.'
     }
 ];
 
@@ -105,6 +165,8 @@ const WhatsNew = (() => {
     let returnFocusTo = null;
     let lastUid = null;
     let button = null;
+    let selectedId = null;
+    let newIdAtOpen = null;
 
     const currentUser = () => window.ToDoAuth?.auth?.currentUser || null;
     const latest = () => WHATS_NEW_RELEASES[0];
@@ -165,7 +227,7 @@ const WhatsNew = (() => {
         dot.className = 'whatsNewDot';
         dot.setAttribute('aria-hidden', 'true');
         button.append(icon, label, dot);
-        button.addEventListener('click', () => open('all'));
+        button.addEventListener('click', () => open());
         anchor.before(button);
         refreshButton();
     }
@@ -180,99 +242,114 @@ const WhatsNew = (() => {
 
     // ---- the popup ---------------------------------------------------------
 
-    function releaseNode(release, { compact }) {
-        const section = document.createElement('section');
-        section.className = 'whatsNewRelease' + (compact ? ' compact' : '');
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) {
+            node.className = className;
+        }
+        if (text !== undefined) {
+            node.textContent = text;
+        }
+        return node;
+    }
 
-        const head = document.createElement('div');
-        head.className = 'whatsNewReleaseHead';
-        const title = document.createElement('h3');
-        title.textContent = release.title;
-        const date = document.createElement('span');
-        date.className = 'whatsNewDate';
-        date.textContent = release.date;
-        head.append(title, date);
-        section.appendChild(head);
+    function iconNode(name, className) {
+        const icon = el('i', 'fa-solid ' + name + (className ? ' ' + className : ''));
+        icon.setAttribute('aria-hidden', 'true');
+        return icon;
+    }
 
-        const list = document.createElement('ul');
-        list.className = 'whatsNewList';
-        release.items.forEach((item) => {
-            const li = document.createElement('li');
-            li.className = 'whatsNewItem';
-            const iconWrap = document.createElement('span');
-            iconWrap.className = 'whatsNewIcon';
+    function postNode(release) {
+        const post = el('article', 'whatsNewPost');
+        post.appendChild(el('h2', 'whatsNewPostTitle', release.title));
+        post.appendChild(el('p', 'whatsNewPostDate', release.date));
+        if (release.intro) {
+            post.appendChild(el('p', 'whatsNewIntro', release.intro));
+        }
+        (release.sections || []).forEach((section) => {
+            const block = el('section', 'whatsNewSection');
+            const head = el('h3', 'whatsNewSectionHead');
+            const iconWrap = el('span', 'whatsNewIcon');
             iconWrap.setAttribute('aria-hidden', 'true');
-            const icon = document.createElement('i');
-            icon.className = 'fa-solid ' + item.icon;
-            iconWrap.appendChild(icon);
-            const body = document.createElement('div');
-            const itemTitle = document.createElement('strong');
-            itemTitle.textContent = item.title;
-            const itemText = document.createElement('p');
-            itemText.textContent = item.text;
-            body.append(itemTitle, itemText);
-            li.append(iconWrap, body);
-            list.appendChild(li);
+            iconWrap.appendChild(iconNode(section.icon || 'fa-star'));
+            head.append(iconWrap, el('span', null, section.heading));
+            block.appendChild(head);
+            (section.paragraphs || []).forEach((text) => block.appendChild(el('p', 'whatsNewText', text)));
+            if (section.points && section.points.length > 0) {
+                const list = el('ul', 'whatsNewPoints');
+                section.points.forEach((text) => list.appendChild(el('li', null, text)));
+                block.appendChild(list);
+            }
+            post.appendChild(block);
         });
-        section.appendChild(list);
-        return section;
+        if (release.tip) {
+            const tip = el('p', 'whatsNewTip');
+            tip.appendChild(iconNode('fa-lightbulb'));
+            tip.appendChild(el('span', null, release.tip));
+            post.appendChild(tip);
+        }
+        if (release.signoff) {
+            post.appendChild(el('p', 'whatsNewSignoff', release.signoff));
+        }
+        return post;
     }
 
-    function render(mode) {
-        const card = overlay.querySelector('.whatsNewCard');
-        card.querySelectorAll('.whatsNewBody, .whatsNewActions').forEach((node) => node.remove());
-
-        const body = document.createElement('div');
-        body.className = 'whatsNewBody';
-        const heading = overlay.querySelector('.whatsNewKicker');
-        if (mode === 'latest') {
-            heading.textContent = 'What\'s new';
-            body.appendChild(releaseNode(latest(), { compact: false }));
-        } else {
-            heading.textContent = 'All updates';
-            WHATS_NEW_RELEASES.forEach((release, index) => {
-                body.appendChild(releaseNode(release, { compact: index > 0 }));
-            });
-        }
-        card.appendChild(body);
-
-        const actions = document.createElement('div');
-        actions.className = 'whatsNewActions';
-        if (mode === 'latest' && WHATS_NEW_RELEASES.length > 1) {
-            const allBtn = document.createElement('button');
-            allBtn.type = 'button';
-            allBtn.className = 'whatsNewSecondaryBtn';
-            allBtn.textContent = 'All updates';
-            allBtn.addEventListener('click', () => render('all'));
-            actions.appendChild(allBtn);
-        }
-        const doneBtn = document.createElement('button');
-        doneBtn.type = 'button';
-        doneBtn.className = 'whatsNewDoneBtn';
-        doneBtn.textContent = mode === 'latest' ? 'Got it' : 'Close';
-        doneBtn.addEventListener('click', close);
-        actions.appendChild(doneBtn);
-        card.appendChild(actions);
-        doneBtn.focus();
+    function renderNav() {
+        const nav = overlay.querySelector('.whatsNewNav');
+        nav.textContent = '';
+        WHATS_NEW_RELEASES.forEach((release) => {
+            const item = el('button', 'whatsNewNavItem' + (release.id === selectedId ? ' active' : ''));
+            item.type = 'button';
+            item.dataset.releaseId = release.id;
+            if (release.id === selectedId) {
+                item.setAttribute('aria-current', 'true');
+            }
+            const top = el('span', 'whatsNewNavTop');
+            top.appendChild(el('span', 'whatsNewNavDate', release.date));
+            if (release.id === newIdAtOpen) {
+                top.appendChild(el('span', 'whatsNewNewTag', 'New'));
+            }
+            item.append(top, el('span', 'whatsNewNavTitle', release.title));
+            item.addEventListener('click', () => select(release.id));
+            nav.appendChild(item);
+        });
     }
 
-    function open(mode) {
+    function select(releaseId) {
+        const release = WHATS_NEW_RELEASES.find((entry) => entry.id === releaseId) || latest();
+        selectedId = release.id;
+        renderNav();
+        const scroller = overlay.querySelector('.whatsNewMain');
+        scroller.textContent = '';
+        scroller.appendChild(postNode(release));
+        scroller.scrollTop = 0;
+    }
+
+    function open() {
         if (overlay) {
             return;
         }
         returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        overlay = document.createElement('div');
-        overlay.className = 'whatsNewOverlay';
+        newIdAtOpen = hasUnseen() ? latest().id : null;
+        overlay = el('div', 'whatsNewOverlay');
         overlay.innerHTML = `
             <div class="whatsNewCard" role="dialog" aria-modal="true" aria-labelledby="whatsNewKicker">
                 <div class="whatsNewHeader">
-                    <p class="whatsNewKicker" id="whatsNewKicker"></p>
+                    <p class="whatsNewKicker" id="whatsNewKicker">Patch notes</p>
                     <button type="button" class="whatsNewCloseBtn" aria-label="Close">&times;</button>
+                </div>
+                <div class="whatsNewLayout">
+                    <nav class="whatsNewNav" aria-label="Updates"></nav>
+                    <div class="whatsNewMain" tabindex="0"></div>
+                </div>
+                <div class="whatsNewActions">
+                    <button type="button" class="whatsNewDoneBtn">Got it</button>
                 </div>
             </div>
         `;
         document.body.appendChild(overlay);
         overlay.querySelector('.whatsNewCloseBtn').addEventListener('click', close);
+        overlay.querySelector('.whatsNewDoneBtn').addEventListener('click', close);
         overlay.addEventListener('click', (event) => {
             if (event.target === overlay) {
                 close();
@@ -286,7 +363,7 @@ const WhatsNew = (() => {
             }
             // Keep Tab inside the dialog.
             if (event.key === 'Tab') {
-                const focusable = Array.from(overlay.querySelectorAll('button'));
+                const focusable = Array.from(overlay.querySelectorAll('button, [tabindex="0"]'));
                 const first = focusable[0];
                 const last = focusable[focusable.length - 1];
                 if (event.shiftKey && document.activeElement === first) {
@@ -298,14 +375,17 @@ const WhatsNew = (() => {
                 }
             }
         });
-        render(mode);
-        // Opening it (either way) counts as seeing it.
+        select(latest().id);
+        overlay.querySelector('.whatsNewDoneBtn').focus();
+        // Opening it counts as seeing it.
         markSeen();
     }
 
     function close() {
         overlay?.remove();
         overlay = null;
+        selectedId = null;
+        newIdAtOpen = null;
         if (returnFocusTo && document.body.contains(returnFocusTo)) {
             returnFocusTo.focus();
         }
@@ -346,7 +426,7 @@ const WhatsNew = (() => {
             }
             return;
         }
-        open('latest');
+        open();
     }
 
     // Cheap watcher: adds the header button once the header exists, and starts a

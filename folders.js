@@ -212,6 +212,270 @@ const TodoFolders = (() => {
         return badge;
     }
 
+    // --- Folder filter chips (capped) -----------------------------------
+    //
+    // The filter row must never grow with the number of folders. It shows "All folders",
+    // the folder being viewed, and the busiest few; the rest live in a floating "More
+    // folders" panel (overlay, so it never pushes the page down). Narrow screens swap the
+    // chips for one "Folder: X" button that opens the same panel. Both pages use this.
+
+    const VISIBLE_FOLDER_CHIPS = 6;
+    let pickerPanel = null;
+    let pickerAnchor = null;
+    let pickerCleanup = null;
+
+    function closePicker(returnFocus) {
+        pickerCleanup?.();
+        pickerCleanup = null;
+        pickerPanel?.remove();
+        pickerPanel = null;
+        if (pickerAnchor) {
+            pickerAnchor.setAttribute('aria-expanded', 'false');
+            if (returnFocus && pickerAnchor.isConnected) {
+                pickerAnchor.focus();
+            }
+        }
+        pickerAnchor = null;
+    }
+
+    function pickVisibleFolders(list, active, countFor) {
+        if (list.length <= VISIBLE_FOLDER_CHIPS + 1) {
+            return new Set(list.map((folder) => folder.id));
+        }
+        const ranked = list
+            .map((folder, index) => ({ folder, index, count: countFor(folder.id) }))
+            .sort((a, b) => b.count - a.count || a.index - b.index)
+            .slice(0, VISIBLE_FOLDER_CHIPS)
+            .map((entry) => entry.folder.id);
+        const keep = new Set(ranked);
+        // The folder you're looking at is always on the bar so you can see where you are.
+        if (resolve(active) && !keep.has(active)) {
+            keep.delete(ranked[ranked.length - 1]);
+            keep.add(active);
+        }
+        return keep;
+    }
+
+    function openPicker(anchor, { active, countFor, noFolderCount, onSelect }) {
+        if (pickerPanel && pickerAnchor === anchor) {
+            closePicker(true);
+            return;
+        }
+        closePicker(false);
+        pickerAnchor = anchor;
+        anchor.setAttribute('aria-expanded', 'true');
+
+        const panel = document.createElement('div');
+        panel.className = 'folderPickerPanel';
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-label', 'Choose a folder');
+
+        const search = document.createElement('input');
+        search.type = 'search';
+        search.className = 'folderPickerSearch';
+        search.placeholder = 'Find a folder';
+        search.maxLength = NAME_MAX;
+        search.setAttribute('aria-label', 'Find a folder');
+        search.autocomplete = 'off';
+
+        const list = document.createElement('div');
+        list.className = 'folderPickerList';
+
+        const choose = (value) => {
+            closePicker(true);
+            onSelect(value);
+        };
+
+        const addItem = (label, value, color, count) => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'folderPickerItem' + (active === value ? ' active' : '');
+            if (active === value) {
+                item.setAttribute('aria-current', 'true');
+            }
+            if (color) {
+                item.style.setProperty('--folder-color', color);
+                const dot = document.createElement('span');
+                dot.className = 'folderDot';
+                dot.setAttribute('aria-hidden', 'true');
+                item.appendChild(dot);
+            }
+            const text = document.createElement('span');
+            text.className = 'folderPickerName';
+            text.textContent = label;
+            item.appendChild(text);
+            if (count > 0) {
+                const badge = document.createElement('span');
+                badge.className = 'folderChipCount';
+                badge.textContent = String(count);
+                item.appendChild(badge);
+            }
+            item.addEventListener('click', () => choose(value));
+            list.appendChild(item);
+        };
+
+        const renderList = () => {
+            list.textContent = '';
+            const needle = search.value.trim().toLowerCase();
+            if (!needle) {
+                addItem('All folders', 'all', null, 0);
+            }
+            const matches = folders.filter((folder) => !needle || folder.name.toLowerCase().includes(needle));
+            matches.forEach((folder) => addItem(folder.name, folder.id, folder.color, countFor(folder.id)));
+            if (!needle || 'no folder'.includes(needle)) {
+                addItem('No folder', 'none', null, noFolderCount());
+            }
+            if (needle && matches.length === 0 && !'no folder'.includes(needle)) {
+                const empty = document.createElement('p');
+                empty.className = 'folderPickerEmpty';
+                empty.textContent = 'No folder matches that.';
+                list.appendChild(empty);
+            }
+        };
+        renderList();
+        search.addEventListener('input', renderList);
+        search.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                list.querySelector('.folderPickerItem')?.click();
+            }
+        });
+
+        panel.append(search, list);
+        document.body.appendChild(panel);
+        pickerPanel = panel;
+
+        // Fixed to the viewport under the button, kept on screen. It overlays the page, so
+        // opening it never moves anything.
+        const place = () => {
+            if (!anchor.isConnected) {
+                closePicker(false);
+                return;
+            }
+            const rect = anchor.getBoundingClientRect();
+            const width = Math.min(320, window.innerWidth - 16);
+            const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+            panel.style.width = width + 'px';
+            panel.style.left = left + 'px';
+            const below = window.innerHeight - rect.bottom - 14;
+            if (below >= 220 || below >= rect.top) {
+                panel.style.top = rect.bottom + 6 + 'px';
+                panel.style.bottom = 'auto';
+                panel.style.maxHeight = Math.max(160, Math.min(window.innerHeight * 0.5, below)) + 'px';
+            } else {
+                panel.style.top = 'auto';
+                panel.style.bottom = window.innerHeight - rect.top + 6 + 'px';
+                panel.style.maxHeight = Math.max(160, Math.min(window.innerHeight * 0.5, rect.top - 14)) + 'px';
+            }
+        };
+        place();
+
+        const onPointerDown = (event) => {
+            if (!panel.contains(event.target) && !anchor.contains(event.target)) {
+                closePicker(false);
+            }
+        };
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                event.stopPropagation();
+                closePicker(true);
+            }
+        };
+        // A scroll inside the list is fine; the page moving under the panel is not.
+        const onScroll = (event) => {
+            if (!panel.contains(event.target)) {
+                closePicker(false);
+            }
+        };
+        document.addEventListener('pointerdown', onPointerDown, true);
+        document.addEventListener('keydown', onKeyDown, true);
+        window.addEventListener('scroll', onScroll, true);
+        window.addEventListener('resize', place);
+        pickerCleanup = () => {
+            document.removeEventListener('pointerdown', onPointerDown, true);
+            document.removeEventListener('keydown', onKeyDown, true);
+            window.removeEventListener('scroll', onScroll, true);
+            window.removeEventListener('resize', place);
+        };
+        search.focus({ preventScroll: true });
+    }
+
+    // Appends the filter controls to `container`. The caller owns the rest of the bar
+    // (Sort / Manage / Roles / Group by). `countFor(id)` and `noFolderCount()` give open-task
+    // counts for whichever tasks the page is showing; `onSelect(value)` gets 'all', 'none'
+    // or a folder id and is responsible for re-rendering.
+    function renderFilterChips(container, { active, countFor, noFolderCount, onSelect }) {
+        if (!container || folders.length === 0) {
+            closePicker(false);
+            return;
+        }
+        const opts = { active, countFor, noFolderCount, onSelect };
+
+        const addChip = (label, value, color, count) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'folderChip folderFilterChip' + (active === value ? ' active' : '');
+            button.setAttribute('aria-pressed', String(active === value));
+            if (color) {
+                button.style.setProperty('--folder-color', color);
+                const dot = document.createElement('span');
+                dot.className = 'folderDot';
+                dot.setAttribute('aria-hidden', 'true');
+                button.appendChild(dot);
+            }
+            const text = document.createElement('span');
+            text.textContent = label;
+            button.appendChild(text);
+            if (count > 0) {
+                const badge = document.createElement('span');
+                badge.className = 'folderChipCount';
+                badge.textContent = String(count);
+                button.appendChild(badge);
+            }
+            button.addEventListener('click', () => onSelect(value));
+            container.appendChild(button);
+        };
+
+        // Narrow screens: one compact button instead of a wrapping row of chips.
+        const current = active === 'none' ? { name: 'No folder', color: null } : (resolve(active) || { name: 'All folders', color: null });
+        const picker = document.createElement('button');
+        picker.type = 'button';
+        picker.className = 'folderChip folderPickerChip' + (active !== 'all' ? ' active' : '');
+        picker.setAttribute('aria-haspopup', 'dialog');
+        picker.setAttribute('aria-expanded', 'false');
+        const pickerLabel = document.createElement('span');
+        pickerLabel.textContent = 'Folder: ' + current.name;
+        const pickerIcon = document.createElement('i');
+        pickerIcon.className = 'fa-solid fa-chevron-down';
+        pickerIcon.setAttribute('aria-hidden', 'true');
+        picker.append(pickerLabel, pickerIcon);
+        picker.addEventListener('click', () => openPicker(picker, opts));
+        container.appendChild(picker);
+
+        addChip('All folders', 'all', null, 0);
+        const visible = pickVisibleFolders(folders, active, countFor);
+        folders.filter((folder) => visible.has(folder.id)).forEach((folder) => {
+            addChip(folder.name, folder.id, folder.color, countFor(folder.id));
+        });
+        const hidden = folders.length - visible.size;
+        if (hidden > 0) {
+            const more = document.createElement('button');
+            more.type = 'button';
+            more.className = 'folderChip folderFilterChip folderMoreChip';
+            more.setAttribute('aria-haspopup', 'dialog');
+            more.setAttribute('aria-expanded', 'false');
+            const moreLabel = document.createElement('span');
+            moreLabel.textContent = `More folders (${hidden})`;
+            const moreIcon = document.createElement('i');
+            moreIcon.className = 'fa-solid fa-chevron-down';
+            moreIcon.setAttribute('aria-hidden', 'true');
+            more.append(moreLabel, moreIcon);
+            more.addEventListener('click', () => openPicker(more, opts));
+            container.appendChild(more);
+        }
+        addChip('No folder', 'none', null, noFolderCount());
+    }
+
     // --- Manager dialog -------------------------------------------------
 
     function closeManager() {
@@ -514,5 +778,5 @@ const TodoFolders = (() => {
         };
     }
 
-    return { COLORS, MAX_FOLDERS, init, getAll, resolve, onChange, add, update, remove, fillSelect, createBadge, openManager, closeManager, openSorter, soloAdapter, sanitize, attach, isEditable };
+    return { COLORS, MAX_FOLDERS, init, getAll, resolve, onChange, add, update, remove, fillSelect, createBadge, openManager, closeManager, openSorter, soloAdapter, sanitize, attach, isEditable, renderFilterChips, closePicker };
 })();

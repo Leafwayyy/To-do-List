@@ -1493,43 +1493,19 @@ function renderFolderBar() {
     folderBar.innerHTML = '';
     const countOpen = (predicate) => tasks.filter((task) => !task.completed && predicate(task)).length;
 
-    const addChip = (label, filterValue, color, count) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'folderChip' + (activeFolderFilter === filterValue ? ' active' : '');
-        button.setAttribute('aria-pressed', String(activeFolderFilter === filterValue));
-        if (color) {
-            button.style.setProperty('--folder-color', color);
-            const dot = document.createElement('span');
-            dot.className = 'folderDot';
-            dot.setAttribute('aria-hidden', 'true');
-            button.appendChild(dot);
-        }
-        const text = document.createElement('span');
-        text.textContent = label;
-        button.appendChild(text);
-        if (count > 0) {
-            const badge = document.createElement('span');
-            badge.className = 'folderChipCount';
-            badge.textContent = String(count);
-            button.appendChild(badge);
-        }
-        button.addEventListener('click', () => {
-            activeFolderFilter = filterValue;
+    // Capped: a handful of chips plus a "More folders" panel (folders.js), so a long folder
+    // list never grows the bar.
+    TodoFolders.renderFilterChips(folderBar, {
+        active: activeFolderFilter,
+        countFor: (folderId) => countOpen((task) => task.folderId === folderId),
+        noFolderCount: () => countOpen((task) => !TodoFolders.resolve(task.folderId)),
+        onSelect: (value) => {
+            activeFolderFilter = value;
             renderFolderBar();
             renderTasks();
             syncFolderSelectToFilter();
-        });
-        folderBar.appendChild(button);
-    };
-
-    if (folders.length > 0) {
-        addChip('All folders', 'all', null, 0);
-        folders.forEach((folder) => {
-            addChip(folder.name, folder.id, folder.color, countOpen((task) => task.folderId === folder.id));
-        });
-        addChip('No folder', 'none', null, countOpen((task) => !TodoFolders.resolve(task.folderId)));
-    }
+        }
+    });
 
     const unfiledOpen = tasks.filter((task) => !task.completed && !TodoFolders.resolve(task.folderId));
     if (folders.length > 0 && unfiledOpen.length > 0) {

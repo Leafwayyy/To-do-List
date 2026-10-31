@@ -6402,36 +6402,75 @@ function openGroupRolesManager(group) {
 // Splits the already-sorted tasks into headed sections for "Group by".
 // Empty sections are left out. Roles are looked up from the assignee's
 // CURRENT role, so there's nothing stored on tasks to go stale.
+// Which "Group by" sections this person has folded shut. Kept on this device only and per
+// person + group + grouping, so folding a section never affects a teammate's view.
+const GROUP_COLLAPSED_KEY = 'todo.groupCollapsed.v1';
+
+function collapsedKey(group) {
+    return [currentUser?.uid || '', group?.id || '', groupByMode].join('|');
+}
+
+function readCollapsedSections(group) {
+    try {
+        const all = JSON.parse(localStorage.getItem(GROUP_COLLAPSED_KEY) || '{}');
+        const list = all[collapsedKey(group)];
+        return new Set(Array.isArray(list) ? list.filter((key) => typeof key === 'string') : []);
+    } catch (error) {
+        // localStorage can be unavailable or hold junk - nothing is folded then.
+        return new Set();
+    }
+}
+
+function setSectionCollapsed(group, sectionKey, collapsed) {
+    const set = readCollapsedSections(group);
+    if (collapsed) {
+        set.add(sectionKey);
+    } else {
+        set.delete(sectionKey);
+    }
+    try {
+        const all = JSON.parse(localStorage.getItem(GROUP_COLLAPSED_KEY) || '{}');
+        if (set.size > 0) {
+            all[collapsedKey(group)] = [...set].slice(0, 100);
+        } else {
+            delete all[collapsedKey(group)];
+        }
+        localStorage.setItem(GROUP_COLLAPSED_KEY, JSON.stringify(all));
+    } catch (error) {
+        // Not saved - it still works for this visit.
+    }
+}
+
 function buildGroupSections(group, sortedTasks) {
     if (groupByMode === 'none') {
-        return [{ title: null, color: null, tasks: sortedTasks }];
+        return [{ key: '', title: null, color: null, tasks: sortedTasks }];
     }
     const memberIds = group.memberIds || [];
     const memberNames = group.memberNames || [];
     const claimed = new Set();
     const sections = [];
-    const take = (title, color, predicate) => {
+    const take = (key, title, color, predicate) => {
         const tasks = sortedTasks.filter((task) => !claimed.has(task.id) && predicate(task));
         tasks.forEach((task) => claimed.add(task.id));
         if (tasks.length > 0) {
-            sections.push({ title, color, tasks });
+            sections.push({ key, title, color, tasks });
         }
     };
     if (groupByMode === 'person') {
         memberIds.forEach((uid, index) => {
-            take(memberNames[index] || 'Teammate', null, (task) => task.ownerId === uid);
+            take('p:' + uid, memberNames[index] || 'Teammate', null, (task) => task.ownerId === uid);
         });
-        take('Former members', null, () => true);
+        take('p:former', 'Former members', null, () => true);
     } else if (groupByMode === 'role') {
         GroupRoles.getAll(group).forEach((role) => {
-            take(role.name, role.color, (task) => GroupRoles.getRole(group, task.ownerId)?.id === role.id);
+            take('r:' + role.id, role.name, role.color, (task) => GroupRoles.getRole(group, task.ownerId)?.id === role.id);
         });
-        take('No role', null, () => true);
+        take('r:none', 'No role', null, () => true);
     } else if (groupByMode === 'folder') {
         TodoFolders.getAll().forEach((folder) => {
-            take(folder.name, folder.color, (task) => TodoFolders.resolve(task.folderId)?.id === folder.id);
+            take('f:' + folder.id, folder.name, folder.color, (task) => TodoFolders.resolve(task.folderId)?.id === folder.id);
         });
-        take('No folder', null, () => true);
+        take('f:none', 'No folder', null, () => true);
     }
     return sections;
 }
@@ -6537,42 +6576,18 @@ function renderGroupFolderBar(group) {
     const scoped = activeMemberScope === 'all' ? groupTasks : groupTasks.filter((task) => task.ownerId === activeMemberScope);
     const countOpen = (predicate) => scoped.filter((task) => !task.completed && predicate(task)).length;
 
-    const addChip = (label, filterValue, color, count) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'folderChip' + (activeFolderFilter === filterValue ? ' active' : '');
-        button.setAttribute('aria-pressed', String(activeFolderFilter === filterValue));
-        if (color) {
-            button.style.setProperty('--folder-color', color);
-            const dot = document.createElement('span');
-            dot.className = 'folderDot';
-            dot.setAttribute('aria-hidden', 'true');
-            button.appendChild(dot);
-        }
-        const text = document.createElement('span');
-        text.textContent = label;
-        button.appendChild(text);
-        if (count > 0) {
-            const badge = document.createElement('span');
-            badge.className = 'folderChipCount';
-            badge.textContent = String(count);
-            button.appendChild(badge);
-        }
-        button.addEventListener('click', () => {
-            activeFolderFilter = filterValue;
+    // Capped: a handful of chips plus a "More folders" panel (folders.js), so a long folder
+    // list never grows the bar.
+    TodoFolders.renderFilterChips(folderBar, {
+        active: activeFolderFilter,
+        countFor: (folderId) => countOpen((task) => task.folderId === folderId),
+        noFolderCount: () => countOpen((task) => !TodoFolders.resolve(task.folderId)),
+        onSelect: (value) => {
+            activeFolderFilter = value;
             renderGroupTasks();
             syncGroupFolderSelect();
-        });
-        folderBar.appendChild(button);
-    };
-
-    if (folders.length > 0) {
-        addChip('All folders', 'all', null, 0);
-        folders.forEach((folder) => {
-            addChip(folder.name, folder.id, folder.color, countOpen((task) => task.folderId === folder.id));
-        });
-        addChip('No folder', 'none', null, countOpen((task) => !TodoFolders.resolve(task.folderId)));
-    }
+        }
+    });
 
     const myUnfiled = groupTasks.filter((task) => task.ownerId === currentUser?.uid && !task.completed && !TodoFolders.resolve(task.folderId));
     if (group && folders.length > 0 && myUnfiled.length > 0) {
@@ -6741,24 +6756,45 @@ function renderGroupTasks() {
         return { ...section, entries };
     }).filter((section) => section.entries.length > 0);
 
+    const collapsedSections = readCollapsedSections(group);
     plan.forEach((section) => {
+        const isCollapsed = Boolean(section.title) && collapsedSections.has(section.key);
         if (section.title) {
             const heading = document.createElement('li');
-            heading.className = 'groupSectionHeading';
+            heading.className = 'groupSectionHeading' + (isCollapsed ? ' collapsed' : '');
+            // The whole heading is one button: click to fold or open the section. The
+            // count stays visible while folded so nothing is hidden without a trace.
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'groupSectionToggle';
+            toggle.setAttribute('aria-expanded', String(!isCollapsed));
+            const chevron = document.createElement('i');
+            chevron.className = 'fa-solid fa-chevron-down groupSectionChevron';
+            chevron.setAttribute('aria-hidden', 'true');
+            toggle.appendChild(chevron);
             if (section.color) {
                 heading.style.setProperty('--folder-color', section.color);
                 const dot = document.createElement('span');
                 dot.className = 'folderDot';
                 dot.setAttribute('aria-hidden', 'true');
-                heading.appendChild(dot);
+                toggle.appendChild(dot);
             }
             const title = document.createElement('span');
+            title.className = 'groupSectionTitle';
             title.textContent = section.title;
             const count = document.createElement('span');
             count.className = 'groupSectionCount';
             count.textContent = String(section.entries.length);
-            heading.append(title, count);
+            toggle.append(title, count);
+            toggle.addEventListener('click', () => {
+                setSectionCollapsed(group, section.key, !isCollapsed);
+                renderGroupTasks();
+            });
+            heading.appendChild(toggle);
             groupTasksList.appendChild(heading);
+        }
+        if (isCollapsed) {
+            return;
         }
         section.entries.forEach((entry) => {
             if (entry.shareKey) {
