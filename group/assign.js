@@ -124,6 +124,24 @@ const GroupAssign = (() => {
         return people;
     }
 
+    // Best-effort heads-up in each person's notification center (never blocks or fails the
+    // assignment itself). Yourself is skipped by notify().
+    function tellPeople(type, group, user, people, what, text) {
+        const ids = people.map((person) => person.uid).filter((uid) => uid && uid !== user.uid);
+        if (ids.length === 0) {
+            return;
+        }
+        const me = displayNameFor(user);
+        window.NotificationCenter?.notifyMany(ids, {
+            type,
+            title: `${me} ${what}`,
+            body: text,
+            groupId: group.id,
+            groupName: group.name,
+            actorName: me
+        });
+    }
+
     async function commitChunk(batchWriter, chunk) {
         const batch = batchWriter();
         chunk.forEach(({ ref, data }) => batch.set(ref, data));
@@ -159,6 +177,7 @@ const GroupAssign = (() => {
             const results = await Promise.allSettled(others.map((target) => suggestTaskForMember(group.id, user, target.uid, fields)));
             let created = results.filter((result) => result.status === 'fulfilled').length;
             const failedNames = others.filter((_, index) => results[index].status === 'rejected').map((target) => target.name);
+            tellPeople('suggestion', group, user, others.filter((_, index) => results[index].status === 'fulfilled'), 'suggested a task for you', text);
             if (includesSelf) {
                 try {
                     await addGroupTask(group.id, user, fields);
@@ -180,6 +199,11 @@ const GroupAssign = (() => {
                 // assignedAt is the SERVER's clock (the rules require exactly that), because
                 // the 15-minute decline window runs from it.
                 Object.assign(extra, { assignedBy: user.uid, assignedByName: displayNameFor(user), assignedAt: serverTimestamp() });
+                // Only if the assigner asked: this person has to send it for review and be
+                // approved before it counts as done. (Your own copy never needs your approval.)
+                if (fields.needsApproval === true) {
+                    extra.needsApproval = true;
+                }
             }
             return {
                 target,
@@ -227,6 +251,7 @@ const GroupAssign = (() => {
         // task. If this write fails the tasks still exist and work normally; the
         // only loss is the assigner's "declined" notification for this one.
         if (created > 0) {
+            tellPeople('assigned', group, user, createdTargets, 'assigned you a task', text);
             try {
                 await setDoc(doc(db(), 'groups', group.id, 'assignments', sharedId), {
                     createdBy: user.uid,
@@ -249,6 +274,16 @@ const GroupAssign = (() => {
     // the notification must never stop you from declining.
     async function decline(groupId, task, user) {
         const { doc, updateDoc, serverTimestamp } = fs();
+        if (task.assignedBy && task.assignedBy !== user.uid) {
+            window.NotificationCenter?.notify({
+                toUid: task.assignedBy,
+                type: 'declined',
+                title: `${displayNameFor(user)} declined a task you assigned`,
+                body: task.text,
+                groupId,
+                actorName: displayNameFor(user)
+            });
+        }
         if (task.sharedId) {
             try {
                 await updateDoc(doc(db(), 'groups', groupId, 'assignments', task.sharedId), {

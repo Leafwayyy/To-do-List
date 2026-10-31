@@ -12,9 +12,12 @@
 //   3. firestore.rules refuse anything the signed-in user isn't allowed to do,
 //      no matter how it was asked.
 //
-// Actions: createFolder, fileTasks (solo + group); assign, createRole, setRole,
-// grantAccess (group only). Roles and access are owner/admin only, exactly as in
-// the rest of the app.
+// Actions: createFolder, fileTasks (solo + group); assign (optionally "needs my approval"),
+// setStatus (in progress / blocked / in review on your OWN tasks), reviewTask (approve or
+// send back a task that is waiting for YOUR review), createRole, setRole, grantAccess
+// (group only). Roles and access are owner/admin only, exactly as in the rest of the app;
+// status and review go through the same code (group/workflow.js) as the buttons on the cards,
+// so the same rules apply.
 //
 // Classic script, loaded on both pages BEFORE the page script (which hands this
 // to the Brain Dump controller). Everything page-specific is read lazily, at call
@@ -96,6 +99,35 @@ const DustyActions = (() => {
         }
         const uid = currentUser && currentUser.uid;
         return groupTasks.filter((task) => wanted.has(task.id) && task.ownerId === uid);
+    }
+
+    // Resolves a setDependency draft against the live list: one of MY open tasks, and valid open
+    // tasks (never itself, never one that would make a loop) for it to wait for.
+    function dependencyPlan(draft) {
+        const mine = myTasksByIds(draft.taskIds).filter((task) => !task.completed);
+        if (mine.length === 0) {
+            return { error: 'That is not one of your open tasks.' };
+        }
+        const task = mine[0];
+        const wanted = Array.isArray(draft.dependsOnIds) ? draft.dependsOnIds.map((id) => String(id)) : [];
+        const deps = [];
+        wanted.forEach((id) => {
+            const found = groupTasks.find((candidate) => candidate.id === id);
+            if (found && !found.completed && found.id !== task.id && !GroupWorkflow.wouldCycle(task.id, found.id) && !deps.some((dep) => dep.id === found.id)) {
+                deps.push(found);
+            }
+        });
+        if (wanted.length > 0 && deps.length === 0) {
+            return { error: 'None of those tasks are available to wait for (they may be finished, or waiting on this one).' };
+        }
+        return { task, deps: deps.slice(0, 5) };
+    }
+
+    // Tasks of other people that are waiting for MY sign-off (I assigned them and asked to approve).
+    function reviewableTasks(ids, uid) {
+        const wanted = new Set((Array.isArray(ids) ? ids : []).map((id) => String(id)));
+        return groupTasks.filter((task) => wanted.has(task.id) && !task.completed && task.status === 'review'
+            && task.assignedBy === uid && task.ownerId !== uid);
     }
 
     const ME_WORDS = ['me', 'myself', 'self', 'i'];
@@ -221,8 +253,72 @@ const DustyActions = (() => {
         }
 
         // Everything below is group-only.
-        if (['assign', 'createRole', 'setRole', 'grantAccess'].includes(action) && !group) {
+        if (['assign', 'setStatus', 'setDependency', 'reviewTask', 'createRole', 'setRole', 'grantAccess'].includes(action) && !group) {
             return blocked('That only works inside a group.');
+        }
+
+        if (action === 'setStatus') {
+            const status = ['todo', 'inprogress', 'blocked', 'review'].includes(draft.status) ? draft.status : null;
+            if (!status) {
+                return blocked('No status was given.');
+            }
+            const reason = clean(draft.statusReason, 200);
+            if (status === 'blocked' && !reason) {
+                return blocked('Say what is blocking it, so the right people know.');
+            }
+            let mine = myTasksByIds(draft.taskIds).filter((task) => !task.completed);
+            if (mine.length === 0) {
+                return blocked('None of those tasks are yours to update (or they are already done).');
+            }
+            if (status === 'review') {
+                mine = mine.filter((task) => task.needsApproval === true && task.status !== 'approved');
+                if (mine.length === 0) {
+                    return blocked('Nobody asked to approve that task, so it does not go for review. Just finish it.');
+                }
+            }
+            const label = { todo: 'not started', inprogress: 'in progress', blocked: 'blocked', review: 'ready for review' }[status];
+            const preview = mine.slice(0, 3).map((task) => `"${clean(task.text, 40)}"`).join(', ') + (mine.length > 3 ? ` and ${mine.length - 3} more` : '');
+            return {
+                allowed: true,
+                text: status === 'blocked'
+                    ? `Mark ${preview} as blocked ("${reason}"). The person who assigned it and the group's owner and admins will be told.`
+                    : (status === 'review'
+                        ? `Send ${preview} for review. The person who assigned it will be asked to approve it.`
+                        : `Mark ${preview} as ${label}.`)
+            };
+        }
+
+        if (action === 'setDependency') {
+            const plan = dependencyPlan(draft);
+            if (plan.error) {
+                return blocked(plan.error);
+            }
+            const name = (task) => `"${clean(task.text, 40)}"`;
+            return {
+                allowed: true,
+                text: plan.deps.length === 0
+                    ? `Stop ${name(plan.task)} waiting for anything.`
+                    : `Make ${name(plan.task)} wait for ${plan.deps.map((dep) => `${name(dep)}${dep.ownerId !== ctx.uid ? ` (${clean(dep.ownerName || 'a teammate', 30)})` : ''}`).join(' and ')}. Nothing is locked; you are told when they are done.`
+            };
+        }
+
+        if (action === 'reviewTask') {
+            const decision = draft.decision === 'approve' || draft.decision === 'sendBack' ? draft.decision : null;
+            if (!decision) {
+                return blocked('Approve it or send it back? That was not clear.');
+            }
+            const waiting = reviewableTasks(draft.taskIds, ctx.uid);
+            if (waiting.length === 0) {
+                return blocked('None of those tasks are waiting for your review.');
+            }
+            const note = clean(draft.note, 300);
+            const preview = waiting.slice(0, 3).map((task) => `"${clean(task.text, 40)}" (${clean(task.ownerName || 'a teammate', 30)})`).join(', ') + (waiting.length > 3 ? ` and ${waiting.length - 3} more` : '');
+            return {
+                allowed: true,
+                text: decision === 'approve'
+                    ? `Approve ${preview}. It will be finished for them.`
+                    : `Send ${preview} back${note ? ` with the note "${note}"` : ''}.`
+            };
         }
 
         if (action === 'assign') {
@@ -271,8 +367,9 @@ const DustyActions = (() => {
             if (others.length === 0) {
                 return { allowed: true, text: `Add "${text}" to your own list${withSteps}.` };
             }
+            const approval = draft.needsApproval === true ? ' Each person has to send it to you for approval before it counts as done.' : '';
             return ctx.access.canAssign
-                ? { allowed: true, text: `Give "${text}" to ${who}${withSteps}. It is one shared task: ${includesMe ? 'you and ' : ''}everyone named gets the same copy, and they can decline theirs for a few minutes.` }
+                ? { allowed: true, text: `Give "${text}" to ${who}${withSteps}. It is one shared task: ${includesMe ? 'you and ' : ''}everyone named gets the same copy, and they can decline theirs for a few minutes.${approval}` }
                 : { allowed: true, text: `Suggest "${text}" to ${others.map((person) => person.name).join(', ')}${includesMe ? ', and add it to your own list' : ''}${withSteps}. You can't assign directly in this group, so each person gets to accept it.` };
         }
 
@@ -425,9 +522,52 @@ const DustyActions = (() => {
                 recurrence: draft.recurrence,
                 taskType,
                 estimateMinutes: taskType === 'timeboxed' ? parseDurationMinutes(draft.estimateMinutes) : null,
-                subtasks
+                subtasks,
+                // Only counts for a real assignment (group.js/assign.js ignore it for suggestions and your own copy).
+                needsApproval: draft.needsApproval === true
             });
             return { applied: true };
+        }
+
+        if (action === 'setDependency') {
+            const { group } = groupContext();
+            const plan = dependencyPlan(draft);
+            if (plan.error) {
+                return { applied: false, reason: plan.error };
+            }
+            await GroupWorkflow.setDependencies(group.id, plan.task, plan.deps.map((dep) => dep.id));
+            return { applied: true };
+        }
+
+        if (action === 'setStatus' || action === 'reviewTask') {
+            const { group, uid } = groupContext();
+            let failures = 0;
+            if (action === 'setStatus') {
+                const status = draft.status === 'todo' ? null : draft.status;
+                let targets = myTasksByIds(draft.taskIds).filter((task) => !task.completed);
+                if (status === 'review') {
+                    targets = targets.filter((task) => task.needsApproval === true && task.status !== 'approved');
+                }
+                for (const task of targets) {
+                    try {
+                        await GroupWorkflow.setStatus(group.id, task, status, { reason: clean(draft.statusReason, 200) });
+                    } catch (error) {
+                        console.error('Dusty could not set a status:', error);
+                        failures += 1;
+                    }
+                }
+                return failures === 0 ? { applied: true } : { applied: false, reason: `${failures} of ${targets.length} could not be updated.` };
+            }
+            const waiting = reviewableTasks(draft.taskIds, uid);
+            for (const task of waiting) {
+                try {
+                    await GroupWorkflow.reviewTask(group.id, task, draft.decision === 'approve' ? 'approved' : 'inprogress', clean(draft.note, 300));
+                } catch (error) {
+                    console.error('Dusty could not answer a review:', error);
+                    failures += 1;
+                }
+            }
+            return failures === 0 ? { applied: true } : { applied: false, reason: `${failures} of ${waiting.length} could not be updated.` };
         }
 
         // roles / access: work on a copy of the live group, written once afterwards

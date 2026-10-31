@@ -189,10 +189,18 @@ Action kinds (set "action" to exactly one of the allowed kinds, fill in only the
 - fileTasks: folder (an existing folder, or one you are creating in this same reply) and taskIds (the EXACT ids from the user's OWN task list below; never a teammate's task and never an invented id).
 - assign (groups only): a NEW task given to one or more people. It takes EVERYTHING a normal task takes, and every person named gets the same full task: text, matrix, taskType, difficulty, estimateMinutes, dueAt, scheduledAt, recurrence, and subtasks (the steps). assignTo is a LIST of names, each one an exact member name from the roster, an exact role name, the word everyone, or the word me for the user themselves. It cannot hand over a task that already exists; if asked to, say so.
 SHARING A TASK: when the user wants the SAME task for themselves and other people ("me and Philip should both have this", "give it to everyone including me"), send exactly ONE assign action with assignTo ["me", "Philip"] and put ALL the steps and details on it. Do NOT also put that task in "tasks", and do NOT send a separate action per person: separate copies are not linked, and a copy without its steps is useless. If the task is only for the user, it is just a normal "tasks" item, not an assign action.
+  Optional on assign: needsApproval = true ONLY when the user says the person has to get it approved before it counts as done ("needs my sign-off", "I want to approve it", "have them send it to me for review"). Otherwise leave it null. Never turn it on by yourself.
+- setStatus (groups only): update the user's OWN tasks. taskIds (exact ids of the user's own tasks, marked "yours" below), status (todo, inprogress, blocked or review) and, for blocked ONLY, statusReason (what is blocking it, in the user's words; if they did not say, ask instead of inventing one). review ONLY works for a task marked "needs approval"; for any other task say it simply gets finished, nothing to approve. todo means not started.
+- setDependency (groups only): make one of the user's OWN tasks wait for other open tasks in the open group ("do the invoice after the contract is signed"). taskIds (exactly one id, marked "yours"), dependsOnIds (the exact ids of the tasks it must wait for, at most 5, taken from the open group's list below; an empty list clears what it waits for). Nothing is locked: the card just shows what it is waiting for and the owner is told when those are done. Never invent an id, and never use a task from another group.
+- reviewTask (groups only): answer a task that is marked "WAITING FOR THIS USER'S REVIEW" below. taskIds (exact ids of those tasks), decision (approve or sendBack) and an optional note (why, for sendBack). Never for any other task, and never for the user's own tasks.
 - createRole (groups only): roleName.
 - setRole (groups only): memberName (exact), roleName (exact, or none to remove their role).
 - grantAccess (groups only): memberName (exact), assignRights (all, role, or none) and folderRights (true or false). This decides who may assign tasks or manage folders.
-When one request needs two steps (a new folder, then putting tasks in it), send both actions in the same reply, with createFolder first.`;
+When one request needs two steps (a new folder, then putting tasks in it), send both actions in the same reply, with createFolder first.
+
+TASK STATUS AND WHAT IS DUE (applies to answers too): each task below may show a status. "blocked" (with its reason) and "in review" tasks are waiting on someone, so do not suggest working on them and do not count them as the user's to-do for today; mention them separately when it helps ("2 are blocked, 1 is waiting for review"). When the user asks what to do today, how their day or week looks, or what is stuck, answer from this list in "reply" in a few plain sentences: overdue first, then due today, then the rest; blocked, in-review and "waiting on:" tasks last (a task that shows "waiting on:" is waiting for those other tasks to be finished first, treat it like a blocked one); name the first thing to start with. Propose no tasks for that.
+
+MENTIONS: in a teammateComments item you can get a person's attention by writing @ followed by their exact name from the roster inside the comment text (for example "@Philip can you check the totals?"). Only do that when the user asked you to ask or tell that person something. Use the full name if two people share a first name.`;
 
 // Google's free-tier Gemini quotas are documented as resetting around
 // midnight Pacific time (not published as an exact guaranteed instant, so
@@ -552,6 +560,17 @@ function describeContextTask(task, includeId) {
     }
     if (task.difficulty) parts.push(`difficulty=${task.difficulty}`);
     if (task.owner) parts.push(`assigned to ${oneLine(task.owner, 80)}`);
+    // Group workflow (client: brainDumpSummarizeTask). "yours" lets the model target the user's
+    // OWN tasks; the rest is state it must respect. All of it is data, never instructions.
+    if (task.mine === true) parts.push('yours');
+    if (['inprogress', 'blocked', 'review', 'approved'].includes(task.status)) {
+        parts.push(`status=${task.status}${task.status === 'blocked' && task.blockedReason ? ` (reason: ${oneLine(task.blockedReason, 120)})` : ''}`);
+    }
+    if (task.needsApproval === true) parts.push('needs approval');
+    if (Array.isArray(task.waitingOn) && task.waitingOn.length > 0) {
+        parts.push(`waiting on: ${task.waitingOn.slice(0, 5).map((title) => oneLine(title, 80)).join(' | ')}`);
+    }
+    if (task.awaitingMyReview === true) parts.push("WAITING FOR THIS USER'S REVIEW");
     // Needed for the EDITING EXISTING TASKS "subtasks" capability - the
     // model can't sensibly rewrite a step list (carrying forward whatever
     // it has no reason to change, including each step's own dueAt if it
@@ -614,6 +633,10 @@ function buildCapabilitiesBlock(taskContext) {
             lines.push('- Assign tasks directly to other people: NO. They can only SUGGEST (use teammateSuggestions); the person has to accept.');
         }
         lines.push(`- Change roles or who has what access: ${caps.canManageRoles ? 'yes (they are an owner/admin)' : 'NO (only the group owner or an admin)'}.`);
+        lines.push('- Set the status (in progress, blocked, ready for review) of their OWN tasks, and make their own tasks wait for other open tasks (setDependency): yes. Approve or send back a task: only one marked WAITING FOR THIS USER\'S REVIEW.');
+        lines.push(caps.canAssign
+            ? '- Ask that an assigned task needs their approval before it is done (needsApproval on assign): yes.'
+            : '- needsApproval only applies when assigning directly, which they cannot do here.');
         const members = (Array.isArray(caps.members) ? caps.members : []).slice(0, 50)
             .map((member) => `${oneLine(member && member.name, 40)}${member && member.role ? ` (${oneLine(member.role, 30)})` : ''}`)
             .filter((entry) => entry.trim());
@@ -952,7 +975,7 @@ function buildGeminiRequest(body) {
                 action: {
                     type: 'STRING',
                     enum: includeTeammateFeatures
-                        ? ['createFolder', 'fileTasks', 'assign', 'createRole', 'setRole', 'grantAccess']
+                        ? ['createFolder', 'fileTasks', 'assign', 'setStatus', 'setDependency', 'reviewTask', 'createRole', 'setRole', 'grantAccess']
                         : ['createFolder', 'fileTasks']
                 },
                 folder: { type: 'STRING', nullable: true },
@@ -970,7 +993,13 @@ function buildGeminiRequest(body) {
                 roleName: { type: 'STRING', nullable: true },
                 memberName: { type: 'STRING', nullable: true },
                 assignRights: { type: 'STRING', enum: ['all', 'role', 'none'], nullable: true },
-                folderRights: { type: 'BOOLEAN', nullable: true }
+                folderRights: { type: 'BOOLEAN', nullable: true },
+                needsApproval: { type: 'BOOLEAN', nullable: true },
+                dependsOnIds: { type: 'ARRAY', items: { type: 'STRING' }, nullable: true },
+                status: { type: 'STRING', enum: ['todo', 'inprogress', 'blocked', 'review'], nullable: true },
+                statusReason: { type: 'STRING', nullable: true },
+                decision: { type: 'STRING', enum: ['approve', 'sendBack'], nullable: true },
+                note: { type: 'STRING', nullable: true }
             },
             required: ['action']
         }

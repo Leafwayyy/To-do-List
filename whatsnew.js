@@ -26,6 +26,135 @@
 
 const WHATS_NEW_RELEASES = [
     {
+        id: '2026-11-03',
+        date: 'November 3, 2026',
+        title: 'Tasks that wait for other tasks, and verified email',
+        intro: 'Two things teams kept running into: work that can\'t start until somebody else finishes something, and email notifications that only reach people whose address has been confirmed.',
+        sections: [
+            {
+                icon: 'fa-link',
+                heading: 'Waits for...',
+                paragraphs: [
+                    'In a group, any task you own now has a "Waits for..." button. Pick up to five other open tasks, yours or a teammate\'s, that need to be finished first. The card shows what it\'s waiting for and looks a little dimmer, and Today stops telling you to start it.',
+                    'Nothing is locked. You can still finish it if you really need to, you\'ll just be asked to confirm. When the last task it was waiting for gets finished, you get a notification that it\'s free to start.'
+                ],
+                points: [
+                    'We stop you creating a loop, like two tasks waiting for each other.',
+                    'If a task it waited for is deleted or finished, the wait just ends.',
+                    'Ask Dusty: "make the invoice wait for the contract".'
+                ]
+            },
+            {
+                icon: 'fa-envelope-circle-check',
+                heading: 'Verify your email',
+                paragraphs: [
+                    'If you signed up with an email and a password, Firebase now sends you a link to confirm your address, and Settings has a button to resend it. We only email notification summaries to confirmed addresses, so nobody can sign up with someone else\'s address and have us email them. Signing in with Google counts as confirmed already.'
+                ]
+            }
+        ],
+        tip: 'Try it: open a group, click "Waits for..." on one of your tasks, then finish the task it waits for from another account.',
+        signoff: 'Email itself switches on once the sending address is set up.'
+    },
+    {
+        id: '2026-11-02',
+        date: 'November 2, 2026',
+        title: 'Dusty now speaks team workflow',
+        intro: 'Dusty already knew your tasks, folders and groups. Now he understands how a team actually works day to day: what\'s blocked, what\'s waiting for a sign-off, and what you should be doing right now. As always, he only proposes. Nothing happens until you tick it.',
+        sections: [
+            {
+                icon: 'fa-comments',
+                heading: 'Ask about your day',
+                paragraphs: [
+                    'Ask "what should I do today?" or "what\'s stuck?" and Dusty answers from your real list: overdue first, then what\'s due today, with blocked and in-review tasks kept apart, because there\'s nothing you can do about those yet.'
+                ]
+            },
+            {
+                icon: 'fa-list-check',
+                heading: 'Status and approval by chat',
+                paragraphs: [
+                    'In a group, you can tell Dusty what is going on and he will draft the update for you to confirm.'
+                ],
+                points: [
+                    '"Mark the invoice as blocked, we\'re waiting on the client\'s logo." He asks for a reason if you don\'t give one.',
+                    '"Send the report for review." Only works if whoever assigned it asked to approve it.',
+                    '"Approve Sam\'s report" or "send it back, the totals are off." Only for tasks that are waiting for you.',
+                    '"Give this to Lee, and I want to approve it before it counts."'
+                ]
+            },
+            {
+                icon: 'fa-at',
+                heading: 'Get someone\'s attention',
+                paragraphs: [
+                    'Ask Dusty to comment on a teammate\'s task and to ask them something, and he can @mention them so it lands in their bell.'
+                ]
+            },
+            {
+                icon: 'fa-lock',
+                heading: 'Still limited to what you can do',
+                paragraphs: [
+                    'Dusty is only told what your role lets you do. He can only mark your own tasks, only answer reviews that are yours, and only ask for approval when you can assign directly. The app checks again when you confirm, and the database checks a third time.'
+                ]
+            }
+        ],
+        tip: 'Try it: open Dusty in a group and say "what is blocked right now?"',
+        signoff: 'The more you tell Dusty how your team works, the better his suggestions get.'
+    },
+    {
+        id: '2026-11-01',
+        date: 'November 1, 2026',
+        title: 'Notifications, a Today view, and a smoother team workflow',
+        intro: 'We looked at what a small team actually needs from a to-do list: knowing what to do today, knowing when something is stuck, and finding out when something concerns you without having to keep checking. This update is built around those three things.',
+        sections: [
+            {
+                icon: 'fa-bell',
+                heading: 'A notification bell, always there',
+                paragraphs: [
+                    'The bell in the corner of every page, personal and group, shows what has happened for you, with a dot on anything new and a count on the bell itself. It isn\'t just a flash when something arrives any more.',
+                    'Desktop alerts are now on by default. We ask once, with a button, because your browser requires you to click Allow yourself, and you can turn them off any time in Settings.'
+                ],
+                points: [
+                    'A task is assigned or suggested to you, or someone declines one you assigned.',
+                    'Someone comments on your task or @mentions you.',
+                    'A task is sent for your review, approved or sent back.',
+                    'Tasks that are due soon or overdue sit at the top under "Needs your attention".',
+                    'Filter by All, Tasks, Comments or Reminders. Old notifications clear themselves after 30 days.'
+                ]
+            },
+            {
+                icon: 'fa-sun',
+                heading: 'Today: what should I do now?',
+                paragraphs: [
+                    'At the top of your task page, personal and group, there is now a short briefing in plain words: how much is overdue or due today, roughly how long it will take, and the few things to start with, in order. Click one to jump to it.',
+                    'It refreshes by itself, so a tab left open all day rolls over to the new day. Fold it away if you don\'t want it, and it will stay folded.'
+                ]
+            },
+            {
+                icon: 'fa-list-check',
+                heading: 'Status and sign-off in groups',
+                paragraphs: [
+                    'A task can now be more than done or not done. Mark it In progress, or Blocked with a short reason, and the person who assigned it, plus the group\'s owner and admins, are told straight away.',
+                    'Approval is optional and up to whoever assigns the task. Tick "Needs my approval before it\'s done" when you assign it, and checking it off sends it to you for review instead. You approve it or send it back with a note. Tasks without that tick are simply done when they\'re done.'
+                ]
+            },
+            {
+                icon: 'fa-at',
+                heading: 'Mention people in comments',
+                paragraphs: [
+                    'Type @ in a comment and pick someone from the list. They get a notification that goes straight to the task. If two people share a first name, use the full name so we don\'t guess wrong.'
+                ]
+            },
+            {
+                icon: 'fa-chart-line',
+                heading: 'A weekly team report',
+                paragraphs: [
+                    'Group owners and admins get a report in the Team tab: what the team finished compared with the week before, what is overdue, blocked or waiting for review, and how loaded each person is. A note lands in your bell once a week, and "Copy as text" lets you paste it into a chat or an email.'
+                ]
+            }
+        ],
+        tip: 'Try it: open a group, mark one of your assigned tasks as Blocked, then check the bell on the account that assigned it.',
+        signoff: 'Email notifications are next, once the app has an address to send them from.'
+    },
+    {
         id: '2026-10-31b',
         date: 'October 31, 2026',
         title: 'A tidier folder bar, and sections you can fold',

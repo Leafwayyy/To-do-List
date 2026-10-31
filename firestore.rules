@@ -82,7 +82,25 @@ service cloud.firestore {
       && data.assignedAt == request.time
       && (!('assignedByName' in data) || (data.assignedByName is string && data.assignedByName.size() <= 80))
       && !('handoffRequest' in data)
+      && (!('needsApproval' in data) || data.needsApproval == true)
       && (!('completed' in data) || data.completed == false);
+  }
+  // Task status (group/workflow.js). The task's OWNER may set it to in progress / blocked /
+  // in review (or clear it), but never to 'approved': that value can only be written by the
+  // person who assigned the task (branch below), so nobody can approve their own work. A value
+  // already on the task (e.g. 'approved', carried through the owner's own completion write)
+  // may stay as it is. In review is only possible on a task whose assigner asked for approval
+  // (needsApproval, set when it was assigned). Reasons and notes are size-capped.
+  function statusFieldsOk(oldData, newData) {
+    return (!('status' in newData) || newData.status == null
+        || newData.status in ['inprogress', 'blocked', 'review']
+        || (('status' in oldData) && newData.status == oldData.status))
+      && (!('status' in newData) || newData.status != 'review'
+        || (('needsApproval' in oldData) && oldData.needsApproval == true))
+      && (!('blockedReason' in newData) || newData.blockedReason == null
+        || (newData.blockedReason is string && newData.blockedReason.size() <= 200))
+      && (!('reviewNote' in newData) || newData.reviewNote == null
+        || (newData.reviewNote is string && newData.reviewNote.size() <= 300));
   }
   function canManageFolders(groupData) {
     return isOwnerOrAdmin(groupData)
@@ -108,6 +126,16 @@ service cloud.firestore {
   function isPendingJoinRequest(db, groupId, uid) {
     return exists(/databases/$(db)/documents/groups/$(groupId)/joinRequests/$(uid))
       && get(/databases/$(db)/documents/groups/$(groupId)/joinRequests/$(uid)).data.status == 'pending';
+  }
+
+  // Notifications (notifications.js): a person may drop one into a TEAMMATE's inbox only when
+  // they really share a group (that group's member list must contain both of them), and a
+  // notification to yourself needs no group. One get() per notification.
+  function sharesGroupWith(db, groupId, otherUid) {
+    return groupId is string
+      && exists(/databases/$(db)/documents/groups/$(groupId))
+      && request.auth.uid in get(/databases/$(db)/documents/groups/$(groupId)).data.memberIds
+      && otherUid in get(/databases/$(db)/documents/groups/$(groupId)).data.memberIds;
   }
 
   match /databases/{database}/documents {
@@ -190,6 +218,42 @@ service cloud.firestore {
         && request.resource.data.taskText is string
         && request.resource.data.taskText.size() > 0
         && request.resource.data.taskText.size() <= 2000;
+    }
+
+    // Notification center inbox. Only the owner can read, mark read (readAt is the ONLY field
+    // an update may touch) or delete. Anyone else may only CREATE one, as themselves (actorId
+    // is checked against the real signed-in user, createdAt must be the server's clock) and
+    // only into the inbox of someone they share a group with. Fixed key set and size caps so
+    // a notification can't be used to stash arbitrary data in someone else's account.
+    match /users/{uid}/notifications/{notifId} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt'])
+        && request.resource.data.readAt is timestamp;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['type', 'title', 'body', 'detail', 'actorId', 'actorName', 'groupId', 'groupName', 'taskId', 'createdAt', 'readAt'])
+        && request.resource.data.keys().hasAll(['type', 'title', 'actorId', 'actorName', 'createdAt'])
+        && request.resource.data.type in ['assigned', 'declined', 'suggestion', 'review', 'status', 'comment', 'mention', 'report', 'info']
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 140
+        && (!('body' in request.resource.data) || (request.resource.data.body is string && request.resource.data.body.size() <= 400))
+        && (!('detail' in request.resource.data) || (request.resource.data.detail is string && request.resource.data.detail.size() <= 1500))
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.actorName is string
+        && request.resource.data.actorName.size() <= 80
+        && (!('groupName' in request.resource.data) || (request.resource.data.groupName is string && request.resource.data.groupName.size() <= 80))
+        && (!('taskId' in request.resource.data) || (request.resource.data.taskId is string && request.resource.data.taskId.size() <= 100))
+        && request.resource.data.createdAt == request.time
+        && (!('readAt' in request.resource.data) || request.resource.data.readAt == null)
+        && (uid == request.auth.uid
+          // To a teammate: only the ordinary kinds, never a "report" or the long email-only
+          // `detail` text (those are notes you leave for yourself). Otherwise any group member
+          // could put their own words into an email that looks like it came from the app.
+          || (('groupId' in request.resource.data) && request.resource.data.groupId.size() <= 100
+            && request.resource.data.type != 'report'
+            && !('detail' in request.resource.data)
+            && sharesGroupWith(database, request.resource.data.groupId, uid)));
     }
 
     // Feedback / bug reports, submitted from Settings -> Feedback. A
@@ -625,6 +689,7 @@ service cloud.firestore {
               && !('assignedBy' in request.resource.data)
               && !('assignedByName' in request.resource.data)
               && !('assignedAt' in request.resource.data)
+              && !('needsApproval' in request.resource.data)
               // Only someone who may assign can attach their own task to a shared
               // card; otherwise any member could slip a task into someone else's
               // card and inflate its "done" count. Lookups: this + the membership
@@ -648,6 +713,8 @@ service cloud.firestore {
           && (!('subtasks' in request.resource.data) || (request.resource.data.subtasks is list && request.resource.data.subtasks.size() <= 200))
           && (!('commentCount' in request.resource.data) || request.resource.data.commentCount is int)
           && (!('folderId' in request.resource.data) || (request.resource.data.folderId is string && request.resource.data.folderId.size() <= 40))
+          && (!('status' in request.resource.data) || request.resource.data.status == null)
+          && (!('dependsOn' in request.resource.data) || (request.resource.data.dependsOn is list && request.resource.data.dependsOn.size() <= 5))
           && (!('ownerName' in request.resource.data) || (request.resource.data.ownerName is string && request.resource.data.ownerName.size() <= 80));
         // The task's own owner can change anything about it (subject to the
         // same size caps). Any other group member may ONLY bump the two
@@ -705,6 +772,15 @@ service cloud.firestore {
               && fieldUnchanged(resource.data, request.resource.data, 'assignedAt')
               && fieldUnchanged(resource.data, request.resource.data, 'sharedId')
               && fieldUnchanged(resource.data, request.resource.data, 'sharedBy')
+              && fieldUnchanged(resource.data, request.resource.data, 'needsApproval')
+              // A task its assigner asked to approve can't be marked done until it has been
+              // approved (checking it off sends it for review instead).
+              && !(
+                ('needsApproval' in resource.data) && resource.data.needsApproval == true
+                && ('completed' in request.resource.data) && request.resource.data.completed == true
+                && !(('completed' in resource.data) && resource.data.completed == true)
+                && !(('status' in resource.data) && resource.data.status == 'approved')
+              )
               && request.resource.data.text is string
               && request.resource.data.text.size() > 0
               && request.resource.data.text.size() <= 2000
@@ -714,6 +790,9 @@ service cloud.firestore {
               // other-member branches below already require an int.
               && (!('commentCount' in request.resource.data) || request.resource.data.commentCount is int)
               && (!('folderId' in request.resource.data) || (request.resource.data.folderId is string && request.resource.data.folderId.size() <= 40))
+              && statusFieldsOk(resource.data, request.resource.data)
+              // What this task waits for: a short list of other tasks' ids (checked again when shown).
+              && (!('dependsOn' in request.resource.data) || (request.resource.data.dependsOn is list && request.resource.data.dependsOn.size() <= 5))
               // The owner may set handoffRequest to null (no request / just
               // cancelled one) or to a well-formed request naming a real
               // teammate other than themself - never anyone else's field.
@@ -822,6 +901,22 @@ service cloud.firestore {
               && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
               && request.resource.data.handoffRequest == null
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['handoffRequest'])
+            )
+            || (
+              // Review: ONLY the person who assigned the task (never its owner), while still a
+              // member, and ONLY while the task sits in review. They may approve it or send it
+              // back, touching nothing but the review fields.
+              ('assignedBy' in resource.data)
+              && resource.data.assignedBy == request.auth.uid
+              && request.auth.uid != resource.data.ownerId
+              && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+              && ('status' in resource.data)
+              && resource.data.status == 'review'
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['status', 'reviewNote', 'reviewedAt', 'statusUpdatedAt', 'updatedAt'])
+              && request.resource.data.status in ['approved', 'inprogress']
+              && (!('reviewNote' in request.resource.data) || request.resource.data.reviewNote == null
+                || (request.resource.data.reviewNote is string && request.resource.data.reviewNote.size() <= 300))
             )
           );
         // Membership required too (security review fix), same reasoning as

@@ -34,6 +34,8 @@
     let emailText = null;
     let saveNameStatus = null;
     let muteToggle = null;
+    let emailToggle = null;
+    let emailStatus = null;
     let exportStatus = null;
     let deleteBtn = null;
     let deleteStatus = null;
@@ -506,6 +508,27 @@
 
                 <section class="settingsSection settingsAlertsSection hidden"></section>
 
+                <section class="settingsSection settingsEmailSection">
+                    <h3>Email</h3>
+                    <label class="settingsToggleRow" for="settingsEmailToggle">
+                        <span class="toggleSwitch">
+                            <input type="checkbox" id="settingsEmailToggle" class="settingsEmailToggle" checked>
+                            <span class="toggleSwitchTrack"><span class="toggleSwitchThumb"></span></span>
+                        </span>
+                        <span>Email me about new notifications</span>
+                    </label>
+                    <p class="settingsHint">Only for things you haven't looked at after a few minutes: tasks assigned to you, reviews, @mentions, blocked tasks, and the weekly report for owners and admins.</p>
+                    <div class="settingsVerifyRow hidden">
+                        <p class="settingsHint">Your email address isn't verified yet, so we can't email you notifications. We can send you a link to verify it.</p>
+                        <div class="settingsInlineRow">
+                            <button type="button" class="settingsVerifySendBtn">Send verification email</button>
+                            <button type="button" class="settingsVerifyCheckBtn">I've verified it</button>
+                        </div>
+                    </div>
+                    <button type="button" class="settingsEmailTestBtn">Send me a test email</button>
+                    <p class="settingsEmailStatus settingsHint" aria-live="polite"></p>
+                </section>
+
                 <section class="settingsSection">
                     <h3>Your data</h3>
                     <p class="settingsHint">Download everything you've added as a JSON file.</p>
@@ -569,6 +592,12 @@
         nameInput = node.querySelector('.settingsNameInput');
         saveNameStatus = node.querySelector('.settingsSaveNameStatus');
         muteToggle = node.querySelector('.settingsMuteToggle');
+        emailToggle = node.querySelector('.settingsEmailToggle');
+        emailStatus = node.querySelector('.settingsEmailStatus');
+        emailToggle.addEventListener('change', saveEmailPreference);
+        node.querySelector('.settingsVerifySendBtn').addEventListener('click', sendVerificationLink);
+        node.querySelector('.settingsVerifyCheckBtn').addEventListener('click', checkVerified);
+        node.querySelector('.settingsEmailTestBtn').addEventListener('click', sendTestEmail);
         exportStatus = node.querySelector('.settingsExportStatus');
         deleteBtn = node.querySelector('.settingsDeleteBtn');
         deleteStatus = node.querySelector('.settingsDeleteStatus');
@@ -1176,6 +1205,95 @@
         }
     }
 
+    // The email worker (worker/email-worker.js) is set up separately; until its address is
+    // filled in here the test button just says email isn't switched on yet.
+    const EMAIL_WORKER_URL = '';
+
+    // Only email-and-password accounts can be unverified (Google sign-in always is verified).
+    function needsVerification() {
+        return Boolean(currentUser && currentUser.email && !currentUser.emailVerified
+            && (currentUser.providerData || []).some((provider) => provider.providerId === 'password'));
+    }
+
+    function refreshVerifyRow() {
+        const row = overlay && overlay.querySelector('.settingsVerifyRow');
+        if (row) {
+            row.classList.toggle('hidden', !needsVerification());
+        }
+    }
+
+    async function sendVerificationLink() {
+        emailStatus.textContent = 'Sending...';
+        try {
+            await window.ToDoAuth.sendVerificationEmail();
+            emailStatus.textContent = `We sent a link to ${currentUser.email}. Open it, then press "I've verified it". Check spam too.`;
+        } catch (error) {
+            console.error('Could not send the verification email:', error);
+            emailStatus.textContent = error && error.code === 'auth/too-many-requests'
+                ? 'Too many tries. Please wait a few minutes and try again.'
+                : 'Could not send that. Check your connection and try again.';
+        }
+    }
+
+    async function checkVerified() {
+        emailStatus.textContent = 'Checking...';
+        try {
+            const user = await window.ToDoAuth.reloadCurrentUser();
+            if (user.emailVerified) {
+                emailStatus.textContent = 'Verified. You can now get email notifications.';
+                refreshVerifyRow();
+            } else {
+                emailStatus.textContent = 'Not verified yet. Open the link in the email we sent, then press this again.';
+            }
+        } catch (error) {
+            console.error('Could not check verification:', error);
+            emailStatus.textContent = 'Could not check. Try again in a moment.';
+        }
+    }
+
+    function saveEmailPreference() {
+        if (!currentUser) {
+            return;
+        }
+        const { doc, setDoc } = window.ToDoAuth.firestore;
+        const wanted = emailToggle.checked;
+        emailStatus.textContent = '';
+        setDoc(doc(window.ToDoAuth.db, 'users', currentUser.uid), { emailNotifications: wanted }, { merge: true })
+            .then(() => {
+                emailStatus.textContent = wanted ? 'Email notifications are on.' : 'Email notifications are off.';
+            })
+            .catch((error) => {
+                console.error('Could not save the email setting:', error);
+                emailToggle.checked = !wanted;
+                emailStatus.textContent = 'Could not save that. Check your connection and try again.';
+            });
+    }
+
+    async function sendTestEmail() {
+        if (!currentUser) {
+            return;
+        }
+        if (!EMAIL_WORKER_URL) {
+            emailStatus.textContent = 'Email isn\'t switched on for this app yet.';
+            return;
+        }
+        emailStatus.textContent = 'Sending...';
+        try {
+            const idToken = await currentUser.getIdToken();
+            const response = await fetch(EMAIL_WORKER_URL.replace(/\/+$/, '') + '/test', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${idToken}` }
+            });
+            const data = await response.json().catch(() => ({}));
+            emailStatus.textContent = response.ok
+                ? `Sent. Check ${currentUser.email || 'your inbox'} (and spam).`
+                : (data.message || 'The test email could not be sent.');
+        } catch (error) {
+            console.error('Test email failed:', error);
+            emailStatus.textContent = 'Could not reach the email service. Try again in a moment.';
+        }
+    }
+
     function refreshAccountFields() {
         if (!currentUser) {
             return;
@@ -1189,10 +1307,13 @@
             muteToggle.checked = false;
         }
 
+        refreshVerifyRow();
         const { doc, getDoc } = window.ToDoAuth.firestore;
         getDoc(doc(window.ToDoAuth.db, 'users', currentUser.uid)).then((snapshot) => {
             const data = snapshot.exists() ? snapshot.data() : null;
             nameInput.value = (data && data.displayName) || currentUser.displayName || '';
+            // On unless the person turned it off.
+            emailToggle.checked = !(data && data.emailNotifications === false);
         }).catch((error) => {
             console.error('Failed to load profile name:', error);
             // Fall back to the Auth profile's own name rather than leaving
@@ -1612,6 +1733,10 @@
 
             const historySnapshotSolo = await getDocs(collection(db, 'users', uid, 'history'));
             await Promise.all(historySnapshotSolo.docs.map((entryDoc) => deleteDoc(entryDoc.ref)));
+
+            // The notification center inbox (notifications.js) is the same kind of subcollection.
+            const notificationsSnapshot = await getDocs(collection(db, 'users', uid, 'notifications'));
+            await Promise.all(notificationsSnapshot.docs.map((noteDoc) => deleteDoc(noteDoc.ref)));
 
             const publicSnapshot = await getDocs(collection(db, 'users', uid, 'public'));
             await Promise.all(publicSnapshot.docs.map((publicDoc) => deleteDoc(publicDoc.ref)));

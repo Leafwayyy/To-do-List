@@ -14,6 +14,7 @@ import {
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
     sendPasswordResetEmail,
+    sendEmailVerification,
     signOut,   
     deleteUser,
     onAuthStateChanged
@@ -166,7 +167,22 @@ window.ToDoAuth = {
         collection, query, where, orderBy, limit, onSnapshot, writeBatch, runTransaction, serverTimestamp, increment
     },
     signInWithGoogle: () => signInWithPopup(auth, googleProvider),
-    signUpWithEmail: (email, password) => createUserWithEmailAndPassword(auth, email, password),
+    // A new email-and-password account is sent Firebase's own "verify your email" message right
+    // away (best effort - signing up never fails because of it). Email notifications only go to
+    // verified addresses, so this is what lets those accounts receive them.
+    signUpWithEmail: async (email, password) => {
+        const credential = await createUserWithEmailAndPassword(auth, email, password);
+        sendEmailVerification(credential.user).catch((error) => console.warn('Could not send the verification email:', error));
+        return credential;
+    },
+    sendVerificationEmail: () => sendEmailVerification(auth.currentUser),
+    // Picks up "I clicked the link" without signing out and in again, and refreshes the token so
+    // the email worker's own check sees the verified address too.
+    reloadCurrentUser: async () => {
+        await auth.currentUser.reload();
+        await auth.currentUser.getIdToken(true);
+        return auth.currentUser;
+    },
     signInWithEmail: (email, password) => signInWithEmailAndPassword(auth, email, password),
     sendPasswordReset: (email) => sendPasswordResetEmail(auth, email),
     signOutUser: () => signOut(auth),

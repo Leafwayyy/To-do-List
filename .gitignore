@@ -17,3 +17,9 @@ worker/.dev.vars.*
 serviceAccountKey*.json
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
+
+# A downloaded Google service-account key (used by the email worker) must NEVER be committed.
+todo-list-*.json
+*-firebase-adminsdk-*.json
+*service-account*.json
+worker/.dev.vars

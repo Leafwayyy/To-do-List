@@ -125,8 +125,20 @@ function brainDumpToDatetimeLocalValue(date) {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function brainDumpSummarizeTask(task) {
+function brainDumpSummarizeTask(task, userId, openById) {
     return {
+        // Group tasks only: the (open) tasks this one is waiting for, by title.
+        waitingOn: Array.isArray(task.dependsOn) && openById
+            ? task.dependsOn.filter((id) => typeof id === 'string').slice(0, 5).map((id) => openById.get(id)).filter(Boolean).map((dep) => String(dep.text || '').slice(0, 80))
+            : [],
+        // Group tasks only: is it the signed-in user's own, and where is it in the workflow
+        // (blocked / in review / needs approval), so Dusty can answer "what's stuck?" and act
+        // on the user's own tasks and on reviews waiting for them. Solo tasks have none of this.
+        mine: Boolean(userId) && task.ownerId === userId,
+        status: typeof task.status === 'string' ? task.status : null,
+        blockedReason: typeof task.blockedReason === 'string' ? task.blockedReason.slice(0, 200) : null,
+        needsApproval: task.needsApproval === true,
+        awaitingMyReview: Boolean(userId) && task.status === 'review' && task.assignedBy === userId && task.ownerId !== userId,
         id: task.id, // needed so Dusty can target an exact task when commenting on a teammate's
         text: task.text,
         completed: Boolean(task.completed),
@@ -338,7 +350,7 @@ async function gatherTaskContext(user, currentGroupId) {
             .filter((task) => !task.completed)
             .slice(0, BRAIN_DUMP_MAX_CONTEXT_TASKS);
         soloSignals = computeSoloPlanningSignals(rawSoloTasks);
-        soloTasks = rawSoloTasks.map(brainDumpSummarizeTask);
+        soloTasks = rawSoloTasks.map((task) => brainDumpSummarizeTask(task, null));
     } catch (error) {
         console.error('Brain Dump: failed to load solo tasks for context:', error);
     }
@@ -372,7 +384,8 @@ async function gatherTaskContext(user, currentGroupId) {
                 if (currentGroupId && group.id === currentGroupId) {
                     groupSignals = computeGroupPlanningSignals(rawGroupTasks);
                 }
-                const groupTasks = rawGroupTasks.map(brainDumpSummarizeTask);
+                const openById = new Map(rawGroupTasks.map((task) => [task.id, task]));
+                const groupTasks = rawGroupTasks.map((task) => brainDumpSummarizeTask(task, user.uid, openById));
                 return { id: group.id, name: group.name, memberNames: group.memberNames, tasks: groupTasks };
             } catch (error) {
                 console.error(`Brain Dump: failed to load tasks for group ${group.id}:`, error);
@@ -2049,7 +2062,8 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         // Changing who can do what is the one kind that starts UNTICKED: if anything Dusty read
         // ever steered it into proposing one, a quick "Do checked" must not be enough, the user
         // has to tick it on purpose.
-        const changesPermissions = ['grantAccess', 'setRole', 'createRole'].includes(draft && draft.action);
+        // (Approving someone's task finishes it for them, so it starts unticked too.)
+        const changesPermissions = ['grantAccess', 'setRole', 'createRole', 'reviewTask'].includes(draft && draft.action);
         checkbox.checked = verdict.allowed && !changesPermissions;
         checkbox.disabled = !verdict.allowed;
         checkbox.setAttribute('aria-label', 'Do this');
@@ -2071,7 +2085,9 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
         if (verdict.allowed && changesPermissions) {
             const note = document.createElement('p');
             note.classList.add('brainDumpActionNote');
-            note.textContent = 'This changes who can do what in the group. Tick the box to confirm it.';
+            note.textContent = draft.action === 'reviewTask'
+                ? 'This answers a review and tells them. Tick the box to confirm it.'
+                : 'This changes who can do what in the group. Tick the box to confirm it.';
             fields.appendChild(note);
         }
         card.appendChild(fields);

@@ -399,6 +399,25 @@ const TOUR_STEPS = [
         beforeShow: () => switchSoloView('tasks')
     },
     {
+        selector: '.todayPanel',
+        title: 'Today tells you where to start',
+        text: 'This card turns your list into a plan for the day: what\'s overdue, what\'s due today, roughly how long it will take, and the few tasks to start with. Click one to jump straight to it. Fold it away whenever you like and it stays folded.',
+        beforeShow: (step) => {
+            switchSoloView('tasks');
+            const panel = document.querySelector('.todayPanel');
+            step.selector = panel && !panel.classList.contains('hidden') ? '.todayPanel' : '.inputContainer';
+        }
+    },
+    {
+        selector: '.notifBtn',
+        title: 'Your notification bell',
+        text: 'This bell keeps track of what is going on for you: tasks assigned to you, comments, mentions, and anything due soon or overdue. A number shows what you haven\'t looked at yet. Desktop alerts are on by default, and you can switch them off in Settings. If you leave something unread, we can also email you about it.',
+        beforeShow: (step) => {
+            switchSoloView('tasks');
+            step.selector = document.querySelector('.notifBtn') ? '.notifBtn' : '.userBadge';
+        }
+    },
+    {
         selector: '.viewTabs',
         title: 'Tasks, Calendar, and Activity',
         text: 'Everything you\'ve been doing lives under Tasks. Go ahead, tap over to Activity, that\'s where your completion history lives whenever you want it.',
@@ -1133,6 +1152,7 @@ function onTogglePopupAlerts() {
     if (!popupAlertsEnabled) {
         if (Notification.permission === 'granted') {
             popupAlertsEnabled = true;
+            TodoAlerts.setWanted(true);
             updateAlertToggleButton();
             saveSettings();
             return;
@@ -1140,6 +1160,9 @@ function onTogglePopupAlerts() {
 
         Notification.requestPermission().then((permission) => {
             popupAlertsEnabled = permission === 'granted';
+            if (popupAlertsEnabled) {
+                TodoAlerts.setWanted(true);
+            }
             if (!popupAlertsEnabled) {
                 urgencyAlertText.textContent = 'Popup alerts blocked. Enable permission in browser settings if needed.';
             }
@@ -1150,9 +1173,17 @@ function onTogglePopupAlerts() {
     }
 
     popupAlertsEnabled = false;
+    TodoAlerts.setWanted(false);
     updateAlertToggleButton();
     saveSettings();
 }
+
+// The bell's "Turn on alerts" (notifications.js) can grant permission from outside Settings.
+window.addEventListener('todo-alerts-changed', () => {
+    popupAlertsEnabled = TodoAlerts.active();
+    updateAlertToggleButton();
+    saveSettings();
+});
 
 function dismissOnboardingHint() {
     playClickSound();
@@ -1538,6 +1569,9 @@ function renderTasks() {
     tasksList.innerHTML = '';
     const visibleTasks = getVisibleTasks().filter(matchesFolderFilter);
     renderFolderBar();
+    if (typeof TodayPlan !== 'undefined') {
+        TodayPlan.refresh();
+    }
 
     if (visibleTasks.length === 0) {
         const emptyMessage = document.createElement('li');
@@ -3620,7 +3654,9 @@ function loadSettings() {
     if (!saved) {
         isAutoPrioritize = false;
         priorityToggle.checked = false;
-        popupAlertsEnabled = false;
+        // Alerts are ON by default for everybody and only off if they turned them off
+        // (notifications.js TodoAlerts); the browser still has to grant permission.
+        popupAlertsEnabled = typeof TodoAlerts !== 'undefined' && TodoAlerts.active();
         showDifficultyBadgesOnMobile = true;
         updateDifficultyVisibilityControl();
         return;
@@ -3630,7 +3666,7 @@ function loadSettings() {
         const parsed = JSON.parse(saved);
         isAutoPrioritize = Boolean(parsed.autoPrioritize);
         priorityToggle.checked = isAutoPrioritize;
-        popupAlertsEnabled = Boolean(parsed.popupAlertsEnabled);
+        popupAlertsEnabled = typeof TodoAlerts !== 'undefined' && TodoAlerts.active();
         showDifficultyBadgesOnMobile = parsed.showDifficultyBadgesOnMobile !== false;
 
         if (!('Notification' in window) || Notification.permission !== 'granted') {
@@ -5475,6 +5511,24 @@ function getUrgencyRank(urgencyLevel) {
 
 function isNotifiableUrgency(task, status) {
     return Boolean(status.hasDeadline && !task.completed && getUrgencyRank(status.urgencyLevel) > 0);
+}
+
+// Today (today.js): what to do now, from your open tasks.
+if (typeof TodayPlan !== 'undefined') {
+    TodayPlan.mount(document.querySelector('.todayPanel'), () => (tasks.length > 0 ? { tasks } : null));
+}
+
+// What the bell lists under "Needs your attention": open tasks due soon or overdue.
+if (typeof NotificationCenter !== 'undefined') {
+    NotificationCenter.setReminderSource(() => tasks
+        .map((task) => {
+            const status = getTaskUrgencyStatus(task);
+            if (!isNotifiableUrgency(task, status)) {
+                return null;
+            }
+            return { key: task.id, text: task.text, level: status.urgencyLevel, label: status.countdownLabel, timestamp: status.deadlineTimestamp };
+        })
+        .filter(Boolean));
 }
 
 function maybeNotifyTaskUrgency(task, status) {

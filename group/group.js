@@ -126,6 +126,37 @@ async function addComment(groupId, taskId, user, text) {
     await batch.commit();
     // You obviously just saw your own comment - don't flag it unread to yourself.
     setCommentsLastViewedAt(taskId, new Date().toISOString());
+    // The bell: anyone @mentioned hears about it, and the task's owner hears about the comment
+    // (once, never twice if they were also mentioned). Never yourself.
+    const commentedTask = groupTasks.find((item) => item.id === taskId);
+    const commentGroup = getSelectedGroup();
+    const me = displayNameFor(user);
+    const mentioned = commentGroup
+        ? GroupWorkflow.mentionedUids(trimmedText, GroupWorkflow.memberList(commentGroup)).filter((uid) => uid !== user.uid)
+        : [];
+    if (mentioned.length > 0) {
+        window.NotificationCenter?.notifyMany(mentioned, {
+            type: 'mention',
+            title: `${me} mentioned you in a comment`,
+            body: trimmedText,
+            groupId,
+            groupName: commentGroup?.name,
+            taskId,
+            actorName: me
+        });
+    }
+    if (commentedTask && commentedTask.ownerId && commentedTask.ownerId !== user.uid && !mentioned.includes(commentedTask.ownerId)) {
+        window.NotificationCenter?.notify({
+            toUid: commentedTask.ownerId,
+            type: 'comment',
+            title: `${me} commented on your task`,
+            body: trimmedText,
+            groupId,
+            groupName: commentGroup?.name,
+            taskId,
+            actorName: me
+        });
+    }
 }
 
 async function deleteComment(groupId, taskId, commentId) {
@@ -403,6 +434,11 @@ async function setGroupTaskCompleted(groupId, task, completed) {
             completedAt: completed ? new Date().toISOString() : null,
             updatedAt: new Date().toISOString()
         };
+        if (completed) {
+            // Done is done: a task that was blocked / in review / approved stops being any of those.
+            update.status = null;
+            update.blockedReason = null;
+        }
         if (!freshTask.completed && completed) {
             Object.assign(update, getRecurrenceAdvanceFields(freshTask) || {});
         }
@@ -422,7 +458,10 @@ async function deleteGroupTask(groupId, taskId) {
 // own completed/completedAt from its subtasks (auto-complete with manual
 // override, same as solo) - completedAt feeds the history panel.
 function subtaskDrivenTaskUpdate(task, subtasks) {
-    const completed = subtasks.length > 0 && subtasks.every((subtask) => subtask.completed);
+    // Finishing every step doesn't finish a task whose assigner has to approve it: it waits
+    // for the owner to send it for review (see GroupWorkflow.requestReview).
+    const needsSignOff = task.needsApproval === true && task.status !== 'approved';
+    const completed = subtasks.length > 0 && subtasks.every((subtask) => subtask.completed) && !needsSignOff;
     const justCompleted = !task.completed && completed;
     const update = {
         subtasks,
@@ -2868,6 +2907,8 @@ const suggestionsForYouPanel = document.querySelector('.suggestionsForYouPanel')
 const suggestionOutcomesPanel = document.querySelector('.suggestionOutcomesPanel');
 const assignmentOutcomesPanel = document.querySelector('.assignmentOutcomesPanel');
 const assignSelect = document.querySelector('.assignSelect');
+const assignApprovalRow = document.querySelector('.assignApprovalRow');
+const assignNeedsApproval = document.querySelector('.assignNeedsApproval');
 const handoffRequestsForYouPanel = document.querySelector('.handoffRequestsForYouPanel');
 const brainDumpToggleBtn = document.querySelector('.brainDumpToggleBtn');
 const groupAlertToggleBtn = document.querySelector('.groupAlertToggleBtn');
@@ -3112,6 +3153,10 @@ function createGroupTaskItem(groupId, task, isOwner) {
 
     if (task.completed) {
         taskItem.classList.add('completed');
+    }
+
+    if (!task.completed && GroupWorkflow.unmetDependencies(task).length > 0) {
+        taskItem.classList.add('isWaitingOnTask');
     }
 
     const taskMain = document.createElement('div');
@@ -3376,6 +3421,10 @@ function createGroupTaskItem(groupId, task, isOwner) {
     taskTopRow.appendChild(taskButtons);
 
     taskItem.appendChild(taskTopRow);
+    const statusRow = GroupWorkflow.createStatusRow(groupId, task, isOwner);
+    if (statusRow) {
+        taskItem.appendChild(statusRow);
+    }
     if (canSnooze) {
         taskItem.appendChild(createGroupSnoozeSection(groupId, task));
     }
@@ -3387,6 +3436,18 @@ function createGroupTaskItem(groupId, task, isOwner) {
             return;
         }
         playClickSound();
+        // The assigner asked to approve this one: checking it off asks for that approval.
+        if (!task.completed && GroupWorkflow.needsSignOff(task)) {
+            GroupWorkflow.requestReview(groupId, task);
+            return;
+        }
+        // Waiting for other tasks? Finishing it anyway is allowed, but not by accident.
+        if (!task.completed) {
+            const unmet = GroupWorkflow.unmetDependencies(task);
+            if (unmet.length > 0 && !confirm(`"${task.text}" is waiting for ${unmet.length === 1 ? `"${unmet[0].text}"` : `${unmet.length} other tasks`}. Mark it done anyway?`)) {
+                return;
+            }
+        }
         const willBeCompleted = !task.completed;
         const completedAt = new Date().toISOString();
         setGroupTaskCompleted(groupId, task, willBeCompleted).catch((error) => {
@@ -3394,6 +3455,7 @@ function createGroupTaskItem(groupId, task, isOwner) {
             alert(describeGroupWriteError(error, 'Could not update the task.'));
         });
         if (willBeCompleted) {
+            GroupWorkflow.notifyDependents(groupId, task);
             playTaskCompleteSound();
             checkGroupMilestone(groupId, task.id);
             logGroupTaskCompletion(groupId, task, completedAt).catch((error) => {
@@ -3879,7 +3941,7 @@ function createGroupCommentItem(groupId, task, comment) {
 
     const text = document.createElement('p');
     text.classList.add('commentItemText');
-    text.textContent = comment.text;
+    GroupWorkflow.renderWithMentions(text, comment.text, GroupWorkflow.memberList(getSelectedGroup()));
     item.appendChild(text);
 
     if (comment.authorId === currentUser?.uid) {
@@ -3912,6 +3974,8 @@ function createGroupCommentAddRow(groupId, task) {
     addInput.setAttribute('aria-label', 'Add a comment');
     addInput.maxLength = 500;
     addInput.addEventListener('mousedown', (event) => event.stopPropagation());
+    // Typing "@" offers the group's people (workflow.js).
+    GroupWorkflow.attachMentionPicker(addInput, () => GroupWorkflow.memberList(getSelectedGroup()));
 
     const addBtnEl = document.createElement('button');
     addBtnEl.type = 'button';
@@ -6151,6 +6215,22 @@ function renderGroupCalendarView() {
 // Fills the Assign to / Suggest to dropdown. Only rebuilt when its options
 // really change - renderApp runs on every snapshot, and rebuilding an open
 // <select> would snap its list shut mid-choice.
+// "Needs my approval" only makes sense when you are really assigning (not suggesting) to somebody.
+function syncApprovalRow(canAssign) {
+    if (!assignApprovalRow) {
+        return;
+    }
+    const show = Boolean(canAssign && assignSelect && assignSelect.value);
+    assignApprovalRow.classList.toggle('hidden', !show);
+    if (!show && assignNeedsApproval) {
+        assignNeedsApproval.checked = false;
+    }
+}
+assignSelect?.addEventListener('change', () => {
+    const group = getSelectedGroup();
+    syncApprovalRow(group ? getMyAccess(group).canAssign : false);
+});
+
 function renderAssignSelect(group) {
     if (!assignSelect || !currentUser) {
         return;
@@ -6169,6 +6249,7 @@ function renderAssignSelect(group) {
                 : 'Assign to: lands on their list now, they can decline for a few minutes')
             : 'Suggest to: they choose whether to accept';
     }
+    syncApprovalRow(canAssign);
     const signature = JSON.stringify([canAssign, access.assignScope, options]);
     if (assignSelect.dataset.signature === signature) {
         return;
@@ -6363,7 +6444,8 @@ function createSharedTaskCard(group, sharedId, copies, visibleTasks) {
     sortedCopies.forEach((copy) => {
         const name = rosterNameFor(copy.ownerId, copy.ownerName) || 'Teammate';
         const label = copy.ownerId === currentUser?.uid ? 'You' : name;
-        addChip(label, copy.completed ? 'isDone' : 'isOpen', copy.completed ? 'done' : 'to do');
+        const copyStatus = GroupWorkflow.STATUS_INFO[copy.status];
+        addChip(label, copy.completed ? 'isDone' : (copy.status === 'blocked' ? 'isBlocked' : 'isOpen'), copy.completed ? 'done' : (copyStatus ? copyStatus.label.toLowerCase() : 'to do'));
     });
     // People who declined have no copy left; keep them visible so a missing
     // chip never looks like they were simply never asked.
@@ -6374,6 +6456,7 @@ function createSharedTaskCard(group, sharedId, copies, visibleTasks) {
         }
     });
     card.appendChild(chips);
+    GroupWorkflow.createReviewRows(group.id, sortedCopies).forEach((row) => card.appendChild(row));
 
     const mine = visibleTasks.find((task) => sharedKeyOf(task) === sharedId && task.ownerId === currentUser?.uid);
     if (mine) {
@@ -6383,6 +6466,137 @@ function createSharedTaskCard(group, sharedId, copies, visibleTasks) {
         card.appendChild(inner);
     }
     return card;
+}
+
+// Status, sign-off and @mentions (workflow.js) need these from this page.
+GroupWorkflow.configure({
+    fs: () => fs(),
+    db: () => db(),
+    getGroup: () => getSelectedGroup(),
+    getUser: () => currentUser,
+    getTasks: () => groupTasks,
+    nameFor: (uid, storedName) => rosterNameFor(uid, storedName),
+    playClick: () => playClickSound()
+});
+
+// Today (today.js): your own open tasks in this group, plus tasks waiting for YOUR sign-off.
+TodayPlan.mount(document.querySelector('.todayPanel'), () => {
+    const group = getSelectedGroup();
+    if (!group || !currentUser || !hasLoadedGroupTasksOnce) {
+        return null;
+    }
+    return {
+        tasks: groupTasks.filter((task) => task.ownerId === currentUser.uid),
+        waitingIds: groupTasks
+            .filter((task) => task.ownerId === currentUser.uid && !task.completed && GroupWorkflow.unmetDependencies(task).length > 0)
+            .map((task) => task.id),
+        reviews: groupTasks
+            .filter((task) => !task.completed && task.status === 'review' && task.assignedBy === currentUser.uid && task.ownerId !== currentUser.uid)
+            .map((task) => ({ id: task.id, text: task.text, who: rosterNameFor(task.ownerId, task.ownerName) || 'Teammate' })),
+        where: group.name
+    };
+});
+
+// "Approved" means the person who assigned it is happy. Finishing it is still done on the owner's
+// own page, the normal way (sound, milestone, history, streak), as soon as they see it.
+const autoCompletingTaskIds = new Set();
+function autoCompleteApprovedTasks() {
+    const group = getSelectedGroup();
+    if (!group || !currentUser || !hasLoadedGroupTasksOnce) {
+        return;
+    }
+    groupTasks.forEach((task) => {
+        if (task.ownerId !== currentUser.uid || task.status !== 'approved' || task.completed || autoCompletingTaskIds.has(task.id)) {
+            return;
+        }
+        autoCompletingTaskIds.add(task.id);
+        const completedAt = new Date().toISOString();
+        setGroupTaskCompleted(group.id, task, true)
+            .then(() => {
+                GroupWorkflow.notifyDependents(group.id, task);
+                playTaskCompleteSound();
+                checkGroupMilestone(group.id, task.id);
+                return logGroupTaskCompletion(group.id, task, completedAt);
+            })
+            .catch((error) => {
+                console.error('Could not finish an approved task:', error);
+                // Try again later, not on every render (a permanent failure, such as security
+                // rules that are not published yet, would otherwise be hammered constantly).
+                setTimeout(() => autoCompletingTaskIds.delete(task.id), 5 * 60 * 1000);
+            });
+    });
+}
+
+// Weekly report (report.js), Team tab, owner/admin only. Also drops one note in the bell
+// the first time each week it is seen, so it doesn't depend on remembering to look.
+function renderTeamReport(group, isManager) {
+    const container = document.querySelector('.teamReport');
+    if (!container) {
+        return;
+    }
+    container.classList.toggle('hidden', !isManager);
+    if (!isManager) {
+        return;
+    }
+    const report = TeamReport.build({ members: GroupWorkflow.memberList(group), tasks: groupTasks, history: groupHistoryEntries });
+    TeamReport.render(container, report, {
+        groupName: group.name,
+        onCopy: (text, buttonEl) => {
+            const done = () => {
+                buttonEl.textContent = 'Copied';
+                setTimeout(() => { buttonEl.textContent = 'Copy as text'; }, 1800);
+            };
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(text).then(done).catch(() => window.prompt('Copy this report:', text));
+            } else {
+                window.prompt('Copy this report:', text);
+            }
+        }
+    });
+    scheduleWeeklyReportNote(group);
+}
+
+const weeklyReportTimers = new Map();
+const weeklyReportChecked = new Set();
+function scheduleWeeklyReportNote(group) {
+    if (!currentUser || weeklyReportTimers.has(group.id) || weeklyReportChecked.has(group.id)) {
+        return;
+    }
+    weeklyReportChecked.add(group.id);
+    // Wait a few seconds so the task and history snapshots have arrived, then judge on fresh data.
+    weeklyReportTimers.set(group.id, setTimeout(() => {
+        const current = getSelectedGroup();
+        if (!current || current.id !== group.id || !currentUser) {
+            // Not looking at this group any more: check again next time it is opened.
+            weeklyReportTimers.delete(group.id);
+            weeklyReportChecked.delete(group.id);
+            return;
+        }
+        const { isOwner, isAdmin } = getMyRoleInGroup(current);
+        const report = TeamReport.build({ members: GroupWorkflow.memberList(current), tasks: groupTasks, history: groupHistoryEntries });
+        const key = `weeklyReportSeen:${currentUser.uid}:${current.id}`;
+        let seen = null;
+        try {
+            seen = localStorage.getItem(key);
+        } catch {
+            seen = report.weekKey;
+        }
+        if ((isOwner || isAdmin) && seen !== report.weekKey) {
+            try {
+                localStorage.setItem(key, report.weekKey);
+            } catch {
+                // Non-fatal: it may show once more next visit.
+            }
+            window.NotificationCenter?.notifySelf({
+                type: 'report',
+                title: `Weekly report for ${current.name}`,
+                body: TeamReport.headline(report) + '.',
+                detail: TeamReport.toText(report, current.name),
+                groupId: current.id
+            });
+        }
+        weeklyReportTimers.delete(group.id);
+    }, 8000));
 }
 
 teamRolesBtn?.addEventListener('click', () => {
@@ -6679,6 +6893,8 @@ function renderGroupTasks() {
     groupTasksList.innerHTML = '';
     legacyShareKeyById = computeLegacyShareKeys(groupTasks);
     renderGroupFolderBar(group);
+    TodayPlan.refresh();
+    autoCompleteApprovedTasks();
 
     // A group is selected but its first task snapshot hasn't arrived yet -
     // show loading skeleton rows (same shimmering .taskSkeletonRow markup/
@@ -6897,6 +7113,7 @@ function renderMemberRoster(group, { isOwner = false, isAdmin = false } = {}) {
         return;
     }
     memberRoster.innerHTML = '';
+    renderTeamReport(group, isOwner || isAdmin);
 
     // Roles & access: owner/admin only - a member granted folder rights doesn't get this.
     // (The click handler reads the selected group at click time, so it is never stale.)
@@ -8284,9 +8501,9 @@ if (teamPulseOverlay) {
 
 function loadGroupSettings() {
     try {
-        const saved = localStorage.getItem(GROUP_SETTINGS_KEY);
-        const parsed = saved ? JSON.parse(saved) : null;
-        groupPopupAlertsEnabled = Boolean(parsed?.popupAlertsEnabled);
+        // Alerts are ON by default for everybody and only off if they turned them off
+        // (notifications.js TodoAlerts); the browser still has to grant permission.
+        groupPopupAlertsEnabled = typeof TodoAlerts !== 'undefined' && TodoAlerts.active();
     } catch {
         groupPopupAlertsEnabled = false;
     }
@@ -8332,6 +8549,7 @@ function onToggleGroupPopupAlerts() {
     if (!groupPopupAlertsEnabled) {
         if (Notification.permission === 'granted') {
             groupPopupAlertsEnabled = true;
+            TodoAlerts.setWanted(true);
             updateGroupAlertToggleButton();
             saveGroupSettings();
             return;
@@ -8339,6 +8557,9 @@ function onToggleGroupPopupAlerts() {
 
         Notification.requestPermission().then((permission) => {
             groupPopupAlertsEnabled = permission === 'granted';
+            if (groupPopupAlertsEnabled) {
+                TodoAlerts.setWanted(true);
+            }
             updateGroupAlertToggleButton();
             saveGroupSettings();
         });
@@ -8346,6 +8567,7 @@ function onToggleGroupPopupAlerts() {
     }
 
     groupPopupAlertsEnabled = false;
+    TodoAlerts.setWanted(false);
     updateGroupAlertToggleButton();
     saveGroupSettings();
 }
@@ -8353,6 +8575,13 @@ function onToggleGroupPopupAlerts() {
 if (groupAlertToggleBtn) {
     groupAlertToggleBtn.addEventListener('click', onToggleGroupPopupAlerts);
 }
+
+// The bell's "Turn on alerts" (notifications.js) can grant permission from outside Settings.
+window.addEventListener('todo-alerts-changed', () => {
+    groupPopupAlertsEnabled = TodoAlerts.active();
+    updateGroupAlertToggleButton();
+    saveGroupSettings();
+});
 
 function getGroupUrgencyRank(urgencyLevel) {
     if (urgencyLevel === 'overdue') {
@@ -8369,6 +8598,24 @@ function getGroupUrgencyRank(urgencyLevel) {
 
 function isNotifiableGroupUrgency(task, status) {
     return Boolean(status.hasDeadline && !task.completed && getGroupUrgencyRank(status.urgencyLevel) > 0);
+}
+
+// What the bell lists under "Needs your attention": your own open tasks in this group that
+// are due soon or overdue.
+if (typeof NotificationCenter !== 'undefined') {
+    NotificationCenter.setReminderSource(() => {
+        const groupName = getSelectedGroup()?.name || '';
+        return groupTasks
+            .filter((task) => currentUser && task.ownerId === currentUser.uid)
+            .map((task) => {
+                const status = getTaskUrgencyStatus(task);
+                if (!isNotifiableGroupUrgency(task, status)) {
+                    return null;
+                }
+                return { key: task.id, text: task.text, level: status.urgencyLevel, label: status.countdownLabel, where: groupName, timestamp: status.deadlineTimestamp };
+            })
+            .filter(Boolean);
+    });
 }
 
 function pruneGroupStageReminderTimestamps(now = Date.now()) {
@@ -8963,6 +9210,9 @@ function addTaskFromInputs() {
         folderId: TodoFolders.resolve(folderSelect?.value) ? folderSelect.value : null
     };
     const assignChoice = assignSelect?.value || '';
+    if (assignChoice && assignNeedsApproval?.checked && getMyAccess(group).canAssign) {
+        newTaskFields.needsApproval = true;
+    }
     const writePromise = assignChoice
         ? runGroupAssignment(group, assignChoice, newTaskFields)
         : addGroupTask(group.id, currentUser, newTaskFields);
@@ -8971,6 +9221,7 @@ function addTaskFromInputs() {
         if (assignSelect) {
             assignSelect.value = '';
         }
+        syncApprovalRow(false);
         if (recurrenceSelect) {
             recurrenceSelect.value = '';
         }
@@ -9794,6 +10045,25 @@ const GROUP_TOUR_STEPS = [
         }
     },
     {
+        selector: '.todayPanel',
+        title: 'Today, status, and sign-off',
+        text: 'Today is your plan for the day in this group: what\'s overdue, what\'s due today, and where to start. On any task you own you can mark it In progress, or Blocked (say why, and the person who assigned it is told). When someone assigns you a task they can ask to approve it first: checking it off then sends it to them for review, and it counts as done once they approve it. If a task can\'t start until another one is finished, use "Waits for..." on it: the card shows what it\'s waiting for, and you\'re told when it\'s free.',
+        beforeShow: (step) => {
+            switchGroupView('tasks');
+            const panel = document.querySelector('.todayPanel');
+            step.selector = panel && !panel.classList.contains('hidden') ? '.todayPanel' : '.inputContainer';
+        }
+    },
+    {
+        selector: '.notifBtn',
+        title: 'Your notification bell',
+        text: 'Everything that concerns you lands here, in solo and in every group: tasks assigned or suggested to you, reviews, comments, and @mentions (type @ in a comment to pick someone). Things that are due soon or overdue are pinned at the top. Desktop alerts are on by default, and you can turn them off in Settings.',
+        beforeShow: (step) => {
+            switchGroupView('tasks');
+            step.selector = document.querySelector('.notifBtn') ? '.notifBtn' : '.userBadge';
+        }
+    },
+    {
         selector: '.viewTabs',
         title: 'One place for each job',
         text: 'Tasks is where you\'ve been working. Go ahead, tap through the others: Team, Calendar, Leaderboard, Availability, and Activity. Everyone\'s roles, schedule, rankings, meeting times, and finished work all live there whenever you want them.',
@@ -9803,7 +10073,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.memberRoster',
         title: 'Team',
-        text: 'Everyone in the group, their role, and their current progress. Keep an eye out for a little flame next to a name, that\'s a real streak, the same one solo tracks, just visible here too. Go ahead, click a card, that switches Tasks over to just their work, same as picking them above.',
+        text: 'Everyone in the group, their role, and their current progress. Keep an eye out for a little flame next to a name, that\'s a real streak, the same one solo tracks, just visible here too. Go ahead, click a card, that switches Tasks over to just their work, same as picking them above. Owners and admins also see Roles & access here, and a weekly report of how the team is doing.',
         action: { event: 'click' },
         beforeShow: () => switchGroupView('team')
     },
