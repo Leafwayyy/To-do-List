@@ -48,12 +48,16 @@ function subscribeToGroupTasks(groupId, callback, onError) {
 // in a week and silently undercount).
 // ---------------------------------------------------------------------
 
+// Wide enough that a busy team's month is still fully inside it. "All time" does not depend on
+// this cap: it is a server-side count per person (see refreshAllTimeCounts).
+const GROUP_HISTORY_LIMIT = 500;
+
 function subscribeToGroupHistory(groupId, callback, onError) {
     const { collection, query, orderBy, limit, onSnapshot } = fs();
     const historyRef = query(
         collection(db(), 'groups', groupId, 'history'),
         orderBy('completedAt', 'desc'),
-        limit(200)
+        limit(GROUP_HISTORY_LIMIT)
     );
     return onSnapshot(historyRef, (snapshot) => {
         callback(snapshot.docs.map((entryDoc) => normalizeGroupTextDoc(entryDoc.id, entryDoc.data(), 'taskText')));
@@ -65,17 +69,26 @@ function subscribeToGroupHistory(groupId, callback, onError) {
 // as-is rather than looked up fresh, since only a task's own owner can
 // ever complete it (enforced by firestore.rules), so they're already
 // correct for whoever triggered this.
-async function logGroupTaskCompletion(groupId, task, completedAt) {
-    const { doc, setDoc } = fs();
-    await setDoc(doc(db(), 'groups', groupId, 'history', generateTaskId()), {
+// The history entry for one completion - the single source for the leaderboard, Activity and
+// the weekly report. It is written in the SAME transaction/batch as the completion itself
+// (see setGroupTaskCompleted, applySubtaskDrivenUpdate and the Dusty edit path), so a task
+// can never end up done without credit, or credited without being done.
+function buildGroupCompletionEntry(task, completedAt) {
+    return {
         taskId: task.id,
-        taskText: task.text,
+        // The rules require 1-2000 characters; an untitled task still gets counted.
+        taskText: String(task.text || '').trim().slice(0, 2000) || 'Task',
         ownerId: task.ownerId,
         // Sliced to the rules' 80-char name cap (an older task can carry a
         // longer name from before the cap existed).
         ownerName: String(task.ownerName || 'Teammate').slice(0, 80),
         completedAt
-    });
+    };
+}
+
+function newGroupHistoryRef(groupId) {
+    const { doc, collection } = fs();
+    return doc(collection(db(), 'groups', groupId, 'history'));
 }
 
 // ---------------------------------------------------------------------
@@ -420,18 +433,24 @@ function getRecurrenceAdvanceFields(task) {
 // applySubtaskDrivenUpdate below. completed itself still comes from the
 // caller (real user intent, not derived from potentially-stale data), only
 // the recurrence-advance fields need a fresh read.
+// Resolves to { becameCompleted }: true only when THIS call is what finished the task (not when
+// it was already done, e.g. a second open tab got there first), which is also the only time
+// credit is written, so a double click or two tabs can never count a task twice.
 async function setGroupTaskCompleted(groupId, task, completed) {
     const { doc, runTransaction } = fs();
     const taskRef = doc(db(), 'groups', groupId, 'tasks', task.id);
+    let becameCompleted = false;
     await runTransaction(db(), async (transaction) => {
+        becameCompleted = false;
         const snapshot = await transaction.get(taskRef);
         if (!snapshot.exists()) {
             return;
         }
         const freshTask = { id: snapshot.id, ...snapshot.data() };
+        const completedAt = new Date().toISOString();
         const update = {
             completed,
-            completedAt: completed ? new Date().toISOString() : null,
+            completedAt: completed ? completedAt : null,
             updatedAt: new Date().toISOString()
         };
         if (completed) {
@@ -441,9 +460,14 @@ async function setGroupTaskCompleted(groupId, task, completed) {
         }
         if (!freshTask.completed && completed) {
             Object.assign(update, getRecurrenceAdvanceFields(freshTask) || {});
+            becameCompleted = true;
         }
         transaction.update(taskRef, update);
+        if (becameCompleted) {
+            transaction.set(newGroupHistoryRef(groupId), buildGroupCompletionEntry(freshTask, completedAt));
+        }
     });
+    return { becameCompleted };
 }
 
 async function deleteGroupTask(groupId, taskId) {
@@ -511,10 +535,10 @@ async function applySubtaskDrivenUpdate(groupId, taskId, mutateSubtasks) {
     const taskRef = doc(db(), 'groups', groupId, 'tasks', taskId);
 
     let justCompleted = false;
-    let historyCompletedAt = null;
-    let freshTaskForHistory = null;
 
     await runTransaction(db(), async (transaction) => {
+        // A retried transaction must start clean.
+        justCompleted = false;
         const snapshot = await transaction.get(taskRef);
         if (!snapshot.exists()) {
             return;
@@ -523,10 +547,12 @@ async function applySubtaskDrivenUpdate(groupId, taskId, mutateSubtasks) {
         const subtasks = mutateSubtasks(freshTask.subtasks || []);
         const result = subtaskDrivenTaskUpdate(freshTask, subtasks);
         justCompleted = result.justCompleted;
-        historyCompletedAt = result.historyCompletedAt;
-        freshTaskForHistory = freshTask;
         const { justCompleted: _jc, historyCompletedAt: _hca, ...update } = result;
         transaction.update(taskRef, update);
+        // Credit goes in the same transaction as the completion itself.
+        if (result.justCompleted) {
+            transaction.set(newGroupHistoryRef(groupId), buildGroupCompletionEntry(freshTask, result.historyCompletedAt || new Date().toISOString()));
+        }
     });
 
     // Real bug found while wiring in recurrence: a recurring task advanced
@@ -544,9 +570,6 @@ async function applySubtaskDrivenUpdate(groupId, taskId, mutateSubtasks) {
         // only its history log.
         playTaskCompleteSound();
         checkGroupMilestone(groupId, taskId);
-        logGroupTaskCompletion(groupId, freshTaskForHistory, historyCompletedAt).catch((error) => {
-            console.error('Failed to log completion history:', error);
-        });
     }
 }
 
@@ -3449,19 +3472,18 @@ function createGroupTaskItem(groupId, task, isOwner) {
             }
         }
         const willBeCompleted = !task.completed;
-        const completedAt = new Date().toISOString();
-        setGroupTaskCompleted(groupId, task, willBeCompleted).catch((error) => {
+        // Completion and its leaderboard credit are one write (setGroupTaskCompleted), and the
+        // sound / milestone / "now free to start" notices wait for it to actually succeed.
+        setGroupTaskCompleted(groupId, task, willBeCompleted).then((result) => {
+            if (willBeCompleted && result && result.becameCompleted) {
+                GroupWorkflow.notifyDependents(groupId, task);
+                playTaskCompleteSound();
+                checkGroupMilestone(groupId, task.id);
+            }
+        }).catch((error) => {
             console.error('Failed to update task:', error);
             alert(describeGroupWriteError(error, 'Could not update the task.'));
         });
-        if (willBeCompleted) {
-            GroupWorkflow.notifyDependents(groupId, task);
-            playTaskCompleteSound();
-            checkGroupMilestone(groupId, task.id);
-            logGroupTaskCompletion(groupId, task, completedAt).catch((error) => {
-                console.error('Failed to log completion history:', error);
-            });
-        }
     });
 
     return taskItem;
@@ -6510,13 +6532,13 @@ function autoCompleteApprovedTasks() {
             return;
         }
         autoCompletingTaskIds.add(task.id);
-        const completedAt = new Date().toISOString();
         setGroupTaskCompleted(group.id, task, true)
-            .then(() => {
-                GroupWorkflow.notifyDependents(group.id, task);
-                playTaskCompleteSound();
-                checkGroupMilestone(group.id, task.id);
-                return logGroupTaskCompletion(group.id, task, completedAt);
+            .then((result) => {
+                if (result && result.becameCompleted) {
+                    GroupWorkflow.notifyDependents(group.id, task);
+                    playTaskCompleteSound();
+                    checkGroupMilestone(group.id, task.id);
+                }
             })
             .catch((error) => {
                 console.error('Could not finish an approved task:', error);
@@ -7371,6 +7393,53 @@ const LEADERBOARD_ORDINALS = { 1: '1st', 2: '2nd', 3: '3rd' };
 // own comment), so an "all time" count on a very long-lived, very active
 // group can undercount once total completions pass that cap - accepted,
 // since it's still far more accurate than reading live task state.
+// "All time" per person, counted by the database (not by downloading every entry), so it keeps
+// counting past the history list's cap. The list is only the most recent entries.
+let allTimeCounts = new Map();
+let allTimeCountsFor = null;
+let allTimeCountsBusy = false;
+let allTimeCountsAgain = false;
+
+async function refreshAllTimeCounts() {
+    const group = getSelectedGroup();
+    if (!group || !currentUser) {
+        return;
+    }
+    if (allTimeCountsFor !== group.id) {
+        allTimeCountsFor = group.id;
+        allTimeCounts = new Map();
+    }
+    if (allTimeCountsBusy) {
+        allTimeCountsAgain = true;
+        return;
+    }
+    allTimeCountsBusy = true;
+    try {
+        const { collection, query, where, getCountFromServer } = fs();
+        if (typeof getCountFromServer !== 'function') {
+            return;
+        }
+        const next = new Map();
+        await Promise.all((group.memberIds || []).map(async (memberId) => {
+            const snapshot = await getCountFromServer(query(collection(db(), 'groups', group.id, 'history'), where('ownerId', '==', memberId)));
+            next.set(memberId, snapshot.data().count);
+        }));
+        if (getSelectedGroup()?.id === group.id) {
+            allTimeCounts = next;
+            renderGroupLeaderboard(group);
+        }
+    } catch (error) {
+        // Not fatal: the board falls back to counting the entries it already has.
+        console.warn('Could not count all-time completions:', error?.code || error);
+    } finally {
+        allTimeCountsBusy = false;
+        if (allTimeCountsAgain) {
+            allTimeCountsAgain = false;
+            setTimeout(refreshAllTimeCounts, 1500);
+        }
+    }
+}
+
 function getMemberCompletedEntriesForRange(memberId, range) {
     const startMs = range === 'week'
         ? getStartOfCalendarWeek(new Date()).getTime()
@@ -7415,7 +7484,9 @@ function renderGroupLeaderboard(group) {
     const counts = new Map(memberIds.map((memberId) => [memberId, 0]));
 
     memberIds.forEach((memberId) => {
-        counts.set(memberId, getMemberCompletedEntriesForRange(memberId, leaderboardRange).length);
+        const listed = getMemberCompletedEntriesForRange(memberId, leaderboardRange).length;
+        // The counted total can only ever raise "All time", never lower what is already listed.
+        counts.set(memberId, leaderboardRange === 'all' ? Math.max(listed, allTimeCounts.get(memberId) || 0) : listed);
     });
 
     const rows = memberIds.map((memberId, index) => ({
@@ -8380,7 +8451,7 @@ async function maybeShowGroupTeamPulse(group) {
     let thisWeekCount = 0;
     let lastWeekCount = 0;
     // Tallied by ownerName (already denormalized on every history entry,
-    // see logGroupTaskCompletion) so "top contributor" needs no extra
+    // see buildGroupCompletionEntry) so "top contributor" needs no extra
     // lookups - just counting this-week entries by whoever completed them.
     const thisWeekCountsByOwner = new Map();
     try {
@@ -9388,7 +9459,7 @@ async function commitAiTaskEditsGroup(drafts) {
         throw new Error('No group selected.');
     }
 
-    const { doc, updateDoc } = fs();
+    const { doc, writeBatch } = fs();
     const results = [];
 
     for (const draft of drafts) {
@@ -9428,9 +9499,18 @@ async function commitAiTaskEditsGroup(drafts) {
         let justCompleted = false;
         if (Object.prototype.hasOwnProperty.call(draft, 'completed')) {
             const willBeCompleted = Boolean(draft.completed);
-            if (realTask.completed !== willBeCompleted) {
+            if (willBeCompleted && !realTask.completed && GroupWorkflow.needsSignOff(realTask)) {
+                // The assigner asked to approve this one, so finishing it means sending it for
+                // review (the same as ticking it), never ticking it done.
+                GroupWorkflow.requestReview(group.id, realTask);
+            } else if (realTask.completed !== willBeCompleted) {
                 fieldUpdates.completed = willBeCompleted;
                 fieldUpdates.completedAt = willBeCompleted ? new Date().toISOString() : null;
+                if (willBeCompleted) {
+                    // Done is done: no longer blocked / in review / approved (as the checkbox does).
+                    fieldUpdates.status = null;
+                    fieldUpdates.blockedReason = null;
+                }
                 justCompleted = willBeCompleted;
                 // Recurring: same advance-in-place behavior as every other
                 // completion path - justCompleted (used for the sound/
@@ -9463,9 +9543,16 @@ async function commitAiTaskEditsGroup(drafts) {
             // id/completed for any step whose text still matches.
             fieldUpdates.subtasks = applyEditedSubtasks(realTask.subtasks, draft.subtasks);
         }
+        // The edit and, if it finished the task, the leaderboard credit are one atomic write.
+        const completedStamp = fieldUpdates.completedAt || new Date().toISOString();
         if (Object.keys(fieldUpdates).length > 0) {
             fieldUpdates.updatedAt = new Date().toISOString();
-            await updateDoc(doc(db(), 'groups', group.id, 'tasks', realTask.id), fieldUpdates);
+            const batch = writeBatch(db());
+            batch.update(doc(db(), 'groups', group.id, 'tasks', realTask.id), fieldUpdates);
+            if (justCompleted) {
+                batch.set(newGroupHistoryRef(group.id), buildGroupCompletionEntry(realTask, completedStamp));
+            }
+            await batch.commit();
         }
 
         // Same side effects the checkbox itself triggers on completing a
@@ -9474,9 +9561,7 @@ async function commitAiTaskEditsGroup(drafts) {
         if (justCompleted) {
             playTaskCompleteSound();
             checkGroupMilestone(group.id, realTask.id);
-            logGroupTaskCompletion(group.id, realTask, new Date().toISOString()).catch((error) => {
-                console.error('Failed to log completion history:', error);
-            });
+            GroupWorkflow.notifyDependents(group.id, realTask);
         }
 
         results.push({ taskId: draft.taskId, applied: true });
@@ -9732,6 +9817,7 @@ function watchSelectedGroupTasks() {
             groupHistoryEntries = entries;
             groupHistoryLoadError = null;
             renderApp();
+            refreshAllTimeCounts();
         }, (error) => {
             if (unsubscribeHistory !== historyUnsubscribe) {
                 return;

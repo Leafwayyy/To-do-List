@@ -26,6 +26,7 @@ import {
     doc,
     getDoc,
     getDocs,
+    getCountFromServer,
     setDoc,
     updateDoc,
     deleteDoc,
@@ -163,7 +164,7 @@ window.ToDoAuth = {
     auth,
     db,
     firestore: {
-        doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove,
+        doc, getDoc, getDocs, getCountFromServer, setDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove,
         collection, query, where, orderBy, limit, onSnapshot, writeBatch, runTransaction, serverTimestamp, increment
     },
     signInWithGoogle: () => signInWithPopup(auth, googleProvider),
