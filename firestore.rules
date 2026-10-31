@@ -829,6 +829,26 @@ service cloud.firestore {
               )
             )
             || (
+              // The person who ASSIGNED a task can adjust what they asked for while it is still
+              // open: its wording, deadline, schedule, effort and steps. Never who owns it, whether
+              // it is done, its status, or anything about approval - those stay with the owner
+              // (and the review branch below). assignedBy itself can't be forged (it is frozen).
+              request.auth.uid != resource.data.ownerId
+              && ('assignedBy' in resource.data)
+              && resource.data.assignedBy == request.auth.uid
+              && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+              && !(('completed' in resource.data) && resource.data.completed == true)
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'text', 'matrix', 'taskType', 'estimateMinutes', 'difficulty', 'dueAt',
+                'recurrence', 'scheduledAt', 'subtasks', 'folderId', 'updatedAt'
+              ])
+              && request.resource.data.text is string
+              && request.resource.data.text.size() > 0
+              && request.resource.data.text.size() <= 2000
+              && (!('subtasks' in request.resource.data) || (request.resource.data.subtasks is list && request.resource.data.subtasks.size() <= 200))
+              && (!('folderId' in request.resource.data) || (request.resource.data.folderId is string && request.resource.data.folderId.size() <= 40))
+            )
+            || (
               request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
               && (
                 (

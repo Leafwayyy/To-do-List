@@ -3308,6 +3308,23 @@ function createGroupTaskItem(groupId, task, isOwner) {
 
     const canSnooze = isOwner && Boolean(task.dueAt) && !task.completed;
 
+    // You assigned this to someone: you can still change what you asked for (deadline, wording,
+    // effort) without waiting for them to do it, and they're told. Done and the steps' ticks
+    // stay theirs.
+    if (!isOwner && !task.completed && task.assignedBy && currentUser && task.assignedBy === currentUser.uid) {
+        const editAssignedBtn = document.createElement('button');
+        editAssignedBtn.type = 'button';
+        editAssignedBtn.classList.add('editBtn');
+        editAssignedBtn.innerHTML = '<i class="fa-solid fa-pen"></i><span class="taskBtnLabel">Edit</span>';
+        editAssignedBtn.setAttribute('aria-label', 'Edit the task you assigned');
+        editAssignedBtn.title = 'Change the deadline or details of the task you assigned. They will be told.';
+        editAssignedBtn.addEventListener('click', () => {
+            playClickSound();
+            openGroupTaskEditor(groupId, task);
+        });
+        taskButtons.appendChild(editAssignedBtn);
+    }
+
     if (isOwner) {
         const editBtn = document.createElement('button');
         editBtn.type = 'button';
@@ -3320,6 +3337,34 @@ function createGroupTaskItem(groupId, task, isOwner) {
             openGroupTaskEditor(groupId, task);
         });
         taskButtons.appendChild(editBtn);
+
+        // You assigned copies of this to other people and yours has since changed (a new deadline,
+        // steps added later): one click brings their copies in line, and they're told.
+        const outOfStep = task.completed ? [] : GroupWorkflow.copiesOutOfStep(task, generateSubtaskId);
+        if (outOfStep.length > 0) {
+            const syncBtn = document.createElement('button');
+            syncBtn.type = 'button';
+            syncBtn.classList.add('editBtn', 'syncCopiesBtn');
+            const names = outOfStep.map((copy) => rosterNameFor(copy.ownerId, copy.ownerName) || 'Teammate');
+            const label = names.length === 1 ? `Update ${names[0]}'s copy` : `Update ${names.length} copies`;
+            syncBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i><span class="taskBtnLabel"></span>';
+            syncBtn.querySelector('.taskBtnLabel').textContent = label;
+            syncBtn.setAttribute('aria-label', label);
+            syncBtn.title = `Send your changes (deadline, title, steps) to ${names.join(', ')}. Steps they added or ticked are kept.`;
+            syncBtn.addEventListener('click', () => {
+                playClickSound();
+                if (!confirm(`Send your changes to ${names.join(', ')}? They'll be told. Their own progress on steps is kept.`)) {
+                    return;
+                }
+                syncBtn.disabled = true;
+                GroupWorkflow.pushToCopies(groupId, task, generateSubtaskId).catch((error) => {
+                    console.error('Could not update their copies:', error);
+                    alert(describeGroupWriteError(error, 'Could not update their copies.'));
+                    syncBtn.disabled = false;
+                });
+            });
+            taskButtons.appendChild(syncBtn);
+        }
 
         if (canSnooze) {
             const snoozeBtn = document.createElement('button');
@@ -4622,6 +4667,27 @@ function saveGroupTaskEditorChanges() {
     const updatedDueAt = editorDeadlineInput.value ? new Date(editorDeadlineInput.value).toISOString() : null;
 
     const { doc, updateDoc } = fs();
+    // Editing someone else's task (one you assigned them): note what changes so they can be told.
+    const editedTaskBefore = groupTasks.find((candidate) => candidate.id === activeEditorTaskId);
+    const editedGroupId = activeEditorGroupId;
+    const editedOthers = Boolean(editedTaskBefore && currentUser && editedTaskBefore.ownerId !== currentUser.uid);
+    const assignedChanges = [];
+    if (editedOthers) {
+        const sameTime = (a, b) => (a ? new Date(a).getTime() : null) === (b ? new Date(b).getTime() : null);
+        if (editedTaskBefore.text !== updatedText) {
+            assignedChanges.push('the title');
+        }
+        if (!sameTime(editedTaskBefore.dueAt, updatedDueAt)) {
+            assignedChanges.push('the deadline');
+        }
+        if (editorScheduleInput && !sameTime(editedTaskBefore.scheduledAt, editorScheduleInput.value ? new Date(editorScheduleInput.value).toISOString() : null)) {
+            assignedChanges.push('the scheduled time');
+        }
+        if (getValidMatrixValue(editedTaskBefore.matrix) !== getValidMatrixValue(editorMatrixSelect.value)
+            || String(getValidDifficultyLevel(editedTaskBefore.difficulty)) !== String(getValidDifficultyLevel(editorDifficultySelect.value))) {
+            assignedChanges.push('the priority');
+        }
+    }
     updateDoc(doc(db(), 'groups', activeEditorGroupId, 'tasks', activeEditorTaskId), {
         text: updatedText,
         matrix: getValidMatrixValue(editorMatrixSelect.value),
@@ -4641,6 +4707,9 @@ function saveGroupTaskEditorChanges() {
         updatedAt: new Date().toISOString()
     }).then(() => {
         closeGroupTaskEditor();
+        if (editedOthers && assignedChanges.length > 0) {
+            GroupWorkflow.tellOwnerOfEdit(editedGroupId, { ...editedTaskBefore, text: updatedText }, assignedChanges);
+        }
     }).catch((error) => {
         console.error('Failed to save task edits:', error);
         alert(describeGroupWriteError(error, 'Could not save your changes.'));
@@ -10004,7 +10073,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.inputContainer',
         title: 'Quick options, and giving work to people',
-        text: 'Tap the / button (or type /) for due date, folder, priority, repeat and more in plain words, and I\'ll offer chips for things I notice as you type. Shortcut: N jumps to this box, Ctrl+K from anywhere. In a team there\'s one more: Assign to. Owners and admins assign a task straight onto someone\'s list (they can decline); everyone else uses Suggest to, and the person chooses whether to accept. Pick Everyone or a role to share one task with many people.',
+        text: 'Tap the / button (or type /) for due date, folder, priority, repeat and more in plain words, and I\'ll offer chips for things I notice as you type. Shortcut: N jumps to this box, Ctrl+K from anywhere. In a team there\'s one more: Assign to. Owners and admins assign a task straight onto someone\'s list (they can decline); everyone else uses Suggest to, and the person chooses whether to accept. Pick Everyone or a role to share one task with many people. Each person gets their own copy, so if plans change you can Edit a task you assigned (the deadline, say) and they\'re told, or use Update copies on your own copy to send them your new deadline and steps.',
         beforeShow: () => switchGroupView('tasks')
     },
     {

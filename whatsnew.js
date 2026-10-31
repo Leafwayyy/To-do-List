@@ -26,6 +26,31 @@
 
 const WHATS_NEW_RELEASES = [
     {
+        id: '2026-11-04',
+        date: 'November 4, 2026',
+        title: 'Change a deadline you assigned, and keep copies in step',
+        intro: 'When you assign a task, each person gets their own copy. That was fine until plans changed: the deadline moved on your side, but theirs stayed put, and all you could do was leave a comment.',
+        sections: [
+            {
+                icon: 'fa-pen-to-square',
+                heading: 'Edit what you assigned',
+                paragraphs: [
+                    'On a task you assigned to someone, you now get an Edit button. You can change the deadline, the wording and the priority without waiting for them. They get a notification saying what changed.',
+                    'Finishing the task, ticking its steps and approvals stay theirs. You can\'t edit a task once it\'s done.'
+                ]
+            },
+            {
+                icon: 'fa-arrows-rotate',
+                heading: 'Update their copy',
+                paragraphs: [
+                    'If your own copy of a shared task has moved on (a new deadline, steps you added later), an Update copies button appears on it. One click sends your changes to the copies you assigned. Steps they already ticked stay ticked, and steps they added themselves are kept.'
+                ]
+            }
+        ],
+        tip: 'Try it: assign a task to a teammate, change the deadline on your copy, and press Update copies.',
+        signoff: 'Needs the new database rules published.'
+    },
+    {
         id: '2026-11-03',
         date: 'November 3, 2026',
         title: 'Tasks that wait for other tasks, and verified email',

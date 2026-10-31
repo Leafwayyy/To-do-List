@@ -759,6 +759,119 @@ const GroupWorkflow = (() => {
         }, true);
     }
 
+    // ---- keeping the copies you assigned in step with yours ------------------------
+    // Assigning makes one copy per person. After that, changes to your own copy (a new deadline,
+    // steps you added later) don't reach theirs on their own, so this lists the copies you assigned
+    // and pushes what differs.
+
+    const SYNC_FIELDS = ['text', 'matrix', 'taskType', 'estimateMinutes', 'difficulty', 'dueAt', 'scheduledAt'];
+
+    // Their open copies of a task you own and assigned to others.
+    function copiesIAssigned(task) {
+        const me = ctx.getUser();
+        if (!me || !task || !task.sharedId || task.ownerId !== me.uid || task.sharedBy !== me.uid) {
+            return [];
+        }
+        return (ctx.getTasks() || []).filter((other) => other.id !== task.id && other.sharedId === task.sharedId
+            && other.assignedBy === me.uid && other.ownerId !== me.uid && !other.completed);
+    }
+
+    // My steps, kept in order. A step they already have (same words) keeps its tick; new ones
+    // are added unticked; anything they added themselves is kept, never deleted.
+    function mergeSteps(mine, theirs, makeId, now = new Date().toISOString()) {
+        const theirList = Array.isArray(theirs) ? theirs : [];
+        const used = new Set();
+        const out = (Array.isArray(mine) ? mine : []).map((step) => {
+            const index = theirList.findIndex((candidate, i) => !used.has(i) && candidate && candidate.text === step.text);
+            if (index >= 0) {
+                used.add(index);
+                return { ...theirList[index], dueAt: step.dueAt || null };
+            }
+            return { id: makeId(), text: String(step.text || '').slice(0, 240), completed: false, createdAt: now, dueAt: step.dueAt || null };
+        });
+        theirList.forEach((step, i) => {
+            if (!used.has(i)) {
+                out.push(step);
+            }
+        });
+        return out.slice(0, 200);
+    }
+
+    const sameTime = (a, b) => (a ? new Date(a).getTime() : null) === (b ? new Date(b).getTime() : null);
+
+    // What would change on `theirs` to match `mine`: { fields, changes: [words] } or null.
+    function copyPatch(mine, theirs, makeId) {
+        const fields = {};
+        const changes = [];
+        SYNC_FIELDS.forEach((key) => {
+            const a = mine[key] == null ? null : mine[key];
+            const b = theirs[key] == null ? null : theirs[key];
+            const different = key === 'dueAt' || key === 'scheduledAt' ? !sameTime(a, b) : a !== b;
+            if (different) {
+                fields[key] = a;
+                changes.push(key === 'dueAt' ? 'the deadline' : key === 'scheduledAt' ? 'the scheduled time' : key === 'text' ? 'the title' : 'the details');
+            }
+        });
+        const merged = mergeSteps(mine.subtasks, theirs.subtasks, makeId);
+        const strip = (list) => JSON.stringify((list || []).map((s) => [s.id, s.text, s.completed, s.dueAt || null]));
+        const mineSteps = (mine.subtasks || []).length;
+        if (mineSteps > 0 && strip(merged) !== strip(theirs.subtasks)) {
+            fields.subtasks = merged;
+            changes.push('the steps');
+        }
+        return Object.keys(fields).length > 0 ? { fields, changes } : null;
+    }
+
+    // How many of your assigned copies differ from yours (to decide whether to offer the button).
+    function copiesOutOfStep(task, makeId) {
+        return copiesIAssigned(task).filter((copy) => copyPatch(task, copy, makeId));
+    }
+
+    async function pushToCopies(groupId, task, makeId) {
+        const { doc, writeBatch } = ctx.fs();
+        const group = ctx.getGroup();
+        const me = myName();
+        const plans = copiesIAssigned(task).map((copy) => ({ copy, patch: copyPatch(task, copy, makeId) })).filter((plan) => plan.patch);
+        if (plans.length === 0) {
+            return 0;
+        }
+        const batch = writeBatch(ctx.db());
+        const now = new Date().toISOString();
+        plans.forEach(({ copy, patch }) => {
+            batch.update(doc(ctx.db(), 'groups', groupId, 'tasks', copy.id), { ...patch.fields, updatedAt: now });
+        });
+        await batch.commit();
+        plans.forEach(({ copy, patch }) => {
+            notify({
+                toUid: copy.ownerId,
+                type: 'status',
+                title: `${me} updated a task for you`,
+                body: clip(task.text, 120) + ' - changed ' + patch.changes.join(', '),
+                groupId,
+                groupName: group?.name,
+                taskId: copy.id,
+                actorName: me
+            });
+        });
+        return plans.length;
+    }
+
+    // Tell the owner you changed their task (used when you edit a task you assigned them).
+    function tellOwnerOfEdit(groupId, task, changes) {
+        const group = ctx.getGroup();
+        const me = myName();
+        notify({
+            toUid: task.ownerId,
+            type: 'status',
+            title: `${me} updated a task for you`,
+            body: clip(task.text, 120) + (changes.length ? ' - changed ' + changes.join(', ') : ''),
+            groupId,
+            groupName: group?.name,
+            taskId: task.id,
+            actorName: me
+        });
+    }
+
     // The group's people as [{ uid, name }], for mentions.
     function memberList(group) {
         return (group?.memberIds || []).map((uid, index) => ({
@@ -770,7 +883,8 @@ const GroupWorkflow = (() => {
     return {
         STATUS_INFO, configure, askForText, setStatus, reviewTask, requestReview, needsSignOff, createStatusRow, createReviewRows,
         dependencyIds, unmetDependencies, dependencyCandidates, wouldCycle, setDependencies, notifyDependents, openDependencyPicker,
-        mentionRanges, mentionedUids, renderWithMentions, attachMentionPicker, memberList, managersFor
+        mentionRanges, mentionedUids, renderWithMentions, attachMentionPicker, memberList, managersFor,
+        copiesIAssigned, copiesOutOfStep, copyPatch, mergeSteps, pushToCopies, tellOwnerOfEdit
     };
 })();
 

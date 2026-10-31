@@ -61,7 +61,7 @@ const TITLE_ENDINGS = [
     ' assigned you a task', ' declined a task you assigned', ' suggested a task for you',
     ' commented on your task', ' mentioned you in a comment', ' sent a task for your review',
     ' approved your task', ' sent a task back to you', ' is blocked on a task',
-    ' finished a task you were waiting on'
+    ' finished a task you were waiting on', ' updated a task for you'
 ];
 const GENERIC_TITLE = {
     assigned: 'A task was assigned to you', declined: 'Someone declined a task you assigned', suggestion: 'A task was suggested to you',
