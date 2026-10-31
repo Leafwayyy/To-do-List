@@ -79,6 +79,11 @@ const GroupAssign = (() => {
     function resolveTargets(group, choice, myUid, scope = 'all') {
         const memberIds = group.memberIds || [];
         const all = memberIds.map((uid, index) => ({ uid, name: nameAt(group, index) }));
+        // "me": your own copy. Always allowed (it is your own task), whatever your
+        // assign scope - this is what lets "me and Philip" be ONE shared assignment.
+        if (choice === 'me') {
+            return all.filter((target) => target.uid === myUid);
+        }
         if (scope === 'role') {
             // Defense in depth (the rules enforce this too): same-role only.
             const myRole = GroupRoles.getRole(group, myUid);
@@ -102,6 +107,23 @@ const GroupAssign = (() => {
         return [];
     }
 
+    // Several choices at once ("me" + "Philip" + a role), as one de-duplicated list of
+    // people in the order they were named. Each choice is judged on its own by
+    // resolveTargets, so a role-limited assigner can't smuggle someone in via a list.
+    function resolveTargetList(group, choices, myUid, scope = 'all') {
+        const seen = new Set();
+        const people = [];
+        (Array.isArray(choices) ? choices : [choices]).forEach((choice) => {
+            resolveTargets(group, choice, myUid, scope).forEach((person) => {
+                if (!seen.has(person.uid)) {
+                    seen.add(person.uid);
+                    people.push(person);
+                }
+            });
+        });
+        return people;
+    }
+
     async function commitChunk(batchWriter, chunk) {
         const batch = batchWriter();
         chunk.forEach(({ ref, data }) => batch.set(ref, data));
@@ -118,7 +140,10 @@ const GroupAssign = (() => {
     // Returns { mode, created, total, failedNames }. Never throws for a
     // partial result: the caller decides how to tell the user.
     async function assign({ group, user, canAssign, assignScope = 'all', choice, fields }) {
-        const targets = resolveTargets(group, choice, user.uid, canAssign ? assignScope : 'all');
+        const effectiveScope = canAssign ? assignScope : 'all';
+        const targets = Array.isArray(choice)
+            ? resolveTargetList(group, choice, user.uid, effectiveScope)
+            : resolveTargets(group, choice, user.uid, effectiveScope);
         if (targets.length === 0) {
             return { mode: 'none', created: 0, total: 0, failedNames: [] };
         }
@@ -294,5 +319,5 @@ const GroupAssign = (() => {
         return result;
     }
 
-    return { getChoiceOptions, resolveTargets, assign, decline, subscribe, getUnseenDeclines, dismiss, isWithinDeclineWindow, DECLINE_WINDOW_MS };
+    return { getChoiceOptions, resolveTargets, resolveTargetList, assign, decline, subscribe, getUnseenDeclines, dismiss, isWithinDeclineWindow, DECLINE_WINDOW_MS };
 })();

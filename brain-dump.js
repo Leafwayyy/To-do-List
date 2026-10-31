@@ -2507,6 +2507,15 @@ function createBrainDumpController({ context, commitTasks, commitSuggestions, co
             // to parse at once (Miller's Law), but a plain single-type
             // reply (the common case) doesn't need a label pointing out
             // what it obviously already is.
+            // Fold duplicate drafts (a task plus an assignment of the SAME task) into one shared
+            // assignment before anything is drawn - see DustyActions.normalizeReply.
+            try {
+                if (actionTools && typeof actionTools.normalizeReply === 'function') {
+                    actionTools.normalizeReply(data);
+                }
+            } catch (error) {
+                console.warn('Brain Dump: could not tidy the reply:', error);
+            }
             const presentTypeCount = [data.tasks, data.teammateSuggestions, data.teammateComments, data.memoryProposals, data.taskEdits, data.actions]
                 .filter((list) => Array.isArray(list) && list.length > 0).length;
             const labelFor = (label) => (presentTypeCount > 1 ? label : undefined);

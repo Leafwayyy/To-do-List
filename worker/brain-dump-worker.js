@@ -187,7 +187,8 @@ PERMISSIONS: the "WHAT THIS USER IS ALLOWED TO DO" block below is decided by the
 Action kinds (set "action" to exactly one of the allowed kinds, fill in only the fields that kind uses, and leave every other field null):
 - createFolder: folder (the new folder's short name).
 - fileTasks: folder (an existing folder, or one you are creating in this same reply) and taskIds (the EXACT ids from the user's OWN task list below; never a teammate's task and never an invented id).
-- assign (groups only): text (a NEW task), assignTo (a member's exact name from the roster, an exact role name, or the word everyone), matrix, difficulty, dueAt (same reasoning as a normal task). This creates a new task on that person's list. It cannot hand over a task that already exists; if asked to, say so.
+- assign (groups only): a NEW task given to one or more people. It takes EVERYTHING a normal task takes, and every person named gets the same full task: text, matrix, taskType, difficulty, estimateMinutes, dueAt, scheduledAt, recurrence, and subtasks (the steps). assignTo is a LIST of names, each one an exact member name from the roster, an exact role name, the word everyone, or the word me for the user themselves. It cannot hand over a task that already exists; if asked to, say so.
+SHARING A TASK: when the user wants the SAME task for themselves and other people ("me and Philip should both have this", "give it to everyone including me"), send exactly ONE assign action with assignTo ["me", "Philip"] and put ALL the steps and details on it. Do NOT also put that task in "tasks", and do NOT send a separate action per person: separate copies are not linked, and a copy without its steps is useless. If the task is only for the user, it is just a normal "tasks" item, not an assign action.
 - createRole (groups only): roleName.
 - setRole (groups only): memberName (exact), roleName (exact, or none to remove their role).
 - grantAccess (groups only): memberName (exact), assignRights (all, role, or none) and folderRights (true or false). This decides who may assign tasks or manage folders.
@@ -957,10 +958,15 @@ function buildGeminiRequest(body) {
                 folder: { type: 'STRING', nullable: true },
                 taskIds: { type: 'ARRAY', items: { type: 'STRING' }, nullable: true },
                 text: { type: 'STRING', nullable: true },
-                assignTo: { type: 'STRING', nullable: true },
+                assignTo: { type: 'ARRAY', items: { type: 'STRING' }, nullable: true },
                 matrix: { type: 'STRING', enum: ['do', 'schedule', 'delegate', 'eliminate'], nullable: true },
+                taskType: { type: 'STRING', enum: ['open', 'timeboxed'], nullable: true },
                 difficulty: { type: 'STRING', nullable: true },
+                estimateMinutes: { type: 'STRING', nullable: true },
                 dueAt: { type: 'STRING', nullable: true },
+                scheduledAt: { type: 'STRING', nullable: true },
+                recurrence: { type: 'STRING', enum: ['daily', 'weekly', 'monthly'], nullable: true },
+                subtasks: { type: 'ARRAY', items: SUBTASK_ITEM_SCHEMA, nullable: true },
                 roleName: { type: 'STRING', nullable: true },
                 memberName: { type: 'STRING', nullable: true },
                 assignRights: { type: 'STRING', enum: ['all', 'role', 'none'], nullable: true },

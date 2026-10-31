@@ -98,6 +98,39 @@ const DustyActions = (() => {
         return groupTasks.filter((task) => wanted.has(task.id) && task.ownerId === uid);
     }
 
+    const ME_WORDS = ['me', 'myself', 'self', 'i'];
+    const isMeToken = (name) => ME_WORDS.includes(norm(name));
+
+    // assignTo may be one name or a list. Always a clean array of names.
+    function assignNames(draft) {
+        const raw = draft && draft.assignTo;
+        const list = Array.isArray(raw) ? raw : (raw == null || raw === '' ? [] : [raw]);
+        return list.map((name) => clean(name, 60)).filter(Boolean).slice(0, 12);
+    }
+
+    // The choices for a whole list of names: { choices: ['me','u:..','r:..','everyone'], error }.
+    // "me" (or the user's own name) is the user's own copy, not an error.
+    function resolveAssignChoices(group, names) {
+        const choices = [];
+        for (const name of names) {
+            if (isMeToken(name)) {
+                choices.push('me');
+                continue;
+            }
+            const asMember = findMember(group, name);
+            if (asMember && asMember !== 'ambiguous' && asMember.uid === currentUser.uid) {
+                choices.push('me');
+                continue;
+            }
+            const choice = resolveAssignTarget(group, name);
+            if (typeof choice === 'object') {
+                return { choices: [], error: choice.error };
+            }
+            choices.push(choice);
+        }
+        return { choices: [...new Set(choices)], error: choices.length === 0 ? 'No one was named.' : null };
+    }
+
     // 'everyone' | 'u:<uid>' | 'r:<roleId>' | { error }
     function resolveAssignTarget(group, name) {
         const wanted = norm(name);
@@ -197,21 +230,50 @@ const DustyActions = (() => {
             if (!text) {
                 return blocked('The task has no text.');
             }
-            const target = resolveAssignTarget(ctx.group, draft.assignTo);
-            if (typeof target === 'object') {
-                return blocked(target.error);
+            const { choices, error } = resolveAssignChoices(ctx.group, assignNames(draft));
+            if (error) {
+                return blocked(error);
             }
             const scope = ctx.access.canAssign ? ctx.access.assignScope : 'all';
-            const people = GroupAssign.resolveTargets(ctx.group, target, ctx.uid, scope);
-            if (people.length === 0) {
+            // Each named person/role/group must itself be reachable. A role-limited assigner
+            // asking for "me and Kim" (Kim is in another role) is refused, not quietly trimmed.
+            const unreachable = choices.find((choice) => GroupAssign.resolveTargets(ctx.group, choice, ctx.uid, scope).length === 0);
+            if (unreachable) {
                 return blocked(ctx.access.canAssign && scope === 'role'
                     ? 'You can only assign to people who share your role.'
                     : 'Nobody to send that to.');
             }
-            const who = people.length === 1 ? people[0].name : (target === 'everyone' ? `everyone (${people.length} people)` : `${people.length} people`);
+            const people = GroupAssign.resolveTargetList(ctx.group, choices, ctx.uid, scope);
+            const others = people.filter((person) => person.uid !== ctx.uid);
+            const includesMe = people.length !== others.length;
+            // Name each choice the way the user said it, so the card shows exactly who is
+            // included: "you", a person, "everyone", or "everyone with the role X".
+            const parts = choices.map((choice) => {
+                if (choice === 'me') {
+                    return 'you';
+                }
+                if (choice === 'everyone') {
+                    return `everyone (${people.length} people)`;
+                }
+                if (choice.startsWith('r:')) {
+                    const role = GroupRoles.getAll(ctx.group).find((candidate) => candidate.id === choice.slice(2));
+                    const count = GroupAssign.resolveTargets(ctx.group, choice, ctx.uid, scope).length;
+                    return `everyone with the role "${role ? role.name : 'that role'}" (${count})`;
+                }
+                const person = people.find((candidate) => `u:${candidate.uid}` === choice);
+                return person ? person.name : 'someone';
+            });
+            const who = parts.length > 4
+                ? `${parts.slice(0, 3).join(', ')} and ${parts.length - 3} more`
+                : (parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
+            const stepCount = Array.isArray(draft.subtasks) ? draft.subtasks.filter((step) => step && clean(step.text, 240)).length : 0;
+            const withSteps = stepCount > 0 ? `, with ${stepCount} step${stepCount === 1 ? '' : 's'}` : '';
+            if (others.length === 0) {
+                return { allowed: true, text: `Add "${text}" to your own list${withSteps}.` };
+            }
             return ctx.access.canAssign
-                ? { allowed: true, text: `Assign "${text}" to ${who}. It lands on their list now, and they can decline for a few minutes.` }
-                : { allowed: true, text: `Suggest "${text}" to ${who}. You can't assign directly in this group, so each person gets to accept it.` };
+                ? { allowed: true, text: `Give "${text}" to ${who}${withSteps}. It is one shared task: ${includesMe ? 'you and ' : ''}everyone named gets the same copy, and they can decline theirs for a few minutes.` }
+                : { allowed: true, text: `Suggest "${text}" to ${others.map((person) => person.name).join(', ')}${includesMe ? ', and add it to your own list' : ''}${withSteps}. You can't assign directly in this group, so each person gets to accept it.` };
         }
 
         if (['createRole', 'setRole', 'grantAccess'].includes(action)) {
@@ -343,16 +405,27 @@ const DustyActions = (() => {
 
         if (action === 'assign') {
             const { group } = groupContext();
-            const choice = resolveAssignTarget(group, draft.assignTo);
-            const due = draft.dueAt && isValidDateValue(draft.dueAt) ? new Date(draft.dueAt).toISOString() : null;
+            const { choices } = resolveAssignChoices(group, assignNames(draft));
+            const isoOrNull = (value) => (value && isValidDateValue(value) ? new Date(value).toISOString() : null);
+            const taskType = draft.taskType === 'timeboxed' ? 'timeboxed' : 'open';
+            // The SAME full task goes to everyone named (steps, estimate, schedule, repeat and
+            // all), as ONE shared assignment - not a bare title with the details left behind.
+            const subtasks = (Array.isArray(draft.subtasks) ? draft.subtasks : [])
+                .slice(0, 200)
+                .map((step) => ({ text: clean(step && step.text, 240), dueAt: isoOrNull(step && step.dueAt) }))
+                .filter((step) => step.text);
             // runGroupAssignment assigns for owners/admins/granted members and falls back to
             // suggestions for everyone else, and throws if nobody received it.
-            await runGroupAssignment(group, choice, {
+            await runGroupAssignment(group, choices, {
                 text: clean(draft.text, AI_TASK_TITLE_MAX_LENGTH),
                 matrix: draft.matrix,
                 difficulty: draft.difficulty,
-                dueAt: due,
-                taskType: 'open'
+                dueAt: isoOrNull(draft.dueAt),
+                scheduledAt: isoOrNull(draft.scheduledAt),
+                recurrence: draft.recurrence,
+                taskType,
+                estimateMinutes: taskType === 'timeboxed' ? parseDurationMinutes(draft.estimateMinutes) : null,
+                subtasks
             });
             return { applied: true };
         }
@@ -453,5 +526,72 @@ const DustyActions = (() => {
         });
     }
 
-    return { capabilities, describe, commit, prepare };
+    // ---- tidy Dusty's reply BEFORE the cards are drawn ----------------------------
+    // "Me and Philip should both have this" has to be ONE shared assignment that includes
+    // the user. The prompt says so, but the model can still slip and send the task for the
+    // user plus a separate assignment for Philip (two unlinked copies, and the second one
+    // without the steps). This repairs that in code so it never reaches the cards:
+    //  - a task in "tasks" that matches an assign action's title is folded INTO that action
+    //    (the user is added, and any steps/fields the action lacked are carried over);
+    //  - an assign action aimed only at the user is just a normal task, so it moves to "tasks".
+    // Mutates and returns the reply. Only touches group replies that contain assign actions.
+    const FIELD_KEYS = ['matrix', 'taskType', 'difficulty', 'estimateMinutes', 'dueAt', 'scheduledAt', 'recurrence'];
+    const titleKey = (text) => norm(text).replace(/[^\p{L}\p{N} ]/gu, '').replace(/\s+/g, ' ').trim();
+
+    function normalizeReply(data) {
+        if (!data || !isGroupPage() || !Array.isArray(data.actions) || !data.actions.some((a) => a && a.action === 'assign')) {
+            return data;
+        }
+        const taskList = Array.isArray(data.tasks) ? data.tasks : [];
+
+        data.actions.forEach((action) => {
+            if (!action || action.action !== 'assign' || !titleKey(action.text)) {
+                return;
+            }
+            const index = taskList.findIndex((task) => task && titleKey(task.text) === titleKey(action.text));
+            if (index === -1) {
+                return;
+            }
+            const task = taskList.splice(index, 1)[0];
+            FIELD_KEYS.forEach((key) => {
+                if ((action[key] === null || action[key] === undefined || action[key] === '') && task[key] !== null && task[key] !== undefined) {
+                    action[key] = task[key];
+                }
+            });
+            if ((!Array.isArray(action.subtasks) || action.subtasks.length === 0) && Array.isArray(task.subtasks)) {
+                action.subtasks = task.subtasks;
+            }
+            const names = assignNames(action);
+            if (!names.some(isMeToken)) {
+                names.unshift('me');
+            }
+            action.assignTo = names;
+        });
+
+        data.actions = data.actions.filter((action) => {
+            if (!action || action.action !== 'assign') {
+                return true;
+            }
+            const names = assignNames(action);
+            if (names.length > 0 && names.every(isMeToken)) {
+                taskList.push({
+                    text: action.text,
+                    matrix: action.matrix,
+                    taskType: action.taskType || 'open',
+                    difficulty: action.difficulty,
+                    estimateMinutes: action.estimateMinutes,
+                    dueAt: action.dueAt,
+                    scheduledAt: action.scheduledAt,
+                    recurrence: action.recurrence,
+                    subtasks: Array.isArray(action.subtasks) ? action.subtasks : []
+                });
+                return false;
+            }
+            return true;
+        });
+        data.tasks = taskList;
+        return data;
+    }
+
+    return { capabilities, describe, commit, prepare, normalizeReply };
 })();

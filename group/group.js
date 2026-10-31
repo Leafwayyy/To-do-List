@@ -6261,11 +6261,48 @@ function renderAssignmentOutcomes(group) {
 // loaded it names the participants, and a task that merely CLAIMS the same
 // sharedId but belongs to someone else is not one of them (the rules also stop
 // plain members setting a sharedId, this covers anything older).
-function getSharedCopies(sharedId) {
-    const bundle = groupAssignments.find((assignment) => assignment.id === sharedId);
+function getSharedCopies(shareKey) {
+    const bundle = groupAssignments.find((assignment) => assignment.id === shareKey);
     const participants = bundle && Array.isArray(bundle.participantIds) ? bundle.participantIds : null;
-    return groupTasks.filter((other) => other.sharedId === sharedId && (!participants || participants.includes(other.ownerId)));
+    return groupTasks.filter((other) => {
+        if (sharedKeyOf(other) !== shareKey) {
+            return false;
+        }
+        // A task that merely CLAIMS this sharedId must belong to a participant. One linked by
+        // look-alike (below) is vouched for by the assigner's own record, not the list.
+        return other.sharedId === shareKey ? (!participants || participants.includes(other.ownerId)) : true;
+    });
 }
+
+// Copies that were never linked: older assignments, or a task plus an assignment of the SAME
+// task made as two separate steps. Shown as one card when an assigned copy and its assigner's
+// own task agree on the title and due date. Safe against look-alikes: it needs a copy that
+// the rules say was assigned BY that person (assignedBy can't be forged), and only that
+// person's own matching task joins it.
+let legacyShareKeyById = new Map();
+function computeLegacyShareKeys(taskList) {
+    const normalize = (text) => String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const matchKey = (originalOwnerId, task) => `${originalOwnerId}|${normalize(task.text)}|${task.dueAt || ''}`;
+    const keyToShare = new Map();
+    const result = new Map();
+    taskList.forEach((task) => {
+        if (task.assignedBy && task.assignedBy !== task.ownerId) {
+            keyToShare.set(matchKey(task.assignedBy, task), task.sharedId || `legacy:${matchKey(task.assignedBy, task)}`);
+        }
+    });
+    taskList.forEach((task) => {
+        if (!task.assignedBy) {
+            const share = keyToShare.get(matchKey(task.ownerId, task));
+            if (share && task.sharedId !== share) {
+                result.set(task.id, share);
+            }
+        } else if (task.assignedBy !== task.ownerId && !task.sharedId) {
+            result.set(task.id, keyToShare.get(matchKey(task.assignedBy, task)));
+        }
+    });
+    return result;
+}
+const sharedKeyOf = (task) => task.sharedId || legacyShareKeyById.get(task.id) || null;
 
 // One card for a task several people share: the title, how many have
 // finished, and a chip per person. YOUR copy is shown inside it as a normal
@@ -6292,10 +6329,14 @@ function createSharedTaskCard(group, sharedId, copies, visibleTasks) {
     head.append(title, progress);
     card.appendChild(head);
 
-    if (bundle?.createdBy) {
+    // Who handed it out: the assignment record when there is one, otherwise whoever the
+    // copies say assigned them (older or look-alike-linked tasks have no record).
+    const assignerCopy = sortedCopies.find((copy) => copy.assignedBy);
+    const assignerUid = bundle?.createdBy || assignerCopy?.assignedBy;
+    if (assignerUid) {
         const by = document.createElement('p');
         by.classList.add('sharedTaskBy');
-        by.textContent = `Assigned by ${rosterNameFor(bundle.createdBy, bundle.createdByName) || 'a teammate'}`;
+        by.textContent = `Assigned by ${rosterNameFor(assignerUid, bundle?.createdByName || assignerCopy?.assignedByName) || 'a teammate'}`;
         card.appendChild(by);
     }
 
@@ -6332,7 +6373,7 @@ function createSharedTaskCard(group, sharedId, copies, visibleTasks) {
     });
     card.appendChild(chips);
 
-    const mine = visibleTasks.find((task) => task.sharedId === sharedId && task.ownerId === currentUser?.uid);
+    const mine = visibleTasks.find((task) => sharedKeyOf(task) === sharedId && task.ownerId === currentUser?.uid);
     if (mine) {
         const inner = document.createElement('ul');
         inner.classList.add('sharedTaskInner');
@@ -6621,6 +6662,7 @@ function renderGroupTasks() {
 
     const group = getSelectedGroup();
     groupTasksList.innerHTML = '';
+    legacyShareKeyById = computeLegacyShareKeys(groupTasks);
     renderGroupFolderBar(group);
 
     // A group is selected but its first task snapshot hasn't arrived yet -
@@ -6673,9 +6715,33 @@ function renderGroupTasks() {
 
     const sorted = [...visible].sort(compareGroupTasksByPriority);
 
-    const collapseShared = activeMemberScope === 'all' && groupByMode !== 'person';
+    // A task shared by several people is ONE card saying who has it, never a copy under
+    // each person - in every grouping, including Group by person. It is placed once, under
+    // the first section that holds a copy, and later sections simply don't repeat it (a
+    // section with nothing left is dropped, and every heading counts what it really shows).
+    // Not when looking at one person's tasks: there their own copy shows normally.
+    const collapseShared = activeMemberScope === 'all';
     const emittedShared = new Set();
-    buildGroupSections(group, sorted).forEach((section) => {
+    const plan = buildGroupSections(group, sorted).map((section) => {
+        const entries = [];
+        section.tasks.forEach((task) => {
+            const shareKey = collapseShared ? sharedKeyOf(task) : null;
+            if (shareKey) {
+                const copies = getSharedCopies(shareKey);
+                if (copies.length > 1 && copies.some((copy) => copy.id === task.id)) {
+                    if (!emittedShared.has(shareKey)) {
+                        emittedShared.add(shareKey);
+                        entries.push({ shareKey, copies });
+                    }
+                    return;
+                }
+            }
+            entries.push({ task });
+        });
+        return { ...section, entries };
+    }).filter((section) => section.entries.length > 0);
+
+    plan.forEach((section) => {
         if (section.title) {
             const heading = document.createElement('li');
             heading.className = 'groupSectionHeading';
@@ -6690,26 +6756,17 @@ function renderGroupTasks() {
             title.textContent = section.title;
             const count = document.createElement('span');
             count.className = 'groupSectionCount';
-            count.textContent = String(section.tasks.length);
+            count.textContent = String(section.entries.length);
             heading.append(title, count);
             groupTasksList.appendChild(heading);
         }
-        section.tasks.forEach((task) => {
-            // Copies of one shared task collapse into a single card in the
-            // combined view. Not when looking at one person (their copy shows
-            // normally) or when grouped by person (each copy sits under its owner).
-            if (collapseShared && task.sharedId) {
-                const copies = getSharedCopies(task.sharedId);
-                if (copies.length > 1 && copies.some((copy) => copy.id === task.id)) {
-                    if (!emittedShared.has(task.sharedId)) {
-                        emittedShared.add(task.sharedId);
-                        groupTasksList.appendChild(createSharedTaskCard(group, task.sharedId, copies, sorted));
-                    }
-                    return;
-                }
+        section.entries.forEach((entry) => {
+            if (entry.shareKey) {
+                groupTasksList.appendChild(createSharedTaskCard(group, entry.shareKey, entry.copies, sorted));
+                return;
             }
-            const isOwner = currentUser && task.ownerId === currentUser.uid;
-            groupTasksList.appendChild(createGroupTaskItem(group.id, task, isOwner));
+            const isOwner = currentUser && entry.task.ownerId === currentUser.uid;
+            groupTasksList.appendChild(createGroupTaskItem(group.id, entry.task, isOwner));
         });
     });
 }
