@@ -2936,9 +2936,6 @@ const handoffRequestsForYouPanel = document.querySelector('.handoffRequestsForYo
 const brainDumpToggleBtn = document.querySelector('.brainDumpToggleBtn');
 const groupAlertToggleBtn = document.querySelector('.groupAlertToggleBtn');
 const helpTourBtn = document.querySelector('.helpTourBtn');
-const navAttentionBadge = document.querySelector('.navAttentionBadge');
-const navAttentionCount = document.querySelector('.navAttentionCount');
-const navAttentionMenu = document.querySelector('.navAttentionMenu');
 const groupOnboardingHint = document.querySelector('.groupOnboardingHint');
 const groupOnboardingStartTourBtn = document.querySelector('.groupOnboardingStartTourBtn');
 const groupOnboardingDismissBtn = document.querySelector('.groupOnboardingDismissBtn');
@@ -8003,11 +8000,6 @@ function computeAttentionSummary() {
     };
 }
 
-function closeNavAttentionMenu() {
-    navAttentionMenu?.classList.add('hidden');
-    navAttentionBadge?.setAttribute('aria-expanded', 'false');
-}
-
 // Brief "look here" pulse on whatever a notification row actually jumped
 // you to - removed afterward purely so it can play again on a later jump
 // without needing a forced-reflow restart trick.
@@ -8100,103 +8092,66 @@ function jumpToSuggestionOutcomes() {
     });
 }
 
-function renderNavAttentionMenu(summary) {
-    if (!navAttentionMenu) {
-        return;
-    }
-    navAttentionMenu.innerHTML = '';
-
+// The rows the one notification bell shows under "Needs your attention" for this group.
+function buildAttentionRows(summary) {
+    const groupName = getSelectedGroup()?.name || '';
     const rows = [
         summary.suggestionsCount > 0 && {
             icon: 'fa-solid fa-lightbulb',
             label: `${summary.suggestionsCount} suggestion${summary.suggestionsCount === 1 ? '' : 's'} for you`,
+            cat: 'tasks',
             onClick: jumpToSuggestionsForYou
         },
         summary.unreadCommentsCount > 0 && {
             icon: 'fa-regular fa-comment',
             label: `${summary.unreadCommentsCount} unread comment${summary.unreadCommentsCount === 1 ? '' : 's'}`,
+            cat: 'comments',
             onClick: jumpToUnreadComments
         },
         summary.joinRequestsCount > 0 && {
             icon: 'fa-solid fa-user-plus',
             label: `${summary.joinRequestsCount} pending join request${summary.joinRequestsCount === 1 ? '' : 's'}`,
+            cat: 'team',
             onClick: jumpToJoinRequests
         },
         summary.suggestionOutcomesCount > 0 && {
             icon: 'fa-solid fa-circle-check',
             label: `${summary.suggestionOutcomesCount} suggestion outcome${summary.suggestionOutcomesCount === 1 ? '' : 's'}`,
+            cat: 'tasks',
             onClick: jumpToSuggestionOutcomes
         },
         summary.handoffRequestsCount > 0 && {
             icon: 'fa-solid fa-right-left',
             label: `${summary.handoffRequestsCount} handoff request${summary.handoffRequestsCount === 1 ? '' : 's'}`,
+            cat: 'tasks',
             onClick: jumpToHandoffRequests
         }
     ].filter(Boolean);
-
-    rows.forEach((row) => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.classList.add('navAttentionMenuRow');
-        btn.setAttribute('role', 'menuitem');
-        btn.innerHTML = `<i class="${row.icon}"></i><span>${row.label}</span>`;
-        btn.addEventListener('click', () => {
+    return rows.map((row, index) => ({
+        key: `attention-${index}`,
+        icon: row.icon,
+        label: row.label,
+        cat: row.cat,
+        where: groupName,
+        onClick: () => {
             playClickSound();
-            closeNavAttentionMenu();
             row.onClick();
-        });
-        navAttentionMenu.appendChild(btn);
-    });
+        }
+    }));
 }
 
-function updateNavAttentionBadge(group) {
-    if (!navAttentionBadge || !navAttentionCount) {
-        return;
-    }
-    if (!group) {
-        navAttentionBadge.classList.remove('visible');
-        closeNavAttentionMenu();
-        return;
-    }
-    const summary = computeAttentionSummary();
-    navAttentionCount.textContent = summary.total > 9 ? '9+' : String(summary.total);
-    navAttentionBadge.classList.toggle('visible', summary.total > 0);
-    navAttentionBadge.title = summary.total === 0 ? '' : [
-        summary.unreadCommentsCount && `${summary.unreadCommentsCount} unread comment${summary.unreadCommentsCount === 1 ? '' : 's'}`,
-        summary.joinRequestsCount && `${summary.joinRequestsCount} pending join request${summary.joinRequestsCount === 1 ? '' : 's'}`,
-        summary.suggestionsCount && `${summary.suggestionsCount} suggestion${summary.suggestionsCount === 1 ? '' : 's'} for you`,
-        summary.suggestionOutcomesCount && `${summary.suggestionOutcomesCount} suggestion outcome${summary.suggestionOutcomesCount === 1 ? '' : 's'}`,
-        summary.handoffRequestsCount && `${summary.handoffRequestsCount} handoff request${summary.handoffRequestsCount === 1 ? '' : 's'}`
-    ].filter(Boolean).join(', ');
-    renderNavAttentionMenu(summary);
-    if (summary.total === 0) {
-        closeNavAttentionMenu();
-    }
+// The old second bell is gone: everything it listed now shows in the one notification bell
+// (notifications.js) under "Needs your attention". This just tells that bell to look again.
+function updateNavAttentionBadge() {
+    window.NotificationCenter?.refresh();
 }
 
-navAttentionBadge?.addEventListener('click', (event) => {
-    event.stopPropagation();
-    if (!navAttentionBadge.classList.contains('visible')) {
-        return;
-    }
-    playClickSound();
-    const willOpen = navAttentionMenu?.classList.contains('hidden');
-    navAttentionMenu?.classList.toggle('hidden', !willOpen);
-    navAttentionBadge.setAttribute('aria-expanded', String(Boolean(willOpen)));
-});
-
-document.addEventListener('click', (event) => {
-    if (!navAttentionMenu || navAttentionMenu.classList.contains('hidden')) {
-        return;
-    }
-    if (!navAttentionMenu.contains(event.target) && !navAttentionBadge?.contains(event.target)) {
-        closeNavAttentionMenu();
-    }
-});
+if (typeof NotificationCenter !== 'undefined') {
+    NotificationCenter.setAttentionSource(() => (getSelectedGroup() ? buildAttentionRows(computeAttentionSummary()) : []));
+}
 
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
-        closeNavAttentionMenu();
         closeGroupTeamPulse();
     }
 });
@@ -9693,7 +9648,7 @@ function resetGroupState() {
     joinRequestsRetryTimer = null;
     joinRequestsRetryCount = 0;
     joinRequestsRetryKey = null;
-    navAttentionBadge?.classList.remove('visible');
+    window.NotificationCenter?.refresh();
     closeGroupSettingsModal();
     // So a different account signing in during the same page load doesn't
     // inherit the previous account's reminder cooldown history.
@@ -10213,7 +10168,7 @@ const GROUP_TOUR_STEPS = [
     {
         selector: '.notifBtn',
         title: 'Your notification bell',
-        text: 'Everything that concerns you lands here, in solo and in every group: tasks assigned or suggested to you, reviews, comments, and @mentions (type @ in a comment to pick someone). Things that are due soon or overdue are pinned at the top. Desktop alerts are on by default, and you can turn them off in Settings.',
+        text: 'Everything that concerns you lands here, in solo and in every group: tasks assigned or suggested to you, reviews, comments, and @mentions (type @ in a comment to pick someone). Under Needs your attention are the things waiting on you: due soon or overdue, unread comments, suggestions for you, join requests if you own or admin the group, and handoffs. Tap any of them to go straight there. Desktop alerts are on by default, and you can turn them off in Settings.',
         beforeShow: (step) => {
             switchGroupView('tasks');
             step.selector = document.querySelector('.notifBtn') ? '.notifBtn' : '.userBadge';
@@ -10287,17 +10242,6 @@ const GROUP_TOUR_STEPS = [
         selector: '.groupSettingsBtn',
         title: 'Group settings',
         text: 'Anyone can open Group settings. It\'s where you leave this group, and where the owner can delete it. Owners and admins also handle who can join and pending join requests there, and the owner sets the group\'s usual hours for Availability.',
-        beforeShow: () => switchGroupView('tasks')
-    },
-    {
-        selector: '.navAttentionBadge',
-        title: 'Notifications',
-        text: 'This bell shows up whenever something needs you: unread comments, join requests if you own or admin the group, tasks suggested to you, and when a suggestion you sent gets accepted or dismissed. Tap it to jump straight to whatever needs you.',
-        // The bell is display:none while nothing is pending (see
-        // .navAttentionBadge in style.css), and there's no other always-
-        // visible bell to point at, so skip the step rather than highlight
-        // an invisible element. Checked via getClientRects, not offsetParent.
-        isRelevant: () => Boolean(navAttentionBadge) && navAttentionBadge.getClientRects().length > 0,
         beforeShow: () => switchGroupView('tasks')
     },
     {

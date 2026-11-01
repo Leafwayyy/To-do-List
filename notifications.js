@@ -122,6 +122,7 @@ const NotificationCenter = (() => {
     let panelTimer = null;
     let activeFilter = 'all';
     let reminderSource = null;
+    let attentionSource = null;
     let scopeIdSource = null;
     // Your open tasks everywhere (personal list + every group), so the bell is the same on
     // every page. The page you are on is read live; the rest comes from here.
@@ -373,7 +374,7 @@ const NotificationCenter = (() => {
         if (!button || !badge) {
             return;
         }
-        const count = unreadItems().length;
+        const count = unreadItems().length + getAttention().length;
         badge.textContent = count > 99 ? '99+' : String(count);
         button.classList.toggle('hasUnread', count > 0);
         button.setAttribute('aria-label', count > 0 ? `Notifications (${count} unread)` : 'Notifications');
@@ -588,6 +589,39 @@ const NotificationCenter = (() => {
         }, 400);
     }
 
+    // Things in this group waiting on you (unread comments, suggestions for you, join requests,
+    // handoffs...). The page supplies them; each has its own "take me there" action.
+    function getAttention() {
+        if (typeof attentionSource !== 'function') {
+            return [];
+        }
+        try {
+            return (attentionSource() || []).filter((entry) => entry && entry.label && typeof entry.onClick === 'function').slice(0, 12);
+        } catch (error) {
+            console.warn('Could not build the waiting-on-you list:', error);
+            return [];
+        }
+    }
+
+    function attentionRow(entry) {
+        const row = el('button', 'notifItem notifAttention');
+        row.type = 'button';
+        const icon = el('span', 'notifIcon');
+        icon.setAttribute('aria-hidden', 'true');
+        icon.appendChild(el('i', entry.icon || 'fa-solid fa-circle-exclamation'));
+        const body = el('div', 'notifBody');
+        body.appendChild(el('p', 'notifTitle', entry.label));
+        if (entry.where) {
+            body.appendChild(sourceChip(entry.where, true));
+        }
+        row.append(icon, body);
+        row.addEventListener('click', () => {
+            closePanel(false);
+            entry.onClick();
+        });
+        return row;
+    }
+
     function reminderRow(entry) {
         const row = el('button', 'notifItem notifReminder level-' + entry.level);
         row.type = 'button';
@@ -691,19 +725,21 @@ const NotificationCenter = (() => {
         const list = el('div', 'notifList');
         const showReminders = activeFilter === 'all' || activeFilter === 'reminders';
         const reminders = showReminders ? getReminders() : [];
+        const attention = getAttention().filter((entry) => activeFilter === 'all' || activeFilter === 'reminders' || (entry.cat || 'tasks') === activeFilter);
         const stored = activeFilter === 'reminders' ? [] : items.filter((item) => activeFilter === 'all' || TYPES[item.type].cat === activeFilter);
 
-        if (reminders.length > 0) {
+        if (attention.length > 0 || reminders.length > 0) {
             list.appendChild(el('p', 'notifSection', 'Needs your attention'));
+            attention.forEach((entry) => list.appendChild(attentionRow(entry)));
             reminders.forEach((entry) => list.appendChild(reminderRow(entry)));
         }
         if (stored.length > 0) {
-            if (reminders.length > 0) {
+            if (reminders.length > 0 || attention.length > 0) {
                 list.appendChild(el('p', 'notifSection', 'Recent'));
             }
             stored.forEach((item) => list.appendChild(itemRow(item)));
         }
-        if (reminders.length === 0 && stored.length === 0) {
+        if (reminders.length === 0 && stored.length === 0 && attention.length === 0) {
             list.appendChild(el('p', 'notifEmpty', activeFilter === 'reminders'
                 ? 'Nothing is due soon. Nice.'
                 : 'You\'re all caught up. Assignments, comments and reminders will show up here.'));
@@ -846,6 +882,20 @@ const NotificationCenter = (() => {
     // `fn()` returns [{ key, text, level: 'overdue'|'critical'|'soon', label, where?, timestamp }].
     // `scopeFn()` says which list this page is showing ('solo' or a group's id) so those tasks
     // are read live, and every other list comes from the database.
+    // `fn()` returns [{ key, label, icon?, cat?, where?, onClick }] - what is waiting on you in the
+    // group you are looking at. Call refresh() whenever it may have changed.
+    function setAttentionSource(fn) {
+        attentionSource = typeof fn === 'function' ? fn : null;
+        refresh();
+    }
+
+    function refresh() {
+        refreshBadge();
+        if (panel) {
+            renderPanel();
+        }
+    }
+
     function setReminderSource(fn, scopeFn) {
         reminderSource = typeof fn === 'function' ? fn : null;
         scopeIdSource = typeof scopeFn === 'function' ? scopeFn : null;
@@ -860,7 +910,7 @@ const NotificationCenter = (() => {
     watch();
     focusFromUrl();
 
-    return { notify, notifySelf, notifyMany, setReminderSource, targetUrl, refreshScopes, open: openPanel, close: closePanel, unreadCount: () => unreadItems().length, markAllRead, items: () => items.slice() };
+    return { notify, notifySelf, notifyMany, setReminderSource, setAttentionSource, refresh, targetUrl, refreshScopes, open: openPanel, close: closePanel, unreadCount: () => unreadItems().length, markAllRead, items: () => items.slice() };
 })();
 
 // Also reachable as window.* for callers that prefer optional chaining.

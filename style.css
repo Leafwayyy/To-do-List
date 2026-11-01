@@ -14229,3 +14229,15 @@ button.notifReminder:hover,
 button.notifReminder:focus-visible{
     background: rgba(181, 139, 255, 0.14);
 }
+
+button.notifAttention{
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+button.notifAttention:hover,
+button.notifAttention:focus-visible{
+    background: rgba(181, 139, 255, 0.14);
+}
